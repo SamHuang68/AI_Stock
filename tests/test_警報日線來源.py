@@ -172,7 +172,7 @@ class 警報日線來源(unittest.TestCase):
 
     def test_突破量比未知不重設既有觸發(self):
         old = {'2330:x': {'status': 'trigger', 'last_fired_time': 100, 'fired_price': 100}}
-        ind = {'close': 120, 'highs': [100] * 21, 'volRatio': None}
+        ind = {'close': 120, 'highs': [100] * 21, 'volVs20d': None}
         self.assertEqual(watch_daemon._eval('breakout_n_high', ind, {})[0], 'none')
         with patch.object(watch_daemon.alert_daemon, 'load_config', return_value={'watch_enabled': True}), \
              patch.object(watch_daemon, 'load_rules', return_value={'2330': {'signals': [{'id': 'x', 'strategy': 'breakout_n_high'}]}}), \
@@ -196,8 +196,10 @@ class 警報日線來源(unittest.TestCase):
                     watch_daemon.check_once()
                 expected = {'2330:x': {'status': None, 'last_fired_time': 100, 'fired_price': None}} if should_reset else old
                 save.assert_called_once_with(expected)
-        self.assertEqual(watch_daemon._eval('breakout_n_high', {**ind, 'volRatio': 1}, {})[0], 'partial')
-        self.assertEqual(watch_daemon._eval('breakout_n_high', {**ind, 'volRatio': 2}, {})[0], 'trigger')
+        self.assertEqual(watch_daemon._eval('breakout_n_high', {**ind, 'volVs20d': 1}, {})[0], 'partial')
+        self.assertEqual(watch_daemon._eval('breakout_n_high', {**ind, 'volVs20d': 2}, {})[0], 'trigger')
+        # 2026-10-19 Sam 核准：突破量能改用當日量口徑，5 日／20 日均量比不再決定突破。
+        self.assertEqual(watch_daemon._eval('breakout_n_high', {**ind, 'volRatio': 2, 'volVs20d': 1}, {})[0], 'partial')
 
     def test_已核對官方股數保留量比與來源收據(self):
         day = self.days[-1]

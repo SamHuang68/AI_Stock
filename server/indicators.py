@@ -256,13 +256,15 @@ def candle_snapshot(candles: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     if n == 0:
         return {'close': None, 'sma5': None, 'sma20': None, 'sma60': None, 'rsi14': None,
                 'rsiPrevMin5': None, 'bbL': None, 'bbU': None, 'bbMid': None,
-                'volRatio': None, 'high20': None, 'low20': None, 'highs': []}
+                'volRatio': None, 'volVs20d': None, 'high20': None, 'low20': None, 'highs': []}
     rsi_s = rsi_wilders_series(closes, 14)
     prev_window = [v for v in rsi_s[max(0, n - 6): n - 1] if v is not None]
     bb_mid = sma(closes, 20)
     sd20 = stdev_population(closes, 20)
     v5 = sma(vols, 5)
     v20 = sma(vols, 20)
+    # 當日量／前 20 日均量（不含當日），與 stock_signals.build_frame 的 volx 同式；突破量能確認用這個口徑。
+    prior20 = sma(vols, 20, n - 2) if n >= 21 else None
     return {
         'close': closes[-1],
         'sma5': sma(closes, 5),
@@ -274,6 +276,7 @@ def candle_snapshot(candles: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         'bbU': (bb_mid + 2.0 * sd20) if bb_mid is not None and sd20 is not None else None,
         'bbL': (bb_mid - 2.0 * sd20) if bb_mid is not None and sd20 is not None else None,
         'volRatio': (v5 / v20) if v5 is not None and v20 else None,
+        'volVs20d': (vols[-1] / prior20) if prior20 and vols[-1] is not None else None,
         'high20': prior_extreme(highs, 20, highest=True),
         'low20': prior_extreme(lows, 20, highest=False),
         'highs': highs,

@@ -172,12 +172,12 @@ const STRATEGIES = [
     direction: 'buy',
     difficulty: '★★☆ 中等',
     desc: '價格站上最近 N 個交易日的最高點 + 量增，動能進場訊號。',
-    why: '突破近期高點代表買盤強勢；配合量能 > 1.5x 通常是法人或主力進場。專業稱「Breakout」。',
+    why: '突破近期高點代表買盤強勢；當日量大於前 20 日均量 1.5 倍通常是法人或主力進場。專業稱「Breakout」。',
     when: '✓ 適合：盤整後突破、明顯壓力區突破、量能配合\n✗ 不適合：高位追高、量能不足（假突破）',
     action: '突破當下進 1/3，3~5 日內回測突破點不破再加 1/3。停損突破點 -3~5%。',
     paramFields: [
       {key:'days', lbl:'回看天數', default:20, hint:'20/60/252', type:'number', min:5, max:252, step:1},
-      {key:'volMult', lbl:'量能倍數', default:1.5, hint:'大於 20 日均量幾倍', type:'number', min:1, max:5, step:0.5},
+      {key:'volMult', lbl:'量能倍數', default:1.5, hint:'當日量為前 20 日均量幾倍', type:'number', min:1, max:5, step:0.5},
     ],
     check(ind, candles, params) {
       const days = Math.floor(params?.days ?? 20);
@@ -186,7 +186,11 @@ const STRATEGIES = [
       if (candles.length < days+1) return {status:'no-data', detail:`需要 ${days+1} 個交易日`};
       const recent = candles.slice(-(days+1), -1);
       const maxHigh = Math.max(...recent.map(x => x.high));
-      const volRatio = num(ind.volRatio);
+      // 當日量／前 20 日均量（不含當日），與後端 watch_daemon 及個股訊號「帶量突破」同口徑。
+      const prior = candles.slice(-21, -1).map(x => num(x.volume));
+      const today = num(candles[candles.length-1].volume);
+      const base = prior.length === 20 && prior.every(v => v != null && v >= 0) ? prior.reduce((a, b) => a + b, 0) / 20 : null;
+      const volRatio = base && today != null ? today / base : null;
       if (c > maxHigh) {
         if (volRatio != null && volRatio >= volMult) {
           return {status:'trigger', detail:`突破 ${days} 日新高 ${maxHigh.toFixed(2)} + 量 ${volRatio.toFixed(1)}x`, triggerPrice: maxHigh};

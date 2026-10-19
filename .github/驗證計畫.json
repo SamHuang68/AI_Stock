@@ -4,30 +4,93 @@
   ],
   "cases": [
     {
-      "id": "個股期MIS失敗快取與共用抓取",
+      "id": "WATCH突破當日量口徑_後端",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "MIS 失效時不讓每個請求各自重試（D-04）",
+      "reason": "突破量能與個股訊號同口徑（IND-01）",
       "targets": [
-        "tests.test_mis_futures_negative_cache",
-        "tests.test_no_new_silent_exceptions",
-        "tests.test_fallback_observability"
+        "tests.test_watch_breakout_day_volume",
+        "tests.test_警報日線來源",
+        "tests.test_indicators",
+        "tests.test_signal_indicator_parity",
+        "tests.test_stock_signals",
+        "tests.test_postmarket_report"
       ],
       "changes": [
-        "server/server.py",
-        "tests/test_mis_futures_negative_cache.py"
+        "server/indicators.py",
+        "server/watch_daemon.py",
+        "tests/test_watch_breakout_day_volume.py",
+        "tests/test_警報日線來源.py"
       ],
       "inputs": [
-        "server/log_once.py",
-        "server/server.py",
-        "tests/silent_except_baseline.json",
-        "tests/test_fallback_observability.py",
-        "tests/test_mis_futures_negative_cache.py",
-        "tests/test_no_new_silent_exceptions.py"
+        "server/alert_daemon.py",
+        "server/indicators.py",
+        "server/postmarket_report.py",
+        "server/stock_signals.py",
+        "server/stock_signals_routes.py",
+        "server/watch_daemon.py",
+        "tests/test_indicators.py",
+        "tests/test_postmarket_report.py",
+        "tests/test_signal_indicator_parity.py",
+        "tests/test_stock_signals.py",
+        "tests/test_watch_breakout_day_volume.py",
+        "tests/test_警報日線來源.py"
+      ]
+    },
+    {
+      "id": "WATCH突破當日量口徑_前端",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "前端 WATCH 與後端同口徑",
+      "targets": [
+        "tests/watch_breakout_day_volume_selftest.js"
+      ],
+      "changes": [
+        "src/core/watch_v2.js",
+        "tests/watch_breakout_day_volume_selftest.js"
+      ],
+      "inputs": [
+        "src/core/watch_v2.js",
+        "tests/watch_breakout_day_volume_selftest.js"
+      ]
+    },
+    {
+      "id": "WATCH共用者_RSI反彈",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "同檔其他策略不退化",
+      "targets": [
+        "tests/watch_rsi_bounce_selftest.js"
+      ],
+      "changes": [
+        "src/core/watch_v2.js"
+      ],
+      "inputs": [
+        "src/core/watch_v2.js",
+        "tests/watch_rsi_bounce_selftest.js"
+      ]
+    },
+    {
+      "id": "追蹤中的前端產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 120,
+      "reason": "src 變更後重建產物",
+      "targets": [
+        "tests.test_bundle_fresh"
+      ],
+      "changes": [
+        "src/core/watch_v2.js",
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_v2.py",
+        "src/core/watch_v2.js",
+        "stock_terminal_v2.html",
+        "tests/test_bundle_fresh.py"
       ]
     }
   ],
-  "baseCommit": "f4fee781ca1ad5d46149be6c76abb3d2993d1db4",
+  "baseCommit": "722d7bbdd9f3a82e5602de282ee7e7c889c5a955",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

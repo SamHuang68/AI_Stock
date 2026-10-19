@@ -166,7 +166,7 @@ def _eval(strategy, ind, params):
         prior = highs[-(days + 1):-1]
         if any(value is None for value in prior): return ('none', '')
         mx = max(prior)
-        vr = ind.get('volRatio')
+        vr = ind.get('volVs20d')  # 當日量／前 20 日均量，與個股訊號「帶量突破」同口徑
         if c > mx:
             if vr is None:
                 return ('none', '')
