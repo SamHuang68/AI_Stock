@@ -4,31 +4,81 @@
   ],
   "cases": [
     {
-      "id": "曝險研究Kelly照公式回報",
-      "kind": "unittest",
-      "timeoutSeconds": 300,
-      "reason": "Kelly 值不再被 1x 底改寫，上限維持研究範圍（PB-03）",
+      "id": "策略指標庫缺值回null",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "KD、N 日高低、漲跌%、布林通道遇缺值不給假值（PB-04、PB-05）",
       "targets": [
-        "tests.test_exposure_lab",
-        "tests.test_decision_context",
-        "tests.test_完整審查資料",
-        "tests.test_曝險壓力"
+        "tests/stratlib_missing_values_selftest.js"
       ],
       "changes": [
-        "server/exposure_lab.py",
-        "tests/test_exposure_lab.py"
+        "src/screener/strategy_builder_v3.js",
+        "tests/stratlib_missing_values_selftest.js"
       ],
       "inputs": [
-        "server/decision_context.py",
-        "server/exposure_lab.py",
-        "tests/test_decision_context.py",
-        "tests/test_exposure_lab.py",
-        "tests/test_完整審查資料.py",
-        "tests/test_曝險壓力.py"
+        "src/screener/backtest_v3.js",
+        "src/screener/strategy_builder_v3.js",
+        "tests/stratlib_missing_values_selftest.js"
+      ]
+    },
+    {
+      "id": "策略指標庫共用者_腳本引擎",
+      "kind": "node",
+      "timeoutSeconds": 120,
+      "reason": "StratLib 共用的腳本引擎與 DSL 行為不退化",
+      "targets": [
+        "tests/完整審查前端_selftest.js"
+      ],
+      "changes": [
+        "src/screener/strategy_builder_v3.js"
+      ],
+      "inputs": [
+        "src/core/position_v2.js",
+        "src/screener/backtest_v3.js",
+        "src/screener/strategy_builder_v3.js",
+        "src/screener/strategy_script_v3.js",
+        "stock_terminal.html",
+        "tests/完整審查前端_selftest.js"
+      ]
+    },
+    {
+      "id": "策略指標庫共用者_自訂策略樣本外",
+      "kind": "node",
+      "timeoutSeconds": 120,
+      "reason": "自訂策略樣本外回測不退化",
+      "targets": [
+        "tests/自訂策略樣本外_selftest.js"
+      ],
+      "changes": [
+        "src/screener/strategy_builder_v3.js"
+      ],
+      "inputs": [
+        "src/screener/backtest_v3.js",
+        "src/screener/strategy_builder_v3.js",
+        "tests/自訂策略樣本外_selftest.js"
+      ]
+    },
+    {
+      "id": "追蹤中的前端產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 120,
+      "reason": "src 變更後重建產物",
+      "targets": [
+        "tests.test_bundle_fresh"
+      ],
+      "changes": [
+        "src/screener/strategy_builder_v3.js",
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_v2.py",
+        "src/screener/strategy_builder_v3.js",
+        "stock_terminal_v2.html",
+        "tests/test_bundle_fresh.py"
       ]
     }
   ],
-  "baseCommit": "4b7c4a4ac9b00576b7ac26ba4a0a9bbf64e7b904",
+  "baseCommit": "5b8ac06d6a9931a4d89fc8f0a72f8514ee27d5af",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
