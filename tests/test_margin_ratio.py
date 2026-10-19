@@ -118,6 +118,30 @@ class TestMarginRatioUnit(unittest.TestCase):
         self.assertIsNone(mr._coherent_live_exchange_date(closes, {'date': '20260827'}))
         self.assertIsNone(mr._coherent_live_exchange_date(closes, {}))
 
+    def _live(self, closing_codes):
+        lots = {'2330': 900.0, '2317': 80.0, '1101': 20.0}
+        margin = [{'股票代號': code, '融資今日餘額': str(lot)} for code, lot in lots.items()]
+        closes = [{'Date': '1150828', 'Code': code, 'ClosingPrice': '100'} for code in closing_codes]
+        summary = {'date': '20260828'}
+        replies = {'MI_MARGN': margin, 'STOCK_DAY_ALL': closes, 'selectType=MS': summary}
+        def http(url):
+            return next(v for k, v in replies.items() if k in url and (k != 'MI_MARGN' or 'openapi' in url))
+        with mock.patch.object(mr, '_http_json', side_effect=http),                 mock.patch.object(mr, '_parse_loan_from_tables', return_value=60_000_000.0),                 mock.patch('builtins.print'):
+            return mr.fetch_latest_ratio_live()
+
+    def test_live_ratio_rejects_incomplete_closing_prices(self):
+        # 審查 CM-01：收盤價回應缺一大段時，分母仍是全市場融資，比率會被低估且無標示。
+        exchange_date, ratio = self._live(['2330', '2317', '1101'])
+        self.assertEqual(exchange_date, date(2026, 8, 28))
+        self.assertAlmostEqual(ratio, 1000 * 1000 * 100 / 60_000_000 * 100)
+        self.assertIsNotNone(self._live(['2330', '2317']))   # 缺 2% 張數：照常輸出
+        self.assertIsNone(self._live(['2330']))              # 缺 10% 張數：拒絕
+
+    def test_lot_coverage_counts_margin_lots_not_stock_count(self):
+        collateral, used, coverage = mr._collateral_with_coverage({'A': 90.0, 'B': 10.0, 'C': 0.0}, {'A': 10.0})
+        self.assertEqual((collateral, used), (900_000.0, 1))
+        self.assertAlmostEqual(coverage, 0.9)
+
     def test_refresh_today_uses_exchange_date_not_local_calendar_date(self):
         exchange_date = date(2026, 8, 28)
         fake_ds = mock.Mock()

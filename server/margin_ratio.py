@@ -365,6 +365,29 @@ def _margin_lots_and_loan(d: date) -> Tuple[Dict[str, float], Optional[float]]:
     return lots, loan
 
 
+# 分母是全市場融資金額，分子只算有收盤價的股票；缺價股票的融資張數占比過高時比率會被低估。
+# 正常日缺價只有停牌股（2026-10-19 實測張數覆蓋 99.98%），低於此門檻表示收盤價回應不完整。
+MIN_LOT_COVERAGE = 0.95
+
+
+def _collateral_with_coverage(lots: Dict[str, float], closes: Dict[str, float]) -> Tuple[float, int, float]:
+    """回傳 (擔保市值, 有價檔數, 有價股票的融資張數占比)。"""
+    collateral = 0.0
+    used = 0
+    total_lots = priced_lots = 0.0
+    for code, lot in lots.items():
+        if lot <= 0:
+            continue
+        total_lots += lot
+        cl = closes.get(code)
+        if cl is None:
+            continue
+        collateral += lot * 1000.0 * cl
+        priced_lots += lot
+        used += 1
+    return collateral, used, (priced_lots / total_lots if total_lots > 0 else 0.0)
+
+
 def compute_ratio_for_date(d: date) -> Optional[float]:
     """計算指定交易日大盤融資維持率（分子不含 ETF）。失敗回 None。
 
@@ -378,6 +401,7 @@ def compute_ratio_for_date(d: date) -> Optional[float]:
             return None
 
         closes = _fetch_closes_for_date(d) if d >= _MI_INDEX_START else {}
+        official = bool(closes)
         if not closes:
             # 官方無收盤價（或當日 MI_INDEX 失敗）→ Yahoo 後備
             # 融資餘額大的優先，提高覆蓋率並利於早停
@@ -391,16 +415,11 @@ def compute_ratio_for_date(d: date) -> Optional[float]:
         if not closes:
             return None
 
-        collateral = 0.0
-        used = 0
-        for code, lot in lots.items():
-            if lot <= 0:
-                continue
-            cl = closes.get(code)
-            if cl is None:
-                continue
-            collateral += lot * 1000.0 * cl
-            used += 1
+        collateral, used, coverage = _collateral_with_coverage(lots, closes)
+        # Yahoo 後備維持原有的檔數下限（早期年份覆蓋率本來就低，不在此改變歷史口徑）
+        if official and coverage < MIN_LOT_COVERAGE:
+            print(f'[margin] {d.isoformat()} rejected: priced margin lot coverage {coverage:.2%} < {MIN_LOT_COVERAGE:.0%}')
+            return None
         # 早期年份 Yahoo 覆蓋率較低；至少要有一定代表性
         min_used = 30 if d < _MI_INDEX_START else 50
         if used < min_used or collateral <= 0:
@@ -476,12 +495,10 @@ def fetch_latest_ratio_live() -> Optional[Tuple[date, float]]:
         total_loan = _parse_loan_from_tables(ms.get('tables') or [])
         if not per_stock or not closes or not total_loan or total_loan <= 0:
             return None
-        collateral = 0.0
-        for code, lots in per_stock.items():
-            cl = closes.get(code)
-            if cl is None or lots <= 0:
-                continue
-            collateral += lots * 1000.0 * cl
+        collateral, _used, coverage = _collateral_with_coverage(per_stock, closes)
+        if coverage < MIN_LOT_COVERAGE:
+            print(f'[margin] latest snapshot rejected: priced margin lot coverage {coverage:.2%} < {MIN_LOT_COVERAGE:.0%}')
+            return None
         if collateral <= 0:
             return None
         return exchange_date, collateral / total_loan * 100.0

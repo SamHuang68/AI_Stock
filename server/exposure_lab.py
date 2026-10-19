@@ -474,12 +474,15 @@ def _mode_ceilings(
     sigma = forecast_vol_pct / 100.0 if forecast_vol_pct is not None else None
     expected = expected_base_pct / 100.0 if expected_base_pct is not None else None
     cost = incremental_cost_pct / 100.0 if incremental_cost_pct is not None else None
-    lambda_star = None
+    lambda_star = lambda_research = None
     if sigma is not None and sigma > 0 and expected is not None and cost is not None:
-        lambda_star = max(1.0, 0.5 + (expected - cost) / (sigma * sigma))
+        lambda_star = 0.5 + (expected - cost) / (sigma * sigma)
+        # 研究範圍是 1x～2x（docs/ST_DYNAMIC_LEVERAGE_FIVE_POST_RESEARCH_2026-08-16.md §6.4）：
+        # 上限以 1x 為底，但 costAdjustedKellyPct 照公式回報，低於 1x 時不改寫成 100%。
+        lambda_research = max(1.0, lambda_star)
     rows = {}
     for name, cfg in configs.items():
-        raw_pct = lambda_star * cfg['riskFraction'] * 100.0 if lambda_star is not None else None
+        raw_pct = lambda_research * cfg['riskFraction'] * 100.0 if lambda_research is not None else None
         caps = [cfg['hardCapPct']]
         if edge_band_crosses_zero:
             caps.append(100.0)
@@ -487,10 +490,11 @@ def _mode_ceilings(
         rows[name] = {
             **cfg,
             'costAdjustedKellyPct': round(lambda_star * 100.0, 1) if lambda_star is not None else None,
+            'researchLambdaPct': round(lambda_research * 100.0, 1) if lambda_research is not None else None,
             'researchCeilingPct': round(max(0.0, ceiling), 1) if ceiling is not None else None,
             'authority': 'monthly_core_research_only',
             'weeklyHealthApplied': False,
-            'formula': 'lambda*=0.5+(g-c_incremental)/sigma^2; risk fraction and hard policy cap',
+            'formula': 'lambda*=0.5+(g-c_incremental)/sigma^2; ceiling uses max(1,lambda*) x risk fraction, then hard policy cap',
         }
     return rows
 

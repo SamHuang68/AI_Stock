@@ -1,6 +1,6 @@
 """已核對的公開交易參考；純本機讀取，不推論未收錄股票仍在交易。"""
 import json
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from functools import lru_cache
 from pathlib import Path
 
@@ -22,6 +22,29 @@ def session(day):
     if str(day.year) == calendar['year']:
         return {'status': 'scheduled', 'reason': '表定交易日；仍以當日日線確認是否實際交易', 'source': calendar['source']}
     return {'status': 'unknown', 'reason': '尚無該年度官方日曆，不以平日推定已交易', 'source': None}
+
+
+def is_closed_day(day):
+    """週末或官方日曆收錄的休市日。未涵蓋年度只能依週末判斷（不以平日推定休市）。"""
+    return session(day)['status'] == 'closed'
+
+
+def last_close_day(local_now, close=time(13, 30)):
+    """台北時間 local_now 當下「最近一個已收盤」的交易日；收盤前取前一日，並跳過週末與官方休市日。"""
+    day = local_now.date()
+    if local_now.time() < close:
+        day -= timedelta(days=1)
+    while is_closed_day(day):
+        day -= timedelta(days=1)
+    return day
+
+
+def next_session_day(day):
+    """day 之後的下一個交易日（跳過週末與官方休市日）。"""
+    day = (date.fromisoformat(day) if isinstance(day, str) else day) + timedelta(days=1)
+    while is_closed_day(day):
+        day += timedelta(days=1)
+    return day
 
 
 def previous_session(day, *, session_lookup=None):

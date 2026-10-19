@@ -82,7 +82,7 @@ from market_contract import attach_quote_contract, cumulative_volume_contract
 from log_once import log_once
 from exchange_source_dates import marketflow_payload, marketflow_cache_key, taipei_today, txf_timestamp, txf_timestamp_check
 from market_routes import market_snapshot, twse_mis_observation, twse_mis_stock_quote, quote_observation, guard_tw_quote
-from http_boundary import BodyReadError, close_rejected_body, is_same_local_origin, read_json_body
+from http_boundary import BodyReadError, close_rejected_body, is_local_host_header, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 from runtime_revision import RUNTIME_COMMIT
 import atomic_store as _atomic_store
@@ -2545,7 +2545,15 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
     def parse_request(self):
         # parser 可能在賦值 headers 前拒絕；不能保留上一個請求的標頭。
         self.headers = self.MessageClass()
-        return super().parse_request()
+        if not super().parse_request():
+            return False
+        # 後端只綁 loopback，但瀏覽器仍可能經 DNS rebinding 以外部網域連進來並讀取 GET 回應。
+        # 以實際綁定的埠比對（測試伺服器使用隨機埠）；正式站閘道轉發時會把 Host 改寫成 127.0.0.1:<後端埠>。
+        bound_port = (getattr(self.server, 'server_address', None) or (None, PORT))[1]
+        if not is_local_host_header(self.headers.get('Host'), bound_port):
+            self.send_error(403, 'host not allowed')
+            return False
+        return True
 
     def send_error(self, code, message=None, explain=None):
         if getattr(self, 'headers', None) is None:
