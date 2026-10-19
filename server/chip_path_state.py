@@ -12,6 +12,7 @@ import math
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
+from 台股交易參考 import is_closed_day
 from conditional_expectation import (
     CHIP_MAX_LAG_SESSIONS,
     _bars_upto_date,
@@ -124,7 +125,7 @@ def _chips_asof_solid(
     while cursor > chip_day and lag_sessions <= CHIP_MAX_LAG_SESSIONS + 3:
         lag_sessions += 1
         cursor = cursor.fromordinal(cursor.toordinal() - 1)
-        while cursor.weekday() >= 5:
+        while is_closed_day(cursor):
             cursor = cursor.fromordinal(cursor.toordinal() - 1)
     if lag_sessions > CHIP_MAX_LAG_SESSIONS:
         reasons.append(

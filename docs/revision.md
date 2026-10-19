@@ -1,3 +1,22 @@
+## v5.0 修訂 — 2026-10-19 週間官方休市日改以官方日曆判定（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/tw-calendar-closed-days`，`VERSION` 維持 5.0。來源：全專案審查 CAL-01、QB-03、PB-08、EW-01 同類（`AI-Workspace/docs/stock-terminal/全專案弱點與公式審查-20261019/`）。
+
+**問題**：多處以「只跳過週末」推算台股交易日，不查 `server/台股交易參考.json` 已收錄的官方休市日（2026 年 25 日）。
+- `guard_tw_quote`（`server/market_routes.py`）把週間休市日 09:00–13:30 當成盤中，所有 `/twquote`、`/quote`、`/quote-batch` 的台股報價被清空並顯示「成交資料尚未更新」。
+- 「最近收盤日」`_last_tw_close_day` 在 `conditional_expectation.py`、`touxin_5d.py`、`peak_observation.py` 各一份，休市日當天會被當成收盤日；`conditional_expectation.evaluate_asof_gate` 與 `chip_path_state.py` 的籌碼落後計數把假日算進交易日，連假後籌碼被誤判逾期。
+- `postmarket_report._next_tw_session_date`（盤後報告的「明日」）與 `signal_digest._digest_due`（每日摘要）也只跳過週末。
+
+**處理**：`台股交易參考.py` 新增 `is_closed_day`、`last_close_day`、`next_session_day`（以既有 `session()` 判定；未涵蓋年度仍只看週末，維持既有行為），上述各處改呼叫它們。三份 `_last_tw_close_day` 保留函式名稱，其他模組的匯入不變。
+
+**既有測試的期望調整（有理由）**：`tests/test_stock_signals.py::test_digest_once_per_day_after_close` 原以 2026-09-25 為日期，那天是官方休市日（中秋節）；新行為在休市日不發摘要是本次修正的目的。該案例只驗「收盤後每日一次」，改用交易日 2026-09-24，斷言不變；另新增 `test_digest_is_not_sent_on_an_official_weekday_holiday`。
+
+**驗證（本機 targeted）**：新增 `tests/test_tw_calendar_closed_days.py` 6 個案例（休市日判定、最近收盤日、三份複本、下一交易日與盤後「明日」、報價防線在休市日保留最後成交而交易日仍拒絕跨日價、籌碼落後不計假日），舊程式碼上全部失敗。引用相關模組的 22 個測試模組 309 項通過，靜默例外棘輪通過。**未驗證**：休市日當天的實機畫面；2027 年起需更新官方日曆 JSON 才能涵蓋。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
 ## v5.0 修訂 — 2026-10-19 條件期望卡「MaxDD Q90」改取回撤尾端（候選，未發布）
 
 基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/ce-maxdd-tail`，`VERSION` 維持 5.0。來源：全專案審查 PB-01（`AI-Workspace/docs/stock-terminal/全專案弱點與公式審查-20261019/`）。

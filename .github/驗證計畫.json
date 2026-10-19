@@ -4,45 +4,84 @@
   ],
   "cases": [
     {
-      "id": "條件期望MaxDDQ90取回撤尾端",
-      "reason": "maxDrawdownQ90Pct 對帶號回撤取第 90 百分位而恆為 0；改取第 10 百分位。以條件期望後端案例與前端卡片自測回歸。",
+      "id": "週間官方休市日以官方日曆判定",
+      "reason": "多處只跳過週末而不查官方休市日：報價防線在休市日清空報價、最近收盤日與籌碼落後計數錯誤、盤後明日與每日摘要錯誤。改用台股交易參考的共用判定。以新案例與所有引用相關模組的測試回歸（非完整套件），含靜默例外棘輪。",
       "changes": [
+        "server/台股交易參考.py",
+        "server/market_routes.py",
         "server/conditional_expectation.py",
-        "tests/test_conditional_expectation.py"
+        "server/touxin_5d.py",
+        "server/peak_observation.py",
+        "server/chip_path_state.py",
+        "server/postmarket_report.py",
+        "server/signal_digest.py",
+        "tests/test_tw_calendar_closed_days.py",
+        "tests/test_stock_signals.py"
       ],
       "inputs": [
+        "server/chip_path_state.py",
         "server/conditional_expectation.py",
-        "server/indicators.py",
+        "server/market_routes.py",
+        "server/peak_observation.py",
+        "server/postmarket_report.py",
+        "server/signal_digest.py",
+        "server/touxin_5d.py",
+        "server/台股交易參考.json",
         "server/台股交易參考.py",
-        "src/ui/conditional_expectation_v5.js",
-        "tests/conditional_expectation_v5_selftest.js",
-        "tests/test_conditional_expectation.py"
+        "tests/test_conditional_expectation.py",
+        "tests/test_conditional_expectation_p1.py",
+        "tests/test_market_contract.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/test_peak_observation.py",
+        "tests/test_peak_observation_100d.py",
+        "tests/test_postmarket_http.py",
+        "tests/test_postmarket_report.py",
+        "tests/test_shadow_multifactor.py",
+        "tests/test_signal_narrative.py",
+        "tests/test_stock_signals.py",
+        "tests/test_stock_signals_revision_metadata.py",
+        "tests/test_touxin_5d.py",
+        "tests/test_tw_calendar_closed_days.py",
+        "tests/test_三項限制解方.py",
+        "tests/test_全檢資料邊界.py",
+        "tests/test_台股即時報價.py",
+        "tests/test_台股日線.py",
+        "tests/test_完整審查資料.py",
+        "tests/test_投組價格契約.py",
+        "tests/test_研究缺口補完.py",
+        "tests/test_行情類股契約.py",
+        "tests/test_警報日線來源.py"
       ],
       "kind": "unittest",
       "targets": [
-        "tests.test_conditional_expectation"
+        "tests.test_tw_calendar_closed_days",
+        "tests.test_conditional_expectation",
+        "tests.test_conditional_expectation_p1",
+        "tests.test_market_contract",
+        "tests.test_peak_observation",
+        "tests.test_peak_observation_100d",
+        "tests.test_postmarket_http",
+        "tests.test_postmarket_report",
+        "tests.test_shadow_multifactor",
+        "tests.test_signal_narrative",
+        "tests.test_stock_signals",
+        "tests.test_stock_signals_revision_metadata",
+        "tests.test_touxin_5d",
+        "tests.test_三項限制解方",
+        "tests.test_全檢資料邊界",
+        "tests.test_台股即時報價",
+        "tests.test_台股日線",
+        "tests.test_完整審查資料",
+        "tests.test_投組價格契約",
+        "tests.test_研究缺口補完",
+        "tests.test_行情類股契約",
+        "tests.test_警報日線來源",
+        "tests.test_no_new_silent_exceptions"
       ],
-      "timeoutSeconds": 300
-    },
-    {
-      "id": "條件期望卡片前端自測",
-      "reason": "確認卡片仍正確顯示 MaxDD Q90 欄位。",
-      "changes": [
-        "server/conditional_expectation.py"
-      ],
-      "inputs": [
-        "server/conditional_expectation.py",
-        "src/ui/conditional_expectation_v5.js",
-        "tests/conditional_expectation_v5_selftest.js"
-      ],
-      "kind": "node",
-      "targets": [
-        "tests/conditional_expectation_v5_selftest.js"
-      ],
-      "timeoutSeconds": 120
+      "timeoutSeconds": 600
     }
   ],
-  "baseCommit": "edd97ae53a6a4557d1b917522a3e7ea837a6b040",
+  "baseCommit": "099453480faa2168bf2dc6433dbba65bebfa47e8",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
