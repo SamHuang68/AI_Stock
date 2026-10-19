@@ -1,3 +1,22 @@
+## 2026-10-19 策略指標庫遇到缺值回 null，不再產生假訊號（PB-04、PB-05）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/stratlib-missing-values`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 PB-04、PB-05）：`src/screener/strategy_builder_v3.js` 的 `StratLib` 在窗口含缺值（停牌、缺列）時沒有檢查。
+  - `kd`、`highest`、`lowest` 的 `Math.max/min` 把 null 當 0：缺值後約 10 根 K 值出現假低檔，N 日最低變成 0。
+  - `pctChange` 在缺值當根得到 −100%。
+  - `bb` 在均線為 null 時仍計算上下軌，得到約 ±2 倍價格的假值，與 `Backtest.bbLower` 分歧。
+- 修正後行為：
+  - 依 `Backtest.sma`／`breakout` 的口徑，窗口含非有限值時該根回 null，條件判斷因此不成立；
+  - `bb` 在均線為 null 處跳過，下軌與 `Backtest.bbLower` 結果一致；
+  - 已重建 `stock_terminal_v2.html`（只有 `?v=` 雜湊變動）。
+- 驗證：
+  - 新增 `tests/stratlib_missing_values_selftest.js`，涵蓋 N 日高低、漲跌%、40 根含缺值的 KD 不出現假低檔、布林通道與 `Backtest.bbLower` 一致；在舊程式上失敗。
+  - 既有 `tests/完整審查前端_selftest.js`、`tests/自訂策略樣本外_selftest.js` 與 `tests.test_bundle_fresh` 通過。
+- 影響：含缺值日線的策略組合器與腳本回測，訊號會改變；新訊號才是正確的。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## v5.0 修訂 — 2026-10-17 加權行情基準與來源優先（本機候選）
 
 修正加權主圖與行情列將 10/16 的 47111.26 配上 10/14 收盤而顯示 -1514.57 的錯誤。當日日 K 缺值時，改依現價交易日選前收；同日正式行情可校正晚 25 秒的 Yahoo 備援。保留跨日、同品質時間排序與台指期既有行為。缺現價時價格、日期與前收一起退回最後有效日 K；metadata 未提供日期時不推定。
