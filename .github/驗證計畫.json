@@ -4,84 +4,45 @@
   ],
   "cases": [
     {
-      "id": "週間官方休市日以官方日曆判定",
-      "reason": "多處只跳過週末而不查官方休市日：報價防線在休市日清空報價、最近收盤日與籌碼落後計數錯誤、盤後明日與每日摘要錯誤。改用台股交易參考的共用判定。以新案例與所有引用相關模組的測試回歸（非完整套件），含靜默例外棘輪。",
+      "id": "持倉張數換算整股",
+      "reason": "張→股以浮點相乘再截斷而少 1 股；改為四捨五入。以 vm 執行正式函式逐筆核對。",
       "changes": [
-        "server/台股交易參考.py",
-        "server/market_routes.py",
-        "server/conditional_expectation.py",
-        "server/touxin_5d.py",
-        "server/peak_observation.py",
-        "server/chip_path_state.py",
-        "server/postmarket_report.py",
-        "server/signal_digest.py",
-        "tests/test_tw_calendar_closed_days.py",
-        "tests/test_stock_signals.py"
+        "src/core/position_v2.js",
+        "tests/position_lot_rounding_selftest.js"
       ],
       "inputs": [
-        "server/chip_path_state.py",
-        "server/conditional_expectation.py",
-        "server/market_routes.py",
-        "server/peak_observation.py",
-        "server/postmarket_report.py",
-        "server/signal_digest.py",
-        "server/touxin_5d.py",
-        "server/台股交易參考.json",
-        "server/台股交易參考.py",
-        "tests/test_conditional_expectation.py",
-        "tests/test_conditional_expectation_p1.py",
-        "tests/test_market_contract.py",
-        "tests/test_no_new_silent_exceptions.py",
-        "tests/test_peak_observation.py",
-        "tests/test_peak_observation_100d.py",
-        "tests/test_postmarket_http.py",
-        "tests/test_postmarket_report.py",
-        "tests/test_shadow_multifactor.py",
-        "tests/test_signal_narrative.py",
-        "tests/test_stock_signals.py",
-        "tests/test_stock_signals_revision_metadata.py",
-        "tests/test_touxin_5d.py",
-        "tests/test_tw_calendar_closed_days.py",
-        "tests/test_三項限制解方.py",
-        "tests/test_全檢資料邊界.py",
-        "tests/test_台股即時報價.py",
-        "tests/test_台股日線.py",
-        "tests/test_完整審查資料.py",
-        "tests/test_投組價格契約.py",
-        "tests/test_研究缺口補完.py",
-        "tests/test_行情類股契約.py",
-        "tests/test_警報日線來源.py"
+        "src/core/position_v2.js",
+        "tests/position_lot_rounding_selftest.js"
+      ],
+      "kind": "node",
+      "targets": [
+        "tests/position_lot_rounding_selftest.js"
+      ],
+      "timeoutSeconds": 120
+    },
+    {
+      "id": "追蹤中的前端產物與原始碼一致",
+      "reason": "修改 position_v2.js 後重建 stock_terminal_v2.html，確認產物與原始碼一致。",
+      "changes": [
+        "src/core/position_v2.js",
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_order.py",
+        "build_v2.py",
+        "src/core/position_v2.js",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/test_bundle_fresh.py"
       ],
       "kind": "unittest",
       "targets": [
-        "tests.test_tw_calendar_closed_days",
-        "tests.test_conditional_expectation",
-        "tests.test_conditional_expectation_p1",
-        "tests.test_market_contract",
-        "tests.test_peak_observation",
-        "tests.test_peak_observation_100d",
-        "tests.test_postmarket_http",
-        "tests.test_postmarket_report",
-        "tests.test_shadow_multifactor",
-        "tests.test_signal_narrative",
-        "tests.test_stock_signals",
-        "tests.test_stock_signals_revision_metadata",
-        "tests.test_touxin_5d",
-        "tests.test_三項限制解方",
-        "tests.test_全檢資料邊界",
-        "tests.test_台股即時報價",
-        "tests.test_台股日線",
-        "tests.test_完整審查資料",
-        "tests.test_投組價格契約",
-        "tests.test_研究缺口補完",
-        "tests.test_行情類股契約",
-        "tests.test_警報日線來源",
-        "tests.test_no_new_silent_exceptions"
+        "tests.test_bundle_fresh"
       ],
-      "timeoutSeconds": 600
+      "timeoutSeconds": 300
     }
   ],
-  "baseCommit": "099453480faa2168bf2dc6433dbba65bebfa47e8",
+  "baseCommit": "9cd9403802e357cf4ae5662c314c3376ba3ba9ef",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

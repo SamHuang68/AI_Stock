@@ -1,3 +1,17 @@
+## v5.0 修訂 — 2026-10-19 持倉張數換算股數不再少 1 股（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/position-lot-rounding`，`VERSION` 維持 5.0。來源：全專案審查 PB-06。
+
+**問題**：`src/core/position_v2.js` `submitPosition` 以 `String(parseFloat(s) * 1000)` 把張數換成股數，`setPosition` 再以 `parseInt` 取整。浮點誤差使 32.3×1000＝32299.999…，存成 32,299 股；0.1 至 999.9 張（0.1 步）有 46 筆、0.01 步有 590 筆少 1 股，持倉成本與損益隨之偏差。
+
+**處理**：新增 `lotsToShares`，以 `Math.round(lots × 1000)` 換算到整股；非數字輸入原樣交給 `setPosition` 拒絕（行為不變）。重建追蹤中的 `stock_terminal_v2.html`（差異只有各模組的快取版本雜湊）。
+
+**驗證（本機 targeted）**：新增 `tests/position_lot_rounding_selftest.js`，以 vm 執行正式 `lotsToShares`，0.1 至 999.9 張與 0.01 至 999.99 張共 109,998 筆全部正確；舊程式碼上失敗。`tests.test_bundle_fresh` 通過。**未驗證**：瀏覽器內實際送出表單；已存入 localStorage、少 1 股的既有持倉不會自動更正（使用者需重新儲存）。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
 ## v5.0 修訂 — 2026-10-19 週間官方休市日改以官方日曆判定（候選，未發布）
 
 基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/tw-calendar-closed-days`，`VERSION` 維持 5.0。來源：全專案審查 CAL-01、QB-03、PB-08、EW-01 同類（`AI-Workspace/docs/stock-terminal/全專案弱點與公式審查-20261019/`）。
