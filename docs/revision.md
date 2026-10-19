@@ -1,3 +1,29 @@
+## 2026-10-20 WATCH 突破新高的量能改用當日量口徑（IND-01）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/watch-breakout-day-volume`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 IND-01）：
+  - WATCH「突破 N 日新高」的前端（`src/core/watch_v2.js`）與背景常駐（`server/watch_daemon.py`）都用 `volRatio`（5 日均量／20 日均量）比對量能倍數。
+  - 個股訊號「帶量突破 20 日高」用的是當日量／前 20 日均量，提示文字也寫「大於 20 日均量幾倍」。
+  - 當日 3 倍量的突破，在 WATCH 被判「量不足（1.3x）」，同一檔在個股體檢卡卻顯示帶量突破。
+- 修正後行為（Sam 2026-10-19 選擇「改用當日量口徑」）：
+  - `indicators.candle_snapshot` 新增 `volVs20d`（當日量／前 20 日均量，不含當日），與 `stock_signals.build_frame` 的 `volx` 同式；
+  - `watch_daemon` 與前端 WATCH 的突破判定改用此口徑，前端由 K 線直接計算，前 20 日量有缺值時不觸發；
+  - 提示改為「當日量為前 20 日均量幾倍」；
+  - `volRatio`（5 日／20 日）本身與其他使用者（警示、盤後報告、多因子等）不變。
+  - 既有 WATCH 規則會較早觸發：單日爆量即成立。
+- 契約變更與測試：
+  - `tests/test_警報日線來源.py` 的突破判定案例改餵 `volVs20d`，並新增「`volRatio` 高但當日量不足仍為 partial」的斷言；
+  - 新增 `tests/test_watch_breakout_day_volume.py`（3 倍量觸發、與 `volx` 同值、正常量為 partial、資料不足為 None）；
+  - 新增 `tests/watch_breakout_day_volume_selftest.js`（前端同口徑、缺值不觸發、提示文字）。
+  - 新案例在舊程式上失敗。
+- 驗證：
+  - 以上案例，加上 `tests.test_indicators`、`test_signal_indicator_parity`、`test_stock_signals`、`test_postmarket_report` 共 110 案例通過；
+  - `watch_rsi_bounce_selftest.js`、`完整審查前端_selftest.js`、`tests.test_bundle_fresh` 通過；
+  - 已重建 `stock_terminal_v2.html`（只有 `?v=` 雜湊變動）。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## v5.0 修訂 — 2026-10-17 加權行情基準與來源優先（本機候選）
 
 修正加權主圖與行情列將 10/16 的 47111.26 配上 10/14 收盤而顯示 -1514.57 的錯誤。當日日 K 缺值時，改依現價交易日選前收；同日正式行情可校正晚 25 秒的 Yahoo 備援。保留跨日、同品質時間排序與台指期既有行為。缺現價時價格、日期與前收一起退回最後有效日 K；metadata 未提供日期時不推定。
