@@ -4,93 +4,23 @@
   ],
   "cases": [
     {
-      "id": "WATCH突破當日量口徑_後端",
+      "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
-      "timeoutSeconds": 300,
-      "reason": "突破量能與個股訊號同口徑（IND-01）",
+      "timeoutSeconds": 600,
+      "reason": "合併紀錄只改文件；分享封存掃描",
       "targets": [
-        "tests.test_watch_breakout_day_volume",
-        "tests.test_警報日線來源",
-        "tests.test_indicators",
-        "tests.test_signal_indicator_parity",
-        "tests.test_stock_signals",
-        "tests.test_postmarket_report"
+        "tests.test_dist_scrub"
       ],
       "changes": [
-        "server/indicators.py",
-        "server/watch_daemon.py",
-        "tests/test_watch_breakout_day_volume.py",
-        "tests/test_警報日線來源.py"
+        "docs/revision.md"
       ],
       "inputs": [
-        "server/alert_daemon.py",
-        "server/indicators.py",
-        "server/postmarket_report.py",
-        "server/stock_signals.py",
-        "server/stock_signals_routes.py",
-        "server/watch_daemon.py",
-        "tests/test_indicators.py",
-        "tests/test_postmarket_report.py",
-        "tests/test_signal_indicator_parity.py",
-        "tests/test_stock_signals.py",
-        "tests/test_watch_breakout_day_volume.py",
-        "tests/test_警報日線來源.py"
-      ]
-    },
-    {
-      "id": "WATCH突破當日量口徑_前端",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "前端 WATCH 與後端同口徑",
-      "targets": [
-        "tests/watch_breakout_day_volume_selftest.js"
-      ],
-      "changes": [
-        "src/core/watch_v2.js",
-        "tests/watch_breakout_day_volume_selftest.js"
-      ],
-      "inputs": [
-        "src/core/watch_v2.js",
-        "tests/watch_breakout_day_volume_selftest.js"
-      ]
-    },
-    {
-      "id": "WATCH共用者_RSI反彈",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "同檔其他策略不退化",
-      "targets": [
-        "tests/watch_rsi_bounce_selftest.js"
-      ],
-      "changes": [
-        "src/core/watch_v2.js"
-      ],
-      "inputs": [
-        "src/core/watch_v2.js",
-        "tests/watch_rsi_bounce_selftest.js"
-      ]
-    },
-    {
-      "id": "追蹤中的前端產物與原始碼一致",
-      "kind": "unittest",
-      "timeoutSeconds": 120,
-      "reason": "src 變更後重建產物",
-      "targets": [
-        "tests.test_bundle_fresh"
-      ],
-      "changes": [
-        "src/core/watch_v2.js",
-        "stock_terminal_v2.html"
-      ],
-      "inputs": [
-        "build_v2.py",
-        "src/core/watch_v2.js",
-        "stock_terminal_v2.html",
-        "tests/test_bundle_fresh.py"
+        "docs/revision.md",
+        "tests/test_dist_scrub.py"
       ]
     }
   ],
-  "baseCommit": "722d7bbdd9f3a82e5602de282ee7e7c889c5a955",
+  "baseCommit": "63ef6492ddbfa54e1c2157946a0ea98c46a4c2cc",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
