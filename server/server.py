@@ -82,7 +82,7 @@ from market_contract import attach_quote_contract, cumulative_volume_contract
 from log_once import log_once
 from exchange_source_dates import marketflow_payload, marketflow_cache_key, taipei_today, txf_timestamp, txf_timestamp_check
 from market_routes import market_snapshot, twse_mis_observation, twse_mis_stock_quote, quote_observation, guard_tw_quote
-from http_boundary import BodyReadError, close_rejected_body, is_same_local_origin, read_json_body
+from http_boundary import BodyReadError, close_rejected_body, is_local_host_header, is_same_local_origin, read_json_body
 from atomic_store import StoreCorruptError, atomic_write_json, load_json
 from runtime_revision import RUNTIME_COMMIT
 import atomic_store as _atomic_store
@@ -965,16 +965,27 @@ def _txf_note_unverified_stamp(session, stamp, reason, now=None):
 
 # ── 個股期貨(含夜盤) 整批載入 (v3.9)：CID='' 一次抓全部，避免每檔打 MIS 被限流(520) ──
 #   日盤 MarketType=0(期貨 -F/現貨 -S)、夜盤 MarketType=1(期貨 -M)。快取 45 秒。
-_MIS_FUT = {'ts': 0, 'map': {}}
+_MIS_FUT = {'ts': 0, 'map': {}, 'failTs': 0}
+# MIS 失效時不可讓每個請求各自重試：同一時間只抓一次，整批失敗後 60 秒內直接回空。
+_MIS_FUT_LOCK = threading.Lock()
+_MIS_FUT_FAIL_TTL = 60
+_MIS_FUT_ATTEMPTS = 2
 def _mis_load_futures():
+    with _MIS_FUT_LOCK:
+        return _mis_load_futures_locked()
+def _mis_load_futures_locked():
     now = time.time()
     if _MIS_FUT['map'] and (now - _MIS_FUT['ts'] < 45):
         return _MIS_FUT['map']
+    if now - _MIS_FUT['failTs'] < _MIS_FUT_FAIL_TTL:
+        return {}
     def all_rows(mt):
         payload = json.dumps({'MarketType': mt, 'SymbolType': 'F', 'KindID': '4', 'CID': '',
                               'ExpireMonth': '', 'RowSize': '全部', 'PageNo': '', 'SortColumn': '', 'AscDesc': 'A'}).encode('utf-8')
         last = None
-        for _ in range(3):
+        for attempt in range(_MIS_FUT_ATTEMPTS):
+            if attempt:
+                time.sleep(1.2)
             try:
                 req = urllib.request.Request('https://mis.taifex.com.tw/futures/api/getQuoteList', data=payload, method='POST',
                     headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0',
@@ -982,7 +993,7 @@ def _mis_load_futures():
                 with urllib.request.urlopen(req, timeout=12) as resp:
                     return (json.loads(resp.read()).get('RtData') or {}).get('QuoteList') or []
             except Exception as e:
-                last = e; time.sleep(1.2)
+                last = e
         print(f'[stockfut] MIS load mt={mt} failed: {last}')
         return []
     day = all_rows('0'); night = all_rows('1')
@@ -1003,7 +1014,9 @@ def _mis_load_futures():
             d = ens(c)
             if 'nightFut' not in d: d['nightFut'] = r
     if m:
-        _MIS_FUT['ts'] = now; _MIS_FUT['map'] = m
+        _MIS_FUT['ts'] = now; _MIS_FUT['map'] = m; _MIS_FUT['failTs'] = 0
+    else:
+        _MIS_FUT['failTs'] = time.time()
     return m
 
 # ── 產業別對照（code → 產業別），用月營收資料集(含上市櫃)的「產業別」欄 ──
@@ -2532,7 +2545,15 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
     def parse_request(self):
         # parser 可能在賦值 headers 前拒絕；不能保留上一個請求的標頭。
         self.headers = self.MessageClass()
-        return super().parse_request()
+        if not super().parse_request():
+            return False
+        # 後端只綁 loopback，但瀏覽器仍可能經 DNS rebinding 以外部網域連進來並讀取 GET 回應。
+        # 以實際綁定的埠比對（測試伺服器使用隨機埠）；正式站閘道轉發時會把 Host 改寫成 127.0.0.1:<後端埠>。
+        bound_port = (getattr(self.server, 'server_address', None) or (None, PORT))[1]
+        if not is_local_host_header(self.headers.get('Host'), bound_port):
+            self.send_error(403, 'host not allowed')
+            return False
+        return True
 
     def send_error(self, code, message=None, explain=None):
         if getattr(self, 'headers', None) is None:

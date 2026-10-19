@@ -172,6 +172,10 @@ def compute_tx_oi(by_day: Dict[str, list]) -> Optional[Dict[str, Any]]:
     if prev is None or prev_d is None:
         # 換月週：不同契約 OI 不可直接相減
         return None
+    prev_main = best(prev_d)
+    if prev_main is None or str(prev_main.get('contract_date') or '') != contract:
+        # 主力契約剛切換：前一日的次月 OI 是轉倉前的小部位，相減會把轉倉算成增倉
+        return None
 
     oi0 = _fnum(cur.get('open_interest'))
     oi1 = _fnum(prev.get('open_interest'))

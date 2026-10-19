@@ -104,6 +104,18 @@ class ConditionalExpectationBinTests(unittest.TestCase):
             as_of,
         )
 
+    def test_same_session_chips_do_not_enter_the_bin(self):
+        # T 的三大法人買賣超在 T 收盤後才公布，報酬卻從 T 收盤起算：T 當日籌碼不得進 T 的分箱。
+        bars = _synthetic_bars(60)
+        as_of = ce._session_date_from_ts(bars[30][0])
+        prior = ce._session_date_from_ts(bars[29][0]).isoformat()
+        only_today = ce.bin_state('2330', as_of, bars=bars, chip_inst_by_date={as_of.isoformat(): 500.0})
+        self.assertEqual(only_today['features']['inst3d'], 'unknown')
+        self.assertIsNone(only_today['evidenceAsOf']['chips'])
+        mixed = ce.bin_state('2330', as_of, bars=bars, chip_inst_by_date={prior: -100.0, as_of.isoformat(): 500.0})
+        self.assertEqual(mixed['features']['inst3d'], 'sell')
+        self.assertEqual(mixed['evidenceAsOf']['chips'], prior)
+
     def test_aggregate_requires_minimum_sample(self):
         obs = []
         for i in range(15):
@@ -135,6 +147,14 @@ class ConditionalExpectationBinTests(unittest.TestCase):
         self.assertIsNotNone(stats['1']['medianReturnPct'])
         self.assertIsNotNone(stats['1']['winRate'])
         self.assertIsNotNone(stats['1']['maxDrawdownQ90Pct'])
+
+    def test_max_drawdown_q90_reports_the_adverse_tail_not_the_mildest_end(self):
+        # 20 筆樣本：一半沒有回撤（0），其餘 −1 到 −10；90% 樣本不劣於的回撤應為尾端的負值。
+        drawdowns = [0.0] * 10 + [-float(k) for k in range(1, 11)]
+        returns = [0.5] * 20
+        stats = ce.aggregate_horizon_stats(returns, drawdowns)
+        self.assertLess(stats['maxDrawdownQ90Pct'], 0)
+        self.assertEqual(stats['maxDrawdownQ90Pct'], -8.0)
 
     def test_build_card_returns_real_horizons_when_flag_data_present(self):
         bars = _synthetic_bars(100)

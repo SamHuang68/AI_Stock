@@ -146,3 +146,18 @@ def is_same_local_origin(value: str | None, port: int) -> bool:
         f'http://localhost:{int(port)}',
         f'http://[::1]:{int(port)}',
     }
+
+
+LOCAL_HOST_NAMES = ('127.0.0.1', 'localhost', '[::1]')
+
+
+def is_local_host_header(value: str | None, port: int) -> bool:
+    """Host 標頭只接受 loopback 主機（可帶本服務實際埠）；擋下 DNS rebinding 把外部網域指向本機。
+
+    沒有 Host 標頭的非瀏覽器呼叫（HTTP/1.0）放行；瀏覽器請求一定帶 Host。
+    """
+    if value is None or not str(value).strip():
+        return True
+    host = str(value).strip().lower()
+    allowed = set(LOCAL_HOST_NAMES) | {f'{name}:{int(port)}' for name in LOCAL_HOST_NAMES}
+    return host in allowed
