@@ -1,3 +1,17 @@
+## v5.0 修訂 — 2026-10-19 條件期望卡「MaxDD Q90」改取回撤尾端（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/ce-maxdd-tail`，`VERSION` 維持 5.0。來源：全專案審查 PB-01（`AI-Workspace/docs/stock-terminal/全專案弱點與公式審查-20261019/`）。
+
+**問題**：`server/conditional_expectation.py` `aggregate_horizon_stats` 以 `_quantile(drawdowns, 0.90)` 計算 `maxDrawdownQ90Pct`。回撤是帶號值（0 為無回撤、越負越糟），升冪排序後的第 90 百分位落在最溫和的一端，只要超過一成樣本沒有回撤就恆為 0。卡片「MaxDD Q90」因此一直顯示 0，與 `docs/FINDINGS_CONDITIONAL_EXPECTATION_P0.md` 範例（−3.1）所表達的「90% 樣本的最大回撤不劣於 X」不符。
+
+**處理**：改為 `_quantile(drawdowns, 0.10)`，即帶號數列的第 10 百分位（等價於 −「絕對回撤的第 90 百分位」）。欄位名稱、前端顯示與資料契約不變。
+
+**驗證（本機 targeted）**：新增案例 `test_max_drawdown_q90_reports_the_adverse_tail_not_the_mildest_end`（20 筆樣本，一半為 0、其餘 −1 至 −10，應得 −8.0）；同一組資料在舊程式回傳 0.0。`tests.test_conditional_expectation` 11 項通過，`tests/conditional_expectation_v5_selftest.js` 通過。**未驗證**：正式卡片在真實資料上的新數值。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
 ## v5.0 修訂 — 2026-10-17 加權行情基準與來源優先（本機候選）
 
 修正加權主圖與行情列將 10/16 的 47111.26 配上 10/14 收盤而顯示 -1514.57 的錯誤。當日日 K 缺值時，改依現價交易日選前收；同日正式行情可校正晚 25 秒的 Yahoo 備援。保留跨日、同品質時間排序與台指期既有行為。缺現價時價格、日期與前收一起退回最後有效日 K；metadata 未提供日期時不推定。
