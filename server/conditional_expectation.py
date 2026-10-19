@@ -252,11 +252,17 @@ def _rs_band(percentile: float | None) -> tuple[str, str]:
     return 'rs_strong', f'相對強度強 ({percentile:.0f}%)'
 
 
+def _chip_known_at_close(day: Any, as_of: date) -> bool:
+    # T86 於 T 收盤後才公布；報酬以 T 收盤為起點，所以 T 當日的籌碼不能進 T 的分箱。
+    session = _chip_session_date(day)
+    return session is not None and session < as_of
+
+
 def _inst3d_sign(chip_inst_by_date: dict[str, float], as_of: date) -> tuple[str, str]:
     eligible = sorted(
         (day, total)
         for day, total in (chip_inst_by_date or {}).items()
-        if _chip_session_date(day) is not None and _chip_session_date(day) <= as_of
+        if _chip_known_at_close(day, as_of)
     )
     if not eligible:
         return 'unknown', '法人3日 未知'
@@ -401,7 +407,7 @@ def bin_state(
         'evidenceAsOf': {
             'quote': (tech or {}).get('asOf'),
             'chips': max(
-                (day for day in (chip_inst_by_date or {}) if _chip_session_date(day) and _chip_session_date(day) <= as_of_date),
+                (day for day in (chip_inst_by_date or {}) if _chip_known_at_close(day, as_of_date)),
                 default=None,
             ),
             'regime': regime_key,
@@ -663,7 +669,7 @@ def build_card(
         'pitAssumptions': [
             'Features computed from daily bars with ts <= asOf session only.',
             f'Forward returns use {RETURN_CONVENTION} over horizons {list(HORIZONS)} sessions.',
-            'Chip bins use published chip_history dates <= asOf (T+2 publication lag respected).',
+            'Chip bins use chip_history sessions strictly before asOf (T86 publishes after the asOf close).',
             'Regime tag from decision_history row with as_of <= session (never latest_context for history).',
         ],
         'notes': [
