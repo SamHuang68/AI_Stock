@@ -65,7 +65,9 @@ def guard_tw_quote(raw: dict[str, Any], now: datetime | None = None) -> dict[str
     out = dict(raw)
     current = (now or datetime.now(TAIPEI_TIMEZONE)).astimezone(TAIPEI_TIMEZONE)
     out.update(quote_observation(out.get('timestampMs'), current))
-    regular = current.weekday() < 5 and 540 <= current.hour * 60 + current.minute <= 810
+    # 休市日（含週間補假、颱風假）不是盤中：與週末一樣以最後成交顯示，不清空報價。
+    from 台股交易參考 import is_closed_day
+    regular = not is_closed_day(current.date()) and 540 <= current.hour * 60 + current.minute <= 810
     invalid_time = out['timestampMs'] is None or out['ageSeconds'] < -5
     if invalid_time or (out['stale'] and regular):
         out.update(ok=False, lastKnownPrice=out.get('price') or out.get('lastKnownPrice'), price=None, change=None,
