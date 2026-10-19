@@ -4,82 +4,24 @@
   ],
   "cases": [
     {
-      "id": "持倉合計損益只用已載價部位",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "合計損益%分子分母一致，未載價明示（PB-07）",
-      "targets": [
-        "tests/position_total_known_cost_selftest.js"
-      ],
-      "changes": [
-        "src/core/position_v2.js",
-        "tests/position_total_known_cost_selftest.js"
-      ],
-      "inputs": [
-        "src/core/position_v2.js",
-        "tests/position_total_known_cost_selftest.js"
-      ]
-    },
-    {
-      "id": "持倉共用者_完整審查前端",
-      "kind": "node",
-      "timeoutSeconds": 120,
-      "reason": "持倉表單與標的隔離不退化",
-      "targets": [
-        "tests/完整審查前端_selftest.js"
-      ],
-      "changes": [
-        "src/core/position_v2.js"
-      ],
-      "inputs": [
-        "src/core/position_v2.js",
-        "src/screener/backtest_v3.js",
-        "src/screener/strategy_builder_v3.js",
-        "src/screener/strategy_script_v3.js",
-        "stock_terminal.html",
-        "tests/完整審查前端_selftest.js"
-      ]
-    },
-    {
-      "id": "持倉共用者_即時報價",
-      "kind": "node",
-      "timeoutSeconds": 120,
-      "reason": "持倉現價優先順序不退化",
-      "targets": [
-        "tests/台股即時報價_selftest.js"
-      ],
-      "changes": [
-        "src/core/position_v2.js"
-      ],
-      "inputs": [
-        "src/core/market_data_v5.js",
-        "src/core/position_v2.js",
-        "src/core/pro_v2.js",
-        "src/core/wl_live_v3.js",
-        "tests/台股即時報價_selftest.js"
-      ]
-    },
-    {
-      "id": "追蹤中的前端產物與原始碼一致",
+      "id": "融資維持率收盤價覆蓋率",
       "kind": "unittest",
       "timeoutSeconds": 120,
-      "reason": "src 變更後重建產物",
+      "reason": "收盤價不完整時不輸出被低估的維持率（CM-01）",
       "targets": [
-        "tests.test_bundle_fresh"
+        "tests.test_margin_ratio"
       ],
       "changes": [
-        "src/core/position_v2.js",
-        "stock_terminal_v2.html"
+        "server/margin_ratio.py",
+        "tests/test_margin_ratio.py"
       ],
       "inputs": [
-        "build_v2.py",
-        "src/core/position_v2.js",
-        "stock_terminal_v2.html",
-        "tests/test_bundle_fresh.py"
+        "server/margin_ratio.py",
+        "tests/test_margin_ratio.py"
       ]
     }
   ],
-  "baseCommit": "38eca6c157ed93eef29421ba9b40354fb0f25414",
+  "baseCommit": "2c881f9744b1b8a6686c5dff134e852d499059f6",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

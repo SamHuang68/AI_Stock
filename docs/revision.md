@@ -1,3 +1,22 @@
+## 2026-10-19 大盤融資維持率在收盤價不完整時不輸出（CM-01）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/margin-lot-coverage`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 CM-01，主控查證屬實）：
+  - `compute_ratio_for_date` 與 `fetch_latest_ratio_live` 的分母是全市場融資金額，分子遇到缺收盤價的股票直接略過。
+  - 收盤價回應不完整時，比率被低估且沒有任何標示；即時路徑也沒有任何覆蓋率下限。
+- 實測：2026-10-19 以 TWSE OpenAPI 取得 1013 檔融資股，5 檔缺收盤價（停牌），以融資張數計的覆蓋率 99.98%。正常日的偏差約 0.02%，風險在於回應不完整的日子。
+- 修正後行為：
+  - 新增 `_collateral_with_coverage`，兩條路徑共用；
+  - 以官方收盤價計算時，張數覆蓋率低於 `MIN_LOT_COVERAGE = 0.95` 則記錄原因並不輸出；
+  - 2004-02-11 前與官方失敗時的 Yahoo 後備維持原有的檔數下限（30／50 檔），不改變歷史口徑、不移除已存的歷史點。這條路徑的覆蓋率仍未記錄，列為未決。
+- 驗證：
+  - 新增 `test_live_ratio_rejects_incomplete_closing_prices`（缺 2% 照常輸出、缺 10% 拒絕）與 `test_lot_coverage_counts_margin_lots_not_stock_count`，兩者在舊程式上失敗；
+  - `tests.test_margin_ratio` 13 案例通過（1 個需網路的整合案例照例略過）。
+  - 當下以真實網路呼叫 `fetch_latest_ratio_live`，main 與本分支都因既有的「兩端點交易日不一致」檢查回 None，未能以即時資料做端對端確認。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-19 持倉合計損益%只用已載價部位計算，未載價明示（PB-07）
 
 - 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/position-total-known-cost`。實作與合併 SHA 待 PR 合併後補記。
