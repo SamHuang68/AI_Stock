@@ -1,3 +1,21 @@
+## 2026-10-19 曝險研究的 Kelly 值照公式回報，上限保留 1x 底（PB-03）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/exposure-kelly-raw`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 PB-03）：`_mode_ceilings` 先把 `λ*` 以 `max(1.0, ·)` 截斷，再把截斷後的值放進 `costAdjustedKellyPct`。公式值 42.5% 或 −66.8% 都會顯示成 100%，與同列 `formula` 字串不符。
+- 查核結論：研究文件 `docs/ST_DYNAMIC_LEVERAGE_FIVE_POST_RESEARCH_2026-08-16.md` §6.4 明訂 `λ_research = min(cap, max(1, λ*))`，研究範圍限 1x～2x，所以上限的 1x 底是刻意設計，保留。有誤的只有 Kelly 欄位本身。審查建議的「移除 1x 底」未採用。
+- 修正後行為：
+  - `costAdjustedKellyPct` 回報未截斷的公式值；
+  - 新增 `researchLambdaPct`，標示截斷後實際用於上限的值；
+  - `researchCeilingPct` 數值不變；
+  - `formula` 字串補上 `max(1,lambda*)`；
+  - 前端沒有顯示 `costAdjustedKellyPct`，畫面不變。
+- 驗證：
+  - 新增 `test_kelly_below_one_is_reported_as_computed_while_ceiling_keeps_1x_floor`，涵蓋 (2%, 20%) 與 (−5%, 25%) 兩種情境，在舊程式上失敗；
+  - `tests.test_exposure_lab`、`test_decision_context`、`test_完整審查資料`、`test_曝險壓力` 共 69 案例通過。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## v5.0 修訂 — 2026-10-17 加權行情基準與來源優先（本機候選）
 
 修正加權主圖與行情列將 10/16 的 47111.26 配上 10/14 收盤而顯示 -1514.57 的錯誤。當日日 K 缺值時，改依現價交易日選前收；同日正式行情可校正晚 25 秒的 Yahoo 備援。保留跨日、同品質時間排序與台指期既有行為。缺現價時價格、日期與前收一起退回最後有效日 K；metadata 未提供日期時不推定。
