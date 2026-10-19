@@ -66,13 +66,9 @@ def _tw_close_iso(ts: float | int) -> str:
 
 
 def _last_tw_close_day(now: datetime) -> date:
-    local = now.astimezone(TZ_TPE)
-    day = local.date()
-    if local.time() < dtime(13, 30):
-        day = day.fromordinal(day.toordinal() - 1)
-    while day.weekday() >= 5:
-        day = day.fromordinal(day.toordinal() - 1)
-    return day
+    # 跳過週末與官方休市日（舊寫法只跳過週末，週間休市日會被當成收盤日）。
+    from 台股交易參考 import last_close_day
+    return last_close_day(now.astimezone(TZ_TPE))
 
 
 def _round_price(value: float | None) -> float | None:

@@ -36,7 +36,8 @@ def evaluate_gate(
     reasons: list[str] = []
     allow = True
 
-    if state.get("kill_switch") or state.get("fsm") == "Halted":
+    # 急停的目的是擋新風險：平倉與減碼放行，否則回撤鎖定或不留倉截止時部位會被鎖在場內（Sam 2026-10-19）。
+    if (state.get("kill_switch") or state.get("fsm") == "Halted") and decision.get("action") not in {"EXIT", "REDUCE"}:
         allow = False
         reasons.append("Kill Switch / Halted")
 
