@@ -4,34 +4,31 @@
   ],
   "cases": [
     {
-      "id": "條件期望籌碼嚴格落後",
+      "id": "曝險研究Kelly照公式回報",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "法人分箱只用 asOf 之前公布的籌碼（PB-02）",
+      "reason": "Kelly 值不再被 1x 底改寫，上限維持研究範圍（PB-03）",
       "targets": [
-        "tests.test_conditional_expectation",
-        "tests.test_conditional_expectation_p1",
+        "tests.test_exposure_lab",
+        "tests.test_decision_context",
         "tests.test_完整審查資料",
-        "tests.test_shadow_multifactor"
+        "tests.test_曝險壓力"
       ],
       "changes": [
-        "server/conditional_expectation.py",
-        "tests/test_conditional_expectation.py"
+        "server/exposure_lab.py",
+        "tests/test_exposure_lab.py"
       ],
       "inputs": [
-        "server/conditional_expectation.py",
-        "server/conditional_expectation_p1.py",
-        "server/shadow_multifactor.py",
-        "server/台股交易參考.json",
-        "server/台股交易參考.py",
-        "tests/test_conditional_expectation.py",
-        "tests/test_conditional_expectation_p1.py",
-        "tests/test_shadow_multifactor.py",
-        "tests/test_完整審查資料.py"
+        "server/decision_context.py",
+        "server/exposure_lab.py",
+        "tests/test_decision_context.py",
+        "tests/test_exposure_lab.py",
+        "tests/test_完整審查資料.py",
+        "tests/test_曝險壓力.py"
       ]
     }
   ],
-  "baseCommit": "8c80dacdf77552705233d07f39389d708dd6ebc6",
+  "baseCommit": "4b7c4a4ac9b00576b7ac26ba4a0a9bbf64e7b904",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

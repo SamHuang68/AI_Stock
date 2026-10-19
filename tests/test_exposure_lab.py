@@ -184,6 +184,17 @@ class ExposureLabTest(unittest.TestCase):
         self.assertIn('g-c_incremental', rows['aggressive']['formula'])
         self.assertTrue(all(not row['weeklyHealthApplied'] for row in rows.values()))
 
+    def test_kelly_below_one_is_reported_as_computed_while_ceiling_keeps_1x_floor(self):
+        # 審查 PB-03：舊版把公式值 42.5% 與 −66.8% 都顯示成 100%。
+        for expected_pct, vol_pct in ((2.0, 20.0), (-5.0, 25.0)):
+            rows = exposure_lab._mode_ceilings(expected_pct, vol_pct, 2.3, False)
+            raw = (0.5 + (expected_pct / 100.0 - 0.023) / (vol_pct / 100.0) ** 2) * 100.0
+            self.assertLess(raw, 100.0)
+            for name, fraction in (('conservative', 0.55), ('moderate', 0.80), ('aggressive', 1.00)):
+                self.assertAlmostEqual(rows[name]['costAdjustedKellyPct'], raw, places=1)
+                self.assertEqual(rows[name]['researchLambdaPct'], 100.0)
+                self.assertAlmostEqual(rows[name]['researchCeilingPct'], fraction * 100.0, places=1)
+
     def test_unadjusted_product_history_never_claims_empirical_cost_gap(self):
         underlying = benchmark_contract(days=150)
         product_rows = []
