@@ -106,10 +106,14 @@ class 不留倉測試(unittest.TestCase):
             decision = {"action": action, "confidence": 0.01, "process": {"chase_risk": "high"}}
             self.assertTrue(self.risk.evaluate_gate(self.state, decision, now=self.now())["allow"])
 
-    def test_減倉仍尊重緊急停止(self):
+    def test_緊急停止只擋新倉_平倉與減碼放行(self):
+        # 2026-10-19 Sam 核准的契約變更：舊版急停連 EXIT 都擋，回撤鎖定後部位被鎖在場內、不留倉截止也送不出。
         for patch in ({"kill_switch": True}, {"fsm": "Halted"}):
             state = dict(self.state, **patch)
-            self.assertFalse(self.risk.evaluate_gate(state, {"action": "EXIT"}, now=self.now())["allow"])
+            for action in ("EXIT", "REDUCE"):
+                self.assertTrue(self.risk.evaluate_gate(state, {"action": action}, now=self.now())["allow"])
+            for action in ("ENTER_LONG", "ENTER_SHORT"):
+                self.assertFalse(self.risk.evaluate_gate(state, {"action": action}, now=self.now())["allow"])
 
     def test_追價仍阻擋新單(self):
         decision = {"action": "ENTER_LONG", "process": {"chase_risk": "high"}}

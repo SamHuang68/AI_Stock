@@ -57,6 +57,20 @@ class 執行修正測試(unittest.TestCase):
         self.assertEqual(result["state"]["positions"]["account"], 0)
         self.assertEqual(result["state"]["overnight_enforcement"]["status"], "confirmed")
 
+    def test_緊急停止中仍執行截止平倉(self):
+        # 2026-10-19 契約變更：舊版急停時截止平倉停在 blocked，部位會留倉過夜。
+        self.engine.system_control("start")
+        self.engine.handle_signal(self.signal())
+        self.assertNotEqual(self.runtime.snapshot()["positions"]["account"], 0)
+        self.engine.set_kill_switch(True)
+        self.engine.set_no_overnight({"enabled": True, "force_flat_time": "13:40", "block_new_before_close_min": 15})
+        result = self.engine.enforce_no_overnight(datetime(2026, 10, 13, 13, 40, tzinfo=self.state.TZ8))
+        self.assertTrue(result["ok"], result["state"].get("overnight_enforcement"))
+        self.assertEqual(result["state"]["positions"]["account"], 0)
+        self.assertTrue(result["state"]["kill_switch"])
+        entry = self.engine.handle_signal(self.signal(signal_id="after-kill"))
+        self.assertEqual(self.runtime.snapshot()["positions"]["account"], 0, entry)
+
     def test_送單途中回撤等待同鎖且最後維持急停平倉(self):
         self.engine.system_control("start")
         broker_module = importlib.import_module(self.package + ".broker")

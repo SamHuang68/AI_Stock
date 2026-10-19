@@ -19,6 +19,9 @@
   const sma = window.Backtest.sma;
   const ema = window.stEmaSeries;
   const rsi = window.Backtest.rsi;
+  // 視窗內有缺值（停牌、缺列）時該根回 null，與 Backtest.sma／breakout 同口徑；
+  // 不可讓 Math.max/min 把 null 當 0，否則 KD、N 日高低與漲跌% 會給出假值。
+  const finite = Number.isFinite;
   // 隨機指標 KD (n=9, 平滑3)
   function kd(high, low, close, n, sm) {
     n = n || 9; sm = sm || 3;
@@ -26,8 +29,12 @@
     const rsv = new Array(len).fill(null);
     for (let i = 0; i < len; i++) {
       if (i < n - 1) continue;
-      let hh = -Infinity, ll = Infinity;
-      for (let j = i - n + 1; j <= i; j++) { hh = Math.max(hh, high[j]); ll = Math.min(ll, low[j]); }
+      let hh = -Infinity, ll = Infinity, missing = !finite(close[i]);
+      for (let j = i - n + 1; j <= i && !missing; j++) {
+        if (!finite(high[j]) || !finite(low[j])) missing = true;
+        else { hh = Math.max(hh, high[j]); ll = Math.min(ll, low[j]); }
+      }
+      if (missing) continue;
       rsv[i] = hh === ll ? 50 : (close[i] - ll) / (hh - ll) * 100;
     }
     const k = new Array(len).fill(null), d = new Array(len).fill(null);
@@ -53,6 +60,7 @@
     const m = sma(close, p);
     const up = new Array(close.length).fill(null), lo = new Array(close.length).fill(null);
     for (let i = p - 1; i < close.length; i++) {
+      if (m[i] == null) continue;
       let v = 0; for (let j = i - p + 1; j <= i; j++) v += (close[j] - m[i]) ** 2;
       const sd = Math.sqrt(v / p); up[i] = m[i] + k * sd; lo[i] = m[i] - k * sd;
     }
@@ -65,13 +73,13 @@
     return a.map((_, i) => i > 0 && a[i - 1] != null && b[i - 1] != null && a[i] != null && b[i] != null && a[i - 1] >= b[i - 1] && a[i] < b[i]);
   }
   function highest(arr, n) {
-    return arr.map((_, i) => { if (i < n - 1) return null; let h = -Infinity; for (let j = i - n + 1; j <= i; j++) h = Math.max(h, arr[j]); return h; });
+    return arr.map((_, i) => { if (i < n - 1) return null; let h = -Infinity; for (let j = i - n + 1; j <= i; j++) { if (!finite(arr[j])) return null; h = Math.max(h, arr[j]); } return h; });
   }
   function lowest(arr, n) {
-    return arr.map((_, i) => { if (i < n - 1) return null; let l = Infinity; for (let j = i - n + 1; j <= i; j++) l = Math.min(l, arr[j]); return l; });
+    return arr.map((_, i) => { if (i < n - 1) return null; let l = Infinity; for (let j = i - n + 1; j <= i; j++) { if (!finite(arr[j])) return null; l = Math.min(l, arr[j]); } return l; });
   }
   function pctChange(close) {
-    return close.map((v, i) => i === 0 ? null : (close[i - 1] ? (v - close[i - 1]) / close[i - 1] * 100 : null));
+    return close.map((v, i) => i === 0 || !finite(v) || !finite(close[i - 1]) || !close[i - 1] ? null : (v - close[i - 1]) / close[i - 1] * 100);
   }
   window.StratLib = { sma, ema, rsi, kd, macd, bb, crossover, crossunder, highest, lowest, pctChange };
 
