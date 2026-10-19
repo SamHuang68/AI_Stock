@@ -1,3 +1,23 @@
+## 2026-10-19 持倉合計損益%只用已載價部位計算，未載價明示（PB-07）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/position-total-known-cost`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 PB-07）：
+  - `renderPositionList` 的總成本累加全部部位，損益與市值只累加已載價部位，合計損益%因此被低估。例：實際 +10% 顯示 +5%。
+  - 「部分價格未載入」只在全部缺價時才出現。
+  - `renderPosition` 把未載價的當前個股顯示成損益 0%、市值等於成本。
+- 修正後行為：
+  - 合計損益%的分母改為已載價部位的成本；
+  - 有部分部位未載價時，市值與合計損益後加「（N 檔未載價）」；全部缺價時顯示「價格未載入」；
+  - 總成本照舊顯示全部部位，沒有刪減任何欄位；
+  - 當前個股未載價時，目前市值與未實現損益顯示 `--`；
+  - 已重建 `stock_terminal_v2.html`（只有 `?v=` 雜湊變動）。
+- 驗證：
+  - 新增 `tests/position_total_known_cost_selftest.js`，在舊程式上重現 +5.00% 而失敗，新程式通過。
+  - 既有 `完整審查前端_selftest.js`、`shell_v5_selftest.js`、`台股即時報價_selftest.js` 與 `tests.test_bundle_fresh` 通過。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-19 策略指標庫遇到缺值回 null，不再產生假訊號（PB-04、PB-05）
 
 - 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/stratlib-missing-values`。實作與合併 SHA 待 PR 合併後補記。

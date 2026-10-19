@@ -4,33 +4,32 @@
   ],
   "cases": [
     {
-      "id": "策略指標庫缺值回null",
+      "id": "持倉合計損益只用已載價部位",
       "kind": "node",
       "timeoutSeconds": 60,
-      "reason": "KD、N 日高低、漲跌%、布林通道遇缺值不給假值（PB-04、PB-05）",
+      "reason": "合計損益%分子分母一致，未載價明示（PB-07）",
       "targets": [
-        "tests/stratlib_missing_values_selftest.js"
+        "tests/position_total_known_cost_selftest.js"
       ],
       "changes": [
-        "src/screener/strategy_builder_v3.js",
-        "tests/stratlib_missing_values_selftest.js"
+        "src/core/position_v2.js",
+        "tests/position_total_known_cost_selftest.js"
       ],
       "inputs": [
-        "src/screener/backtest_v3.js",
-        "src/screener/strategy_builder_v3.js",
-        "tests/stratlib_missing_values_selftest.js"
+        "src/core/position_v2.js",
+        "tests/position_total_known_cost_selftest.js"
       ]
     },
     {
-      "id": "策略指標庫共用者_腳本引擎",
+      "id": "持倉共用者_完整審查前端",
       "kind": "node",
       "timeoutSeconds": 120,
-      "reason": "StratLib 共用的腳本引擎與 DSL 行為不退化",
+      "reason": "持倉表單與標的隔離不退化",
       "targets": [
         "tests/完整審查前端_selftest.js"
       ],
       "changes": [
-        "src/screener/strategy_builder_v3.js"
+        "src/core/position_v2.js"
       ],
       "inputs": [
         "src/core/position_v2.js",
@@ -42,20 +41,22 @@
       ]
     },
     {
-      "id": "策略指標庫共用者_自訂策略樣本外",
+      "id": "持倉共用者_即時報價",
       "kind": "node",
       "timeoutSeconds": 120,
-      "reason": "自訂策略樣本外回測不退化",
+      "reason": "持倉現價優先順序不退化",
       "targets": [
-        "tests/自訂策略樣本外_selftest.js"
+        "tests/台股即時報價_selftest.js"
       ],
       "changes": [
-        "src/screener/strategy_builder_v3.js"
+        "src/core/position_v2.js"
       ],
       "inputs": [
-        "src/screener/backtest_v3.js",
-        "src/screener/strategy_builder_v3.js",
-        "tests/自訂策略樣本外_selftest.js"
+        "src/core/market_data_v5.js",
+        "src/core/position_v2.js",
+        "src/core/pro_v2.js",
+        "src/core/wl_live_v3.js",
+        "tests/台股即時報價_selftest.js"
       ]
     },
     {
@@ -67,18 +68,18 @@
         "tests.test_bundle_fresh"
       ],
       "changes": [
-        "src/screener/strategy_builder_v3.js",
+        "src/core/position_v2.js",
         "stock_terminal_v2.html"
       ],
       "inputs": [
         "build_v2.py",
-        "src/screener/strategy_builder_v3.js",
+        "src/core/position_v2.js",
         "stock_terminal_v2.html",
         "tests/test_bundle_fresh.py"
       ]
     }
   ],
-  "baseCommit": "5b8ac06d6a9931a4d89fc8f0a72f8514ee27d5af",
+  "baseCommit": "38eca6c157ed93eef29421ba9b40354fb0f25414",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
