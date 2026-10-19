@@ -4,45 +4,87 @@
   ],
   "cases": [
     {
-      "id": "持倉張數換算整股",
-      "reason": "張→股以浮點相乘再截斷而少 1 股；改為四捨五入。以 vm 執行正式函式逐筆核對。",
+      "id": "本機ST後端拒絕非loopback的Host",
+      "reason": "後端未檢查 Host，可被 DNS rebinding 讀取 GET 回應；改為只接受 loopback 主機與實際綁定埠。以新案例與會啟動 Handler 或涉及閘道的既有測試回歸（不含 main 上已知因文件路徑失敗的 test_dist_scrub），非完整套件。",
       "changes": [
-        "src/core/position_v2.js",
-        "tests/position_lot_rounding_selftest.js"
+        "server/http_boundary.py",
+        "server/server.py",
+        "tests/test_st_host_header.py"
       ],
       "inputs": [
-        "src/core/position_v2.js",
-        "tests/position_lot_rounding_selftest.js"
-      ],
-      "kind": "node",
-      "targets": [
-        "tests/position_lot_rounding_selftest.js"
-      ],
-      "timeoutSeconds": 120
-    },
-    {
-      "id": "追蹤中的前端產物與原始碼一致",
-      "reason": "修改 position_v2.js 後重建 stock_terminal_v2.html，確認產物與原始碼一致。",
-      "changes": [
-        "src/core/position_v2.js",
-        "stock_terminal_v2.html"
-      ],
-      "inputs": [
-        "build_order.py",
-        "build_v2.py",
-        "src/core/position_v2.js",
-        "stock_terminal.html",
-        "stock_terminal_v2.html",
-        "tests/test_bundle_fresh.py"
+        "server/http_boundary.py",
+        "server/private_web_gateway.py",
+        "server/server.py",
+        "tests/test_Pulse讀寫分離.py",
+        "tests/test_ai_stream_contract.py",
+        "tests/test_bridge_http.py",
+        "tests/test_conditional_expectation.py",
+        "tests/test_conditional_expectation_p1.py",
+        "tests/test_daily_cache_http.py",
+        "tests/test_decision_http.py",
+        "tests/test_features_http.py",
+        "tests/test_focus_cache.py",
+        "tests/test_health_live.py",
+        "tests/test_http_boundary.py",
+        "tests/test_macro_review_fixes.py",
+        "tests/test_postmarket_http.py",
+        "tests/test_private_web_gateway.py",
+        "tests/test_review_regressions.py",
+        "tests/test_server_http_security.py",
+        "tests/test_shadow_feature_gates.py",
+        "tests/test_shadow_multifactor.py",
+        "tests/test_signal_narrative.py",
+        "tests/test_st_host_header.py",
+        "tests/test_start_all.py",
+        "tests/test_stock_signals.py",
+        "tests/test_taiex_quote_official_base.py",
+        "tests/test_台股即時報價.py",
+        "tests/test_完整審查警報權限.py",
+        "tests/test_官方資料來源.py",
+        "tests/test_情境投組HTTP.py",
+        "tests/test_標的研究.py",
+        "tests/test_研究品質與留存.py",
+        "tests/test_研究整合路由.py",
+        "tests/test_私有停止安全.py"
       ],
       "kind": "unittest",
       "targets": [
-        "tests.test_bundle_fresh"
+        "tests.test_st_host_header",
+        "tests.test_Pulse讀寫分離",
+        "tests.test_ai_stream_contract",
+        "tests.test_bridge_http",
+        "tests.test_conditional_expectation",
+        "tests.test_conditional_expectation_p1",
+        "tests.test_daily_cache_http",
+        "tests.test_decision_http",
+        "tests.test_features_http",
+        "tests.test_focus_cache",
+        "tests.test_health_live",
+        "tests.test_http_boundary",
+        "tests.test_macro_review_fixes",
+        "tests.test_postmarket_http",
+        "tests.test_private_web_gateway",
+        "tests.test_review_regressions",
+        "tests.test_server_http_security",
+        "tests.test_shadow_feature_gates",
+        "tests.test_shadow_multifactor",
+        "tests.test_signal_narrative",
+        "tests.test_start_all",
+        "tests.test_stock_signals",
+        "tests.test_taiex_quote_official_base",
+        "tests.test_台股即時報價",
+        "tests.test_完整審查警報權限",
+        "tests.test_官方資料來源",
+        "tests.test_情境投組HTTP",
+        "tests.test_標的研究",
+        "tests.test_研究品質與留存",
+        "tests.test_研究整合路由",
+        "tests.test_私有停止安全"
       ],
-      "timeoutSeconds": 300
+      "timeoutSeconds": 600
     }
   ],
-  "baseCommit": "9cd9403802e357cf4ae5662c314c3376ba3ba9ef",
+  "baseCommit": "7689e8a970b90b77adf11e2bdefcfb3239e88311",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
