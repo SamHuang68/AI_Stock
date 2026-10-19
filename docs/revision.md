@@ -1,3 +1,19 @@
+## 2026-10-20 發布狀態補記（aeaecef3）
+
+- 基底：`aeaecef388eaa2e90763451ebdd68793050e88bc`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。
+
+| 版本 | 內容 | 發布時間（本機時間） | 狀態 |
+| --- | --- | --- | --- |
+| `aeaecef388eaa2e90763451ebdd68793050e88bc` | 全專案審查修正 #220–#233 與合併紀錄 #234 | 2026-10-20 06:24（正式）、06:27（本機） | 本機與正式後端已發布；WaveDeck 未生效 |
+
+- 依據：本機 18432 `/health`、正式後端 18435 `/health` 與 `/health/live` 的 `runtimeCommit` 實測皆為目標 SHA；閘道 `ok`、`isolated-host`。
+- 流程：stage 為 `tests=passed`；停止正式服務後完整備份 14 個 SQLite，完整性 ok；promote rc 0，保留 `data/`；兩端 `market.db` 的 `quick_check` ok。
+- 流程更正：第一次備份是在正式服務仍執行時進行，備份工具偵測到來源變動而停止。工具要求先停止寫入者，正確順序是「stage → 停止 → 備份 → promote」，而不是先備份後停止。
+- **WaveDeck 未生效**：WaveDeck 由主工作樹的 `wavedeck/run.py` 執行，不在 Private Web 發布範圍內。主工作樹停在 `edd44f6`，所以 #225（WD-01）尚未在執行中的 WaveDeck 生效；需更新主工作樹並重啟 WaveDeck，另行授權。
+- 未驗證：閘道／Tailscale 端版本（需 Owner token）、實機畫面。
+
+---
+
 ## 2026-10-20 全專案審查修正 #220–#233 合併紀錄
 
 - 基底：`63ef6492ddbfa54e1c2157946a0ea98c46a4c2cc`（origin/main，即 #233 的合併提交）。本段只補記下列 14 段「實作與合併 SHA 待 PR 合併後補記」，不覆寫原段落。
