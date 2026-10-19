@@ -192,13 +192,20 @@ class 策略訊號整合測試(unittest.TestCase):
         self.assertEqual(self.runtime.snapshot()["execution"]["order_id"], order_id)
         self.assertEqual(self.runtime.snapshot()["positions"]["account"], 2)
 
-    def test_急停時不留倉不自動送單(self):
+    def test_急停時不留倉仍送平倉一次且維持急停(self):
+        # 2026-10-19 Sam 核准的契約變更：舊版急停時不送截止平倉，部位會留倉過夜。
         self.txt(account=2)
         self.runtime.set_kill(True)
         self.engine.set_no_overnight({"enabled": True, "force_flat_time": "13:40"})
-        self.engine.enforce_no_overnight(datetime(2026, 10, 12, 13, 40, tzinfo=self.state.TZ8))
-        self.assertEqual(self.sent(), [])
-        self.assertEqual(self.runtime.snapshot()["fsm"], "Halted")
+        now = datetime(2026, 10, 12, 13, 40, tzinfo=self.state.TZ8)
+        self.engine.enforce_no_overnight(now)
+        state = self.runtime.snapshot()
+        self.assertEqual(len(self.sent()), 1)
+        self.assertEqual(state["execution"]["action"], "EXIT")
+        self.assertTrue(state["kill_switch"])
+        self.assertEqual(state["fsm"], "Halted")
+        self.engine.enforce_no_overnight(now + timedelta(minutes=1))
+        self.assertEqual(len(self.sent()), 1)
 
     def test_相同收K不同識別碼與逆序舊K拒絕(self):
         self.txt()

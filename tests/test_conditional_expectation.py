@@ -148,6 +148,14 @@ class ConditionalExpectationBinTests(unittest.TestCase):
         self.assertIsNotNone(stats['1']['winRate'])
         self.assertIsNotNone(stats['1']['maxDrawdownQ90Pct'])
 
+    def test_max_drawdown_q90_reports_the_adverse_tail_not_the_mildest_end(self):
+        # 20 筆樣本：一半沒有回撤（0），其餘 −1 到 −10；90% 樣本不劣於的回撤應為尾端的負值。
+        drawdowns = [0.0] * 10 + [-float(k) for k in range(1, 11)]
+        returns = [0.5] * 20
+        stats = ce.aggregate_horizon_stats(returns, drawdowns)
+        self.assertLess(stats['maxDrawdownQ90Pct'], 0)
+        self.assertEqual(stats['maxDrawdownQ90Pct'], -8.0)
+
     def test_build_card_returns_real_horizons_when_flag_data_present(self):
         bars = _synthetic_bars(100)
         chip_map = {}
