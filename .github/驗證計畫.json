@@ -4,24 +4,29 @@
   ],
   "cases": [
     {
-      "id": "融資維持率收盤價覆蓋率",
+      "id": "台指期主力切換日OI",
       "kind": "unittest",
-      "timeoutSeconds": 120,
-      "reason": "收盤價不完整時不輸出被低估的維持率（CM-01）",
+      "timeoutSeconds": 300,
+      "reason": "換月日不把轉倉算成同契約增倉（D-03）",
       "targets": [
-        "tests.test_margin_ratio"
+        "tests.test_tx_oi_rollover",
+        "tests.test_decision_context",
+        "tests.test_pulse_intel"
       ],
       "changes": [
-        "server/margin_ratio.py",
-        "tests/test_margin_ratio.py"
+        "server/pulse_extras.py",
+        "tests/test_tx_oi_rollover.py"
       ],
       "inputs": [
-        "server/margin_ratio.py",
-        "tests/test_margin_ratio.py"
+        "server/pulse_extras.py",
+        "tests/test_decision_context.py",
+        "tests/test_pulse_extras.py",
+        "tests/test_pulse_intel.py",
+        "tests/test_tx_oi_rollover.py"
       ]
     }
   ],
-  "baseCommit": "2c881f9744b1b8a6686c5dff134e852d499059f6",
+  "baseCommit": "d50ed8cb04e4ddac20244f1b56dea5ec57fa29af",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
