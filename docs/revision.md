@@ -1,3 +1,23 @@
+## 2026-10-19 條件期望的法人分箱不再使用當日籌碼（PB-02）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/ce-chip-strict-lag`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 PB-02）：
+  - 舊版 `_inst3d_sign` 與 `evidenceAsOf.chips` 用 `籌碼日 <= asOf` 篩選，把交易日 T 的三大法人買賣超放進 T 的分箱。
+  - 但 T86 在 T 收盤後才公布，而前瞻報酬以 T 收盤為進場價，所以歷史統計條件用到了進場時還拿不到的資訊。
+  - `pitAssumptions` 宣稱已處理公布落後，程式卻沒有位移。
+- 修正後行為：
+  - 新增 `_chip_known_at_close`，只採用 asOf 之前交易日的籌碼；歷史觀測與線上卡片共用同一函式。
+  - `pitAssumptions` 改為描述實際做法。
+  - `evaluate_asof_gate` 的籌碼新鮮度門檻與模型版本字串不變。
+- 驗證：
+  - 新增 `test_same_session_chips_do_not_enter_the_bin`：只有當日籌碼時分箱為 unknown；前一日賣超加當日買超時，以前一日為準。
+  - 該案例在舊程式上失敗（`'buy' != 'unknown'`）。
+  - `tests.test_conditional_expectation`、`test_conditional_expectation_p1`、`test_完整審查資料`、`test_shadow_multifactor` 共 53 案例通過。
+- 影響：研究用卡片（`actionAuthority: none`）。部分標的的法人 3 日分箱與勝率統計會改變，改變後的值才是可執行的條件。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-19 WaveDeck 回撤鎖定自動全平、急停仍放行平倉（WD-01）
 
 - 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/wd-drawdown-flatten`。實作與合併 SHA 待 PR 合併後補記。

@@ -4,46 +4,34 @@
   ],
   "cases": [
     {
-      "id": "WaveDeck急停放行平倉與回撤全平",
+      "id": "條件期望籌碼嚴格落後",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "急停只擋新倉、不留倉截止與回撤鎖定仍能平倉（WD-01）",
+      "reason": "法人分箱只用 asOf 之前公布的籌碼（PB-02）",
       "targets": [
-        "wavedeck.tests.test_不留倉",
-        "wavedeck.tests.test_完整審查執行",
-        "wavedeck.tests.test_策略訊號整合",
-        "wavedeck.tests.test_smoke",
-        "wavedeck.tests.test_策略HTTP",
-        "wavedeck.tests.test_exec_md",
-        "wavedeck.tests.test_request_guard"
+        "tests.test_conditional_expectation",
+        "tests.test_conditional_expectation_p1",
+        "tests.test_完整審查資料",
+        "tests.test_shadow_multifactor"
       ],
       "changes": [
-        "wavedeck/server/st_link.py",
-        "wavedeck/server/risk.py",
-        "wavedeck/server/engine.py",
-        "wavedeck/tests/test_不留倉.py",
-        "wavedeck/tests/test_完整審查執行.py",
-        "wavedeck/tests/test_策略訊號整合.py"
+        "server/conditional_expectation.py",
+        "tests/test_conditional_expectation.py"
       ],
       "inputs": [
-        "wavedeck/server/broker.py",
-        "wavedeck/server/engine.py",
-        "wavedeck/server/review_loop.py",
-        "wavedeck/server/risk.py",
-        "wavedeck/server/st_link.py",
-        "wavedeck/server/state.py",
-        "wavedeck/server/不留倉.py",
-        "wavedeck/tests/test_exec_md.py",
-        "wavedeck/tests/test_request_guard.py",
-        "wavedeck/tests/test_smoke.py",
-        "wavedeck/tests/test_不留倉.py",
-        "wavedeck/tests/test_完整審查執行.py",
-        "wavedeck/tests/test_策略HTTP.py",
-        "wavedeck/tests/test_策略訊號整合.py"
+        "server/conditional_expectation.py",
+        "server/conditional_expectation_p1.py",
+        "server/shadow_multifactor.py",
+        "server/台股交易參考.json",
+        "server/台股交易參考.py",
+        "tests/test_conditional_expectation.py",
+        "tests/test_conditional_expectation_p1.py",
+        "tests/test_shadow_multifactor.py",
+        "tests/test_完整審查資料.py"
       ]
     }
   ],
-  "baseCommit": "2c93ae001d693bb58ca2259b0458c942815c30eb",
+  "baseCommit": "8c80dacdf77552705233d07f39389d708dd6ebc6",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
