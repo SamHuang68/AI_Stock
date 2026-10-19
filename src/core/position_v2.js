@@ -298,7 +298,8 @@ function renderPositionList() {
   if (codes.length === 0) return '';
 
   // Aggregate portfolio totals
-  let totalCost = 0, totalValue = 0, totalPnl = 0, knownCount = 0;
+  // 損益%的分子分母用同一組已載價部位；未載價部位只計入總成本並明示檔數。
+  let totalCost = 0, knownCost = 0, totalValue = 0, totalPnl = 0, knownCount = 0;
   for (const code of codes) {
     const p = S.positions[code];
     const ref = p.quoteTimestampMs ? p.lastPrice : code === S.sym
@@ -306,12 +307,15 @@ function renderPositionList() {
       : p.lastPrice;
     totalCost += p.entry * p.shares;
     if (ref != null) {
+      knownCost  += p.entry * p.shares;
       totalValue += ref * p.shares;
       totalPnl   += (ref - p.entry) * p.shares;
       knownCount++;
     }
   }
-  const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
+  const totalPnlPct = knownCost > 0 ? (totalPnl / knownCost * 100) : 0;
+  const unknownCount = codes.length - knownCount;
+  const unknownNote = knownCount && unknownCount ? `（${unknownCount} 檔未載價）` : '';
   const pnlCol = window.Colors ? Colors.gain(totalPnl) : (totalPnl >= 0 ? 'var(--green)' : 'var(--red)');
 
   let h = `<div class="stat-sect">持倉清單 · ${codes.length} 檔</div>`;
@@ -319,11 +323,11 @@ function renderPositionList() {
   // Portfolio summary row
   h += `<div style="padding:7px 12px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px">
     <span style="color:var(--tlo)">總成本 / 市值</span>
-    <span style="color:var(--thi)">${Math.round(totalCost).toLocaleString()} → ${knownCount ? Math.round(totalValue).toLocaleString() : '--'}</span>
+    <span style="color:var(--thi)">${Math.round(totalCost).toLocaleString()} → ${knownCount ? Math.round(totalValue).toLocaleString() + unknownNote : '--'}</span>
   </div>
   <div style="padding:5px 12px 8px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px">
     <span style="color:var(--tlo)">合計損益</span>
-    <span style="color:${pnlCol};font-weight:700">${knownCount ? `${totalPnl >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}% (${totalPnl >= 0 ? '+' : ''}${Math.round(totalPnl).toLocaleString()})` : '部分價格未載入'}</span>
+    <span style="color:${pnlCol};font-weight:700">${knownCount ? `${totalPnl >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}% (${totalPnl >= 0 ? '+' : ''}${Math.round(totalPnl).toLocaleString()})${unknownNote}` : '價格未載入'}</span>
   </div>`;
 
   // Individual rows
@@ -379,10 +383,11 @@ function renderPosition() {
 
   // ── Current position block ──
   if (pos) {
-    const pnl = c ? (c - pos.entry) / pos.entry * 100 : 0;
-    const dPnl = c ? (c - pos.entry) * pos.shares : 0;
+    // 未載價時顯示 --，不可當成損益 0% 與市值等於成本。
+    const pnl = c ? (c - pos.entry) / pos.entry * 100 : null;
+    const dPnl = c ? (c - pos.entry) * pos.shares : null;
     const cost = pos.entry * pos.shares;
-    const val  = c ? c * pos.shares : cost;
+    const val  = c ? c * pos.shares : null;
     const col  = window.Colors ? Colors.gain(pnl) : (pnl >= 0 ? 'var(--green)' : 'var(--red)');
 
     h += '<div class="stat-sect">當前持倉</div>';
@@ -390,8 +395,8 @@ function renderPosition() {
     h += row('持有股數', pos.shares.toLocaleString());
     h += row('現價', c ? c.toFixed(2) : '--');
     h += row('總成本', cost.toLocaleString(undefined, {maximumFractionDigits: 0}));
-    h += row('目前市值', val.toLocaleString(undefined, {maximumFractionDigits: 0}));
-    h += row('未實現損益',
+    h += row('目前市值', val == null ? '--' : val.toLocaleString(undefined, {maximumFractionDigits: 0}));
+    h += row('未實現損益', pnl == null ? '--' :
       `<span style="color:${col}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}% (${dPnl >= 0 ? '+' : ''}${Math.round(dPnl).toLocaleString()})</span>`,
       true);
     if (pos.target) {
