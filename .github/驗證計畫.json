@@ -4,29 +4,30 @@
   ],
   "cases": [
     {
-      "id": "台指期主力切換日OI",
+      "id": "個股期MIS失敗快取與共用抓取",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "換月日不把轉倉算成同契約增倉（D-03）",
+      "reason": "MIS 失效時不讓每個請求各自重試（D-04）",
       "targets": [
-        "tests.test_tx_oi_rollover",
-        "tests.test_decision_context",
-        "tests.test_pulse_intel"
+        "tests.test_mis_futures_negative_cache",
+        "tests.test_no_new_silent_exceptions",
+        "tests.test_fallback_observability"
       ],
       "changes": [
-        "server/pulse_extras.py",
-        "tests/test_tx_oi_rollover.py"
+        "server/server.py",
+        "tests/test_mis_futures_negative_cache.py"
       ],
       "inputs": [
-        "server/pulse_extras.py",
-        "tests/test_decision_context.py",
-        "tests/test_pulse_extras.py",
-        "tests/test_pulse_intel.py",
-        "tests/test_tx_oi_rollover.py"
+        "server/log_once.py",
+        "server/server.py",
+        "tests/silent_except_baseline.json",
+        "tests/test_fallback_observability.py",
+        "tests/test_mis_futures_negative_cache.py",
+        "tests/test_no_new_silent_exceptions.py"
       ]
     }
   ],
-  "baseCommit": "d50ed8cb04e4ddac20244f1b56dea5ec57fa29af",
+  "baseCommit": "f4fee781ca1ad5d46149be6c76abb3d2993d1db4",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
