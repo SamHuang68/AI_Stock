@@ -572,6 +572,12 @@ function renderPositionPanel() {
 }
 window.renderPositionPanel = renderPositionPanel;
 
+/** 張→股（1 張＝1000 股）。四捨五入到整股：32.3×1000 在浮點是 32299.999…，直接 parseInt 會截成 32299 股。 */
+function lotsToShares(value) {
+  const lots = parseFloat(value);
+  return Number.isFinite(lots) ? String(Math.round(lots * 1000)) : value;
+}
+
 function submitPosition() {
   console.log('[v2] submitPosition called for', S.sym);
   const entryEl = document.getElementById('pos-entry');
@@ -591,7 +597,7 @@ function submitPosition() {
   // Lot → share conversion for TW market (1 張 = 1000 股)
   const unit = unitEl?.value || 'share';
   if (unit === 'lot' && s) {
-    s = String(parseFloat(s) * 1000);
+    s = lotsToShares(s);
   }
 
   const ok = setPosition(e, s, t, p, n, { sym: entryEl.dataset.sym, mkt: entryEl.dataset.mkt });

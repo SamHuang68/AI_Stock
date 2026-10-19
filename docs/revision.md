@@ -18,6 +18,163 @@
 
 ---
 
+## 2026-10-19 策略指標庫遇到缺值回 null，不再產生假訊號（PB-04、PB-05）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/stratlib-missing-values`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 PB-04、PB-05）：`src/screener/strategy_builder_v3.js` 的 `StratLib` 在窗口含缺值（停牌、缺列）時沒有檢查。
+  - `kd`、`highest`、`lowest` 的 `Math.max/min` 把 null 當 0：缺值後約 10 根 K 值出現假低檔，N 日最低變成 0。
+  - `pctChange` 在缺值當根得到 −100%。
+  - `bb` 在均線為 null 時仍計算上下軌，得到約 ±2 倍價格的假值，與 `Backtest.bbLower` 分歧。
+- 修正後行為：
+  - 依 `Backtest.sma`／`breakout` 的口徑，窗口含非有限值時該根回 null，條件判斷因此不成立；
+  - `bb` 在均線為 null 處跳過，下軌與 `Backtest.bbLower` 結果一致；
+  - 已重建 `stock_terminal_v2.html`（只有 `?v=` 雜湊變動）。
+- 驗證：
+  - 新增 `tests/stratlib_missing_values_selftest.js`，涵蓋 N 日高低、漲跌%、40 根含缺值的 KD 不出現假低檔、布林通道與 `Backtest.bbLower` 一致；在舊程式上失敗。
+  - 既有 `tests/完整審查前端_selftest.js`、`tests/自訂策略樣本外_selftest.js` 與 `tests.test_bundle_fresh` 通過。
+- 影響：含缺值日線的策略組合器與腳本回測，訊號會改變；新訊號才是正確的。
+- 發布狀態：未合併、未發布。
+
+---
+
+## 2026-10-19 曝險研究的 Kelly 值照公式回報，上限保留 1x 底（PB-03）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/exposure-kelly-raw`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 PB-03）：`_mode_ceilings` 先把 `λ*` 以 `max(1.0, ·)` 截斷，再把截斷後的值放進 `costAdjustedKellyPct`。公式值 42.5% 或 −66.8% 都會顯示成 100%，與同列 `formula` 字串不符。
+- 查核結論：研究文件 `docs/ST_DYNAMIC_LEVERAGE_FIVE_POST_RESEARCH_2026-08-16.md` §6.4 明訂 `λ_research = min(cap, max(1, λ*))`，研究範圍限 1x～2x，所以上限的 1x 底是刻意設計，保留。有誤的只有 Kelly 欄位本身。審查建議的「移除 1x 底」未採用。
+- 修正後行為：
+  - `costAdjustedKellyPct` 回報未截斷的公式值；
+  - 新增 `researchLambdaPct`，標示截斷後實際用於上限的值；
+  - `researchCeilingPct` 數值不變；
+  - `formula` 字串補上 `max(1,lambda*)`；
+  - 前端沒有顯示 `costAdjustedKellyPct`，畫面不變。
+- 驗證：
+  - 新增 `test_kelly_below_one_is_reported_as_computed_while_ceiling_keeps_1x_floor`，涵蓋 (2%, 20%) 與 (−5%, 25%) 兩種情境，在舊程式上失敗；
+  - `tests.test_exposure_lab`、`test_decision_context`、`test_完整審查資料`、`test_曝險壓力` 共 69 案例通過。
+- 發布狀態：未合併、未發布。
+
+---
+
+## 2026-10-19 條件期望的法人分箱不再使用當日籌碼（PB-02）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/ce-chip-strict-lag`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 PB-02）：
+  - 舊版 `_inst3d_sign` 與 `evidenceAsOf.chips` 用 `籌碼日 <= asOf` 篩選，把交易日 T 的三大法人買賣超放進 T 的分箱。
+  - 但 T86 在 T 收盤後才公布，而前瞻報酬以 T 收盤為進場價，所以歷史統計條件用到了進場時還拿不到的資訊。
+  - `pitAssumptions` 宣稱已處理公布落後，程式卻沒有位移。
+- 修正後行為：
+  - 新增 `_chip_known_at_close`，只採用 asOf 之前交易日的籌碼；歷史觀測與線上卡片共用同一函式。
+  - `pitAssumptions` 改為描述實際做法。
+  - `evaluate_asof_gate` 的籌碼新鮮度門檻與模型版本字串不變。
+- 驗證：
+  - 新增 `test_same_session_chips_do_not_enter_the_bin`：只有當日籌碼時分箱為 unknown；前一日賣超加當日買超時，以前一日為準。
+  - 該案例在舊程式上失敗（`'buy' != 'unknown'`）。
+  - `tests.test_conditional_expectation`、`test_conditional_expectation_p1`、`test_完整審查資料`、`test_shadow_multifactor` 共 53 案例通過。
+- 影響：研究用卡片（`actionAuthority: none`）。部分標的的法人 3 日分箱與勝率統計會改變，改變後的值才是可執行的條件。
+- 發布狀態：未合併、未發布。
+
+---
+
+## 2026-10-19 WaveDeck 回撤鎖定自動全平、急停仍放行平倉（WD-01）
+
+- 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/wd-drawdown-flatten`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 WD-01）：急停的目的是擋新風險，但舊版三處一起把部位鎖在場內：
+  1. `WD_DD_FLATTEN` 預設關閉，當日回撤達上限只急停不平倉；
+  2. `risk.evaluate_gate` 在急停或 Halted 時連 EXIT／REDUCE 都拒絕；
+  3. `engine.enforce_no_overnight` 在急停時停在 blocked，不留倉截止送不出平倉，部位會過夜。
+- 修正後行為（Sam 2026-10-19 選擇「兩者都做」）：
+  - `st_link.DD_FLATTEN` 預設開啟，設 `WD_DD_FLATTEN=0` 可改回只急停；
+  - 急停或 Halted 時閘門仍拒絕 ENTER_LONG／ENTER_SHORT，只放行 EXIT 與 REDUCE；
+  - 不留倉截止在急停中照常經閘門送一次平倉，急停狀態維持不變；`handle_signal` 在急停時拒收所有訊號的行為不變。
+- 契約變更與測試：
+  - `test_不留倉.test_減倉仍尊重緊急停止` 改寫為 `test_緊急停止只擋新倉_平倉與減碼放行`；
+  - `test_策略訊號整合.test_急停時不留倉不自動送單` 改寫為 `test_急停時不留倉仍送平倉一次且維持急停`；
+  - 新增 `test_完整審查執行.test_緊急停止中仍執行截止平倉`。
+  - 新案例在舊程式上確認會失敗（2 FAIL），新程式通過。
+- 驗證：
+  - 本機以 repo 根目錄執行 `wavedeck.tests` 的 exec_md、request_guard、smoke、不留倉、完整審查執行、策略HTTP、策略訊號整合，共 90 案例，連續兩次全數通過。
+  - 第一次執行時 `test_策略HTTP` 的過大 JSON 案例出現一次 WinError 10053（連線中止）；單獨執行與後續兩次全組皆通過，修改前的 main 單獨執行也通過，判定為與本修改無關的偶發失敗，未修改該測試。
+- 發布狀態：未合併、未發布。
+
+---
+
+## v5.0 修訂 — 2026-10-19 兩份新文件改用中性路徑，恢復分享封存掃描（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/docs-abs-paths`，只改文件。
+
+**問題**：PR #218、#219 新增的 `docs/當日分時修復.md`、`docs/加權行情錯誤8D.md` 各有一處絕對使用者路徑（`C:/Users/...`），被分享封存的內容掃描器擋下（`windows-user-path`、`mac-user-path`），使 main 上 `tests.test_dist_scrub.TestDistScrub` 的 `setUpClass` 整組失敗。與 PR #208 修過的是同一類問題；兩個 PR 的局部驗證計畫沒有涵蓋分享封存，所以 CI 是綠的。
+
+**處理**：把兩處路徑改為 `<AI-Workspace>/...`，語意不變，不放寬掃描器。
+
+**驗證（本機 targeted）**：`tests.test_dist_scrub` 12 項通過。
+
+**防再發建議（未實作）**：倉庫內 `docs/` 新增或修改時，驗證計畫一律帶上分享封存掃描案例；或在提交前以 `scripts/build_dist.py` 的同一掃描器檢查 `docs/`。
+
+發布狀態：只改文件，未合併、未部署。
+
+---
+
+## v5.0 修訂 — 2026-10-19 本機 ST 後端拒絕非 loopback 的 Host 標頭（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/st-host-check`，`VERSION` 維持 5.0。來源：全專案審查 SEC-01。
+
+**問題**：後端只綁 loopback，但 `server/server.py` 從不檢查 `Host` 標頭。惡意網頁以 DNS rebinding 把自己的網域解析到 127.0.0.1 後，對 `http://<惡意網域>:18432/` 的請求在瀏覽器看來是同源，可以讀到 GET 回應（例如 `/research/portfolio`、`/decision/context`、`/alert/config`）。寫入有 `Origin` 檢查而不受影響。WaveDeck 已有主機白名單，ST 後端沒有。
+
+**處理**：`server/http_boundary.py` 新增 `is_local_host_header`，只接受 `127.0.0.1`、`localhost`、`[::1]`（可帶本服務實際綁定的埠）；`Handler.parse_request` 對所有方法套用，不符回 403。比對的是伺服器實際綁定的埠（測試伺服器使用隨機埠）。正式站閘道轉發時會把 `Host` 改寫成 `127.0.0.1:<後端埠>`（`private_web_gateway.py` `_proxy`），不受影響。沒有 `Host` 標頭的非瀏覽器 HTTP/1.0 呼叫維持放行。
+
+**驗證（本機 targeted）**：新增 `tests/test_st_host_header.py` 4 個案例（規則單元測試，以及啟動真實 Handler：loopback 主機回 200、外部網域的 GET 與 POST 回 403）；外部網域案例在舊 `server.py` 上失敗。會實際啟動 Handler 或涉及 Host／閘道的 32 個測試模組 396 項中，只有 `tests.test_dist_scrub` 的 `setUpClass` 失敗，原因與本次無關：main 上 `docs/加權行情錯誤8D.md`、`docs/當日分時修復.md` 含絕對使用者路徑而被分享封存掃描器擋下（另開 PR 修正），因此本計畫不列該案例。**未驗證**：真實瀏覽器的 DNS rebinding；正式站經閘道的實機請求。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
+## v5.0 修訂 — 2026-10-19 持倉張數換算股數不再少 1 股（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/position-lot-rounding`，`VERSION` 維持 5.0。來源：全專案審查 PB-06。
+
+**問題**：`src/core/position_v2.js` `submitPosition` 以 `String(parseFloat(s) * 1000)` 把張數換成股數，`setPosition` 再以 `parseInt` 取整。浮點誤差使 32.3×1000＝32299.999…，存成 32,299 股；0.1 至 999.9 張（0.1 步）有 46 筆、0.01 步有 590 筆少 1 股，持倉成本與損益隨之偏差。
+
+**處理**：新增 `lotsToShares`，以 `Math.round(lots × 1000)` 換算到整股；非數字輸入原樣交給 `setPosition` 拒絕（行為不變）。重建追蹤中的 `stock_terminal_v2.html`（差異只有各模組的快取版本雜湊）。
+
+**驗證（本機 targeted）**：新增 `tests/position_lot_rounding_selftest.js`，以 vm 執行正式 `lotsToShares`，0.1 至 999.9 張與 0.01 至 999.99 張共 109,998 筆全部正確；舊程式碼上失敗。`tests.test_bundle_fresh` 通過。**未驗證**：瀏覽器內實際送出表單；已存入 localStorage、少 1 股的既有持倉不會自動更正（使用者需重新儲存）。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
+## v5.0 修訂 — 2026-10-19 週間官方休市日改以官方日曆判定（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/tw-calendar-closed-days`，`VERSION` 維持 5.0。來源：全專案審查 CAL-01、QB-03、PB-08、EW-01 同類（`AI-Workspace/docs/stock-terminal/全專案弱點與公式審查-20261019/`）。
+
+**問題**：多處以「只跳過週末」推算台股交易日，不查 `server/台股交易參考.json` 已收錄的官方休市日（2026 年 25 日）。
+- `guard_tw_quote`（`server/market_routes.py`）把週間休市日 09:00–13:30 當成盤中，所有 `/twquote`、`/quote`、`/quote-batch` 的台股報價被清空並顯示「成交資料尚未更新」。
+- 「最近收盤日」`_last_tw_close_day` 在 `conditional_expectation.py`、`touxin_5d.py`、`peak_observation.py` 各一份，休市日當天會被當成收盤日；`conditional_expectation.evaluate_asof_gate` 與 `chip_path_state.py` 的籌碼落後計數把假日算進交易日，連假後籌碼被誤判逾期。
+- `postmarket_report._next_tw_session_date`（盤後報告的「明日」）與 `signal_digest._digest_due`（每日摘要）也只跳過週末。
+
+**處理**：`台股交易參考.py` 新增 `is_closed_day`、`last_close_day`、`next_session_day`（以既有 `session()` 判定；未涵蓋年度仍只看週末，維持既有行為），上述各處改呼叫它們。三份 `_last_tw_close_day` 保留函式名稱，其他模組的匯入不變。
+
+**既有測試的期望調整（有理由）**：`tests/test_stock_signals.py::test_digest_once_per_day_after_close` 原以 2026-09-25 為日期，那天是官方休市日（中秋節）；新行為在休市日不發摘要是本次修正的目的。該案例只驗「收盤後每日一次」，改用交易日 2026-09-24，斷言不變；另新增 `test_digest_is_not_sent_on_an_official_weekday_holiday`。
+
+**驗證（本機 targeted）**：新增 `tests/test_tw_calendar_closed_days.py` 6 個案例（休市日判定、最近收盤日、三份複本、下一交易日與盤後「明日」、報價防線在休市日保留最後成交而交易日仍拒絕跨日價、籌碼落後不計假日），舊程式碼上全部失敗。引用相關模組的 22 個測試模組 309 項通過，靜默例外棘輪通過。**未驗證**：休市日當天的實機畫面；2027 年起需更新官方日曆 JSON 才能涵蓋。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
+## v5.0 修訂 — 2026-10-19 條件期望卡「MaxDD Q90」改取回撤尾端（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/ce-maxdd-tail`，`VERSION` 維持 5.0。來源：全專案審查 PB-01（`AI-Workspace/docs/stock-terminal/全專案弱點與公式審查-20261019/`）。
+
+**問題**：`server/conditional_expectation.py` `aggregate_horizon_stats` 以 `_quantile(drawdowns, 0.90)` 計算 `maxDrawdownQ90Pct`。回撤是帶號值（0 為無回撤、越負越糟），升冪排序後的第 90 百分位落在最溫和的一端，只要超過一成樣本沒有回撤就恆為 0。卡片「MaxDD Q90」因此一直顯示 0，與 `docs/FINDINGS_CONDITIONAL_EXPECTATION_P0.md` 範例（−3.1）所表達的「90% 樣本的最大回撤不劣於 X」不符。
+
+**處理**：改為 `_quantile(drawdowns, 0.10)`，即帶號數列的第 10 百分位（等價於 −「絕對回撤的第 90 百分位」）。欄位名稱、前端顯示與資料契約不變。
+
+**驗證（本機 targeted）**：新增案例 `test_max_drawdown_q90_reports_the_adverse_tail_not_the_mildest_end`（20 筆樣本，一半為 0、其餘 −1 至 −10，應得 −8.0）；同一組資料在舊程式回傳 0.0。`tests.test_conditional_expectation` 11 項通過，`tests/conditional_expectation_v5_selftest.js` 通過。**未驗證**：正式卡片在真實資料上的新數值。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
 ## v5.0 修訂 — 2026-10-17 加權行情基準與來源優先（本機候選）
 
 修正加權主圖與行情列將 10/16 的 47111.26 配上 10/14 收盤而顯示 -1514.57 的錯誤。當日日 K 缺值時，改依現價交易日選前收；同日正式行情可校正晚 25 秒的 Yahoo 備援。保留跨日、同品質時間排序與台指期既有行為。缺現價時價格、日期與前收一起退回最後有效日 K；metadata 未提供日期時不推定。
