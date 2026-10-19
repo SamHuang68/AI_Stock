@@ -329,11 +329,8 @@ MARGIN_CHANGE_SIGNIFICANT = 500.0
 
 def _next_tw_session_date(now: datetime) -> str:
     """盤後 workflow 的「明日」= 下一個台股現貨交易日（ISO date）。"""
-    local = now.astimezone(TZ_TPE)
-    candidate = local.date() + timedelta(days=1)
-    while candidate.weekday() >= 5:
-        candidate += timedelta(days=1)
-    return candidate.isoformat()
+    from 台股交易參考 import next_session_day
+    return next_session_day(now.astimezone(TZ_TPE).date()).isoformat()
 
 
 def _anomaly(

@@ -25,6 +25,7 @@ except Exception:  # pragma: no cover
     TZ_TPE = timezone(timedelta(hours=8))
 
 from postmarket_report import staleness as _quote_staleness
+from 台股交易參考 import is_closed_day
 from postmarket_report import tech_summary_from_bars
 
 CONTRACT_VERSION = 1
@@ -71,13 +72,9 @@ def _chip_session_date(chip_as_of: Any) -> date | None:
 
 
 def _last_tw_close_day(now: datetime) -> date:
-    local = now.astimezone(TZ_TPE)
-    day = local.date()
-    if local.time() < dtime(13, 30):
-        day = day.fromordinal(day.toordinal() - 1)
-    while day.weekday() >= 5:
-        day = day.fromordinal(day.toordinal() - 1)
-    return day
+    # 跳過週末與官方休市日（舊寫法只跳過週末，週間休市日會被當成收盤日）。
+    from 台股交易參考 import last_close_day
+    return last_close_day(now.astimezone(TZ_TPE))
 
 
 def _session_date_from_ts(ts: float | int) -> date:
@@ -142,7 +139,7 @@ def evaluate_asof_gate(
         while cursor > chip_day and lag_sessions <= CHIP_MAX_LAG_SESSIONS + 3:
             lag_sessions += 1
             cursor = cursor.fromordinal(cursor.toordinal() - 1)
-            while cursor.weekday() >= 5:
+            while is_closed_day(cursor):
                 cursor = cursor.fromordinal(cursor.toordinal() - 1)
         if lag_sessions > CHIP_MAX_LAG_SESSIONS:
             reasons.append(
@@ -252,11 +249,17 @@ def _rs_band(percentile: float | None) -> tuple[str, str]:
     return 'rs_strong', f'相對強度強 ({percentile:.0f}%)'
 
 
+def _chip_known_at_close(day: Any, as_of: date) -> bool:
+    # T86 於 T 收盤後才公布；報酬以 T 收盤為起點，所以 T 當日的籌碼不能進 T 的分箱。
+    session = _chip_session_date(day)
+    return session is not None and session < as_of
+
+
 def _inst3d_sign(chip_inst_by_date: dict[str, float], as_of: date) -> tuple[str, str]:
     eligible = sorted(
         (day, total)
         for day, total in (chip_inst_by_date or {}).items()
-        if _chip_session_date(day) is not None and _chip_session_date(day) <= as_of
+        if _chip_known_at_close(day, as_of)
     )
     if not eligible:
         return 'unknown', '法人3日 未知'
@@ -401,7 +404,7 @@ def bin_state(
         'evidenceAsOf': {
             'quote': (tech or {}).get('asOf'),
             'chips': max(
-                (day for day in (chip_inst_by_date or {}) if _chip_session_date(day) and _chip_session_date(day) <= as_of_date),
+                (day for day in (chip_inst_by_date or {}) if _chip_known_at_close(day, as_of_date)),
                 default=None,
             ),
             'regime': regime_key,
@@ -510,7 +513,9 @@ def aggregate_horizon_stats(
         'medianReturnPct': round(_median(returns), 4) if qualified else None,
         'winRate': round(sum(1 for value in returns if value > 0) / n, 4) if qualified else None,
         'n': n,
-        'maxDrawdownQ90Pct': round(_quantile(drawdowns, 0.90), 4) if qualified else None,
+        # 回撤是帶號值（0 為無回撤、越負越糟）：「90% 樣本不劣於」的尾端是升冪第 10 百分位，
+        # 取第 90 百分位會落在最溫和的一端（實務上恆為 0）。
+        'maxDrawdownQ90Pct': round(_quantile(drawdowns, 0.10), 4) if qualified else None,
         'ratesAvailable': qualified,
     }
 
@@ -663,7 +668,7 @@ def build_card(
         'pitAssumptions': [
             'Features computed from daily bars with ts <= asOf session only.',
             f'Forward returns use {RETURN_CONVENTION} over horizons {list(HORIZONS)} sessions.',
-            'Chip bins use published chip_history dates <= asOf (T+2 publication lag respected).',
+            'Chip bins use chip_history sessions strictly before asOf (T86 publishes after the asOf close).',
             'Regime tag from decision_history row with as_of <= session (never latest_context for history).',
         ],
         'notes': [
