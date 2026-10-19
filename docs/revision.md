@@ -1,3 +1,19 @@
+## v5.0 修訂 — 2026-10-19 兩份新文件改用中性路徑，恢復分享封存掃描（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/docs-abs-paths`，只改文件。
+
+**問題**：PR #218、#219 新增的 `docs/當日分時修復.md`、`docs/加權行情錯誤8D.md` 各有一處絕對使用者路徑（`C:/Users/...`），被分享封存的內容掃描器擋下（`windows-user-path`、`mac-user-path`），使 main 上 `tests.test_dist_scrub.TestDistScrub` 的 `setUpClass` 整組失敗。與 PR #208 修過的是同一類問題；兩個 PR 的局部驗證計畫沒有涵蓋分享封存，所以 CI 是綠的。
+
+**處理**：把兩處路徑改為 `<AI-Workspace>/...`，語意不變，不放寬掃描器。
+
+**驗證（本機 targeted）**：`tests.test_dist_scrub` 12 項通過。
+
+**防再發建議（未實作）**：倉庫內 `docs/` 新增或修改時，驗證計畫一律帶上分享封存掃描案例；或在提交前以 `scripts/build_dist.py` 的同一掃描器檢查 `docs/`。
+
+發布狀態：只改文件，未合併、未部署。
+
+---
+
 ## v5.0 修訂 — 2026-10-19 本機 ST 後端拒絕非 loopback 的 Host 標頭（候選，未發布）
 
 基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/st-host-check`，`VERSION` 維持 5.0。來源：全專案審查 SEC-01。
