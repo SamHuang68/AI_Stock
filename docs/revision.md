@@ -1,3 +1,36 @@
+## 2026-10-20 全專案審查修正 #220–#233 合併紀錄
+
+- 基底：`63ef6492ddbfa54e1c2157946a0ea98c46a4c2cc`（origin/main，即 #233 的合併提交）。本段只補記下列 14 段「實作與合併 SHA 待 PR 合併後補記」，不覆寫原段落。
+- 合併方式：Sam 2026-10-20 指示「依序合併 #220 到 #233」。
+  - 每個 PR 先把當時的 origin/main 合併進分支：`docs/revision.md` 保留雙方段落，驗證計畫保留各自案例、`baseCommit` 改為新 main，改到 `src/` 的分支重建 `stock_terminal_v2.html`；
+  - `scripts/變更驗證.py --check` 通過、兩個 CI 工作（ubuntu、windows）通過後，才以 merge commit 合併；
+  - 除上述三個檔案外沒有程式衝突。#229 與 #222 同改 `src/core/position_v2.js`，由 Git 自動合併。
+
+| PR | 標題 | 實作 SHA（合併前分支頭） | 合併 SHA |
+| --- | --- | --- | --- |
+| #220 | 條件期望卡 MaxDD Q90 改取回撤尾端 | `f1ac48d1e69abc81ce77eecd5c996cce3244f7ae` | `099453480faa2168bf2dc6433dbba65bebfa47e8` |
+| #221 | 週間官方休市日改以官方日曆判定 | `10becc1fd03735b1a18342153088ce9ad73493fb` | `9cd9403802e357cf4ae5662c314c3376ba3ba9ef` |
+| #222 | 持倉張數換算股數不再少 1 股 | `cdbec422930aa834282669f2e0cf7eb9376989d6` | `7689e8a970b90b77adf11e2bdefcfb3239e88311` |
+| #223 | 本機 ST 後端拒絕非 loopback 的 Host 標頭 | `a54933b1bd4f5809bfe945007e5e8307bd134b88` | `a12f5c533d0008aa95a5dce6b290ad866c429662` |
+| #224 | 兩份新文件改用中性路徑，恢復分享封存掃描 | `6c55846524d00a6119cd40c7b92bc619a2f00ddc` | `2c93ae001d693bb58ca2259b0458c942815c30eb` |
+| #225 | WaveDeck 回撤鎖定預設自動全平，急停仍放行平倉（WD-01） | `2159a56f3b2627ecd9c5a19067702a591588ff14` | `8c80dacdf77552705233d07f39389d708dd6ebc6` |
+| #226 | 條件期望的法人分箱不再使用當日籌碼（PB-02） | `ac0a3bf5a403d01738d82b0917e70fa1ad05d3e6` | `4b7c4a4ac9b00576b7ac26ba4a0a9bbf64e7b904` |
+| #227 | 曝險研究的 Kelly 值照公式回報，上限保留 1x 底（PB-03） | `945cfc02c7e1bc946b2470903e81d2d56025b4fe` | `5b8ac06d6a9931a4d89fc8f0a72f8514ee27d5af` |
+| #228 | 策略指標庫遇到缺值回 null，不再產生假訊號（PB-04、PB-05） | `6ba75226998da31b6f0e92e8d51f51ed70e1adce` | `38eca6c157ed93eef29421ba9b40354fb0f25414` |
+| #229 | 持倉合計損益%只用已載價部位計算，未載價明示（PB-07） | `39647841971b1f29c1b73b608546d5f2f09bb5db` | `2c881f9744b1b8a6686c5dff134e852d499059f6` |
+| #230 | 大盤融資維持率在收盤價不完整時不輸出（CM-01） | `49f15041ef517a0ea1a9d6125029e0bae945e47e` | `d50ed8cb04e4ddac20244f1b56dea5ec57fa29af` |
+| #231 | 台指期主力契約切換日不再把轉倉算成增倉（D-03） | `571afcd8d6ec4fa8f72601f8274046746ae5a195` | `f4fee781ca1ad5d46149be6c76abb3d2993d1db4` |
+| #232 | 個股期 MIS 整批抓取失效時不再讓每個請求各自重試（D-04） | `0caca235714360f514acf37184cfb85182f8b366` | `722d7bbdd9f3a82e5602de282ee7e7c889c5a955` |
+| #233 | WATCH 突破新高的量能改用當日量口徑（IND-01） | `4a9bb5ce63221799b3789ab2229acb70fe93fce4` | `63ef6492ddbfa54e1c2157946a0ea98c46a4c2cc` |
+
+- 合併後整合驗證（main `63ef649`，乾淨工作樹）：
+  - 14 個 PR 驗證計畫中的全部局部案例在同一份程式上重跑：Python unittest 共 805 案例通過（1 個需網路的案例照例略過）；9 個 node 自測全數通過；
+  - 同一程序內有 2 個 WaveDeck 模組因 `server` 名稱與 ST 的 `server` 模組衝突而無法載入，屬於混跑的測試隔離問題；另以獨立程序重跑 WaveDeck 7 個模組 90 案例全數通過。CI 本來就是每個案例各自一個程序。
+  - 這是局部案例的聯集，不是完整測試套件。
+- 發布狀態：14 個 PR 皆已合併、**皆未發布**。正式站與本機的 runtimeCommit 未變動，發布須 Sam 另行授權並走 stage → promote。
+
+---
+
 ## 2026-10-20 WATCH 突破新高的量能改用當日量口徑（IND-01）
 
 - 基底：`edd97ae53a6a4557d1b917522a3e7ea837a6b040`（origin/main）；分支 `claude/watch-breakout-day-volume`。實作與合併 SHA 待 PR 合併後補記。
