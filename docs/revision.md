@@ -12,6 +12,39 @@
 
 ---
 
+## v5.0 修訂 — 2026-10-19 週間官方休市日改以官方日曆判定（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/tw-calendar-closed-days`，`VERSION` 維持 5.0。來源：全專案審查 CAL-01、QB-03、PB-08、EW-01 同類（`AI-Workspace/docs/stock-terminal/全專案弱點與公式審查-20261019/`）。
+
+**問題**：多處以「只跳過週末」推算台股交易日，不查 `server/台股交易參考.json` 已收錄的官方休市日（2026 年 25 日）。
+- `guard_tw_quote`（`server/market_routes.py`）把週間休市日 09:00–13:30 當成盤中，所有 `/twquote`、`/quote`、`/quote-batch` 的台股報價被清空並顯示「成交資料尚未更新」。
+- 「最近收盤日」`_last_tw_close_day` 在 `conditional_expectation.py`、`touxin_5d.py`、`peak_observation.py` 各一份，休市日當天會被當成收盤日；`conditional_expectation.evaluate_asof_gate` 與 `chip_path_state.py` 的籌碼落後計數把假日算進交易日，連假後籌碼被誤判逾期。
+- `postmarket_report._next_tw_session_date`（盤後報告的「明日」）與 `signal_digest._digest_due`（每日摘要）也只跳過週末。
+
+**處理**：`台股交易參考.py` 新增 `is_closed_day`、`last_close_day`、`next_session_day`（以既有 `session()` 判定；未涵蓋年度仍只看週末，維持既有行為），上述各處改呼叫它們。三份 `_last_tw_close_day` 保留函式名稱，其他模組的匯入不變。
+
+**既有測試的期望調整（有理由）**：`tests/test_stock_signals.py::test_digest_once_per_day_after_close` 原以 2026-09-25 為日期，那天是官方休市日（中秋節）；新行為在休市日不發摘要是本次修正的目的。該案例只驗「收盤後每日一次」，改用交易日 2026-09-24，斷言不變；另新增 `test_digest_is_not_sent_on_an_official_weekday_holiday`。
+
+**驗證（本機 targeted）**：新增 `tests/test_tw_calendar_closed_days.py` 6 個案例（休市日判定、最近收盤日、三份複本、下一交易日與盤後「明日」、報價防線在休市日保留最後成交而交易日仍拒絕跨日價、籌碼落後不計假日），舊程式碼上全部失敗。引用相關模組的 22 個測試模組 309 項通過，靜默例外棘輪通過。**未驗證**：休市日當天的實機畫面；2027 年起需更新官方日曆 JSON 才能涵蓋。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
+## v5.0 修訂 — 2026-10-19 條件期望卡「MaxDD Q90」改取回撤尾端（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/ce-maxdd-tail`，`VERSION` 維持 5.0。來源：全專案審查 PB-01（`AI-Workspace/docs/stock-terminal/全專案弱點與公式審查-20261019/`）。
+
+**問題**：`server/conditional_expectation.py` `aggregate_horizon_stats` 以 `_quantile(drawdowns, 0.90)` 計算 `maxDrawdownQ90Pct`。回撤是帶號值（0 為無回撤、越負越糟），升冪排序後的第 90 百分位落在最溫和的一端，只要超過一成樣本沒有回撤就恆為 0。卡片「MaxDD Q90」因此一直顯示 0，與 `docs/FINDINGS_CONDITIONAL_EXPECTATION_P0.md` 範例（−3.1）所表達的「90% 樣本的最大回撤不劣於 X」不符。
+
+**處理**：改為 `_quantile(drawdowns, 0.10)`，即帶號數列的第 10 百分位（等價於 −「絕對回撤的第 90 百分位」）。欄位名稱、前端顯示與資料契約不變。
+
+**驗證（本機 targeted）**：新增案例 `test_max_drawdown_q90_reports_the_adverse_tail_not_the_mildest_end`（20 筆樣本，一半為 0、其餘 −1 至 −10，應得 −8.0）；同一組資料在舊程式回傳 0.0。`tests.test_conditional_expectation` 11 項通過，`tests/conditional_expectation_v5_selftest.js` 通過。**未驗證**：正式卡片在真實資料上的新數值。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
 ## v5.0 修訂 — 2026-10-17 加權行情基準與來源優先（本機候選）
 
 修正加權主圖與行情列將 10/16 的 47111.26 配上 10/14 收盤而顯示 -1514.57 的錯誤。當日日 K 缺值時，改依現價交易日選前收；同日正式行情可校正晚 25 秒的 Yahoo 備援。保留跨日、同品質時間排序與台指期既有行為。缺現價時價格、日期與前收一起退回最後有效日 K；metadata 未提供日期時不推定。

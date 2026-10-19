@@ -294,6 +294,7 @@ class DigestTests(unittest.TestCase):
         self.assertIn('帶量突破 20 日高', sent[0][1])
 
     def test_digest_once_per_day_after_close(self):
+        # 2026-09-25 是官方休市日（中秋節），休市日不發摘要；本案例只驗「收盤後每日一次」，改用交易日 09-24。
         sent = []
         result = self._result()
         with tempfile.TemporaryDirectory() as tmp, \
@@ -305,12 +306,21 @@ class DigestTests(unittest.TestCase):
             ad.load_config.return_value = {'stock_signal_push': 'digest'}
             notify = lambda text, subject: sent.append(subject)
             self.assertEqual(signal_digest.check_once(
-                now=datetime(2026, 9, 25, 13, 0, tzinfo=TPE), notify=notify)['digests'], 0)
+                now=datetime(2026, 9, 24, 13, 0, tzinfo=TPE), notify=notify)['digests'], 0)
             self.assertEqual(signal_digest.check_once(
-                now=datetime(2026, 9, 25, 15, 0, tzinfo=TPE), notify=notify)['digests'], 1)
+                now=datetime(2026, 9, 24, 15, 0, tzinfo=TPE), notify=notify)['digests'], 1)
             self.assertEqual(signal_digest.check_once(
-                now=datetime(2026, 9, 25, 16, 0, tzinfo=TPE), notify=notify)['digests'], 0)
+                now=datetime(2026, 9, 24, 16, 0, tzinfo=TPE), notify=notify)['digests'], 0)
         self.assertEqual(len(sent), 1)
+
+    def test_digest_is_not_sent_on_an_official_weekday_holiday(self):
+        sent = []
+        result = self._result()
+        with tempfile.TemporaryDirectory() as tmp,                 mock.patch.object(signal_digest, 'STATE_FILE', os.path.join(tmp, 'st.json')),                 mock.patch.object(signal_digest, 'symbols', lambda: [{'sym': '2330', 'market': 'TW'}]),                 mock.patch.object(signal_digest.routes, 'analyze_symbol', lambda *a, **k: result),                 mock.patch.object(signal_digest, '_maybe_refresh_pooled', lambda items: None),                 mock.patch.object(signal_digest, 'alert_daemon') as ad:
+            ad.load_config.return_value = {'stock_signal_push': 'digest'}
+            self.assertEqual(signal_digest.check_once(
+                now=datetime(2026, 9, 25, 15, 0, tzinfo=TPE), notify=lambda text, subject: sent.append(subject))['digests'], 0)
+        self.assertEqual(sent, [])
 
     def test_off_mode_sends_nothing(self):
         with mock.patch.object(signal_digest, 'alert_daemon') as ad:

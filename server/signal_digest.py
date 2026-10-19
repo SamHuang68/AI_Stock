@@ -165,6 +165,10 @@ def _digest_due(market: str, st: Dict[str, Any], now: Optional[datetime]) -> Opt
     local = routes._now_local(market, now)
     if local.weekday() >= 5:
         return None
+    if market == 'TW':
+        from 台股交易參考 import is_closed_day
+        if is_closed_day(local.date()):
+            return None
     hh, mm = DIGEST_AFTER[market]
     if local < local.replace(hour=hh, minute=mm, second=0, microsecond=0):
         return None
