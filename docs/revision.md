@@ -1,3 +1,17 @@
+## v5.0 修訂 — 2026-10-19 本機 ST 後端拒絕非 loopback 的 Host 標頭（候選，未發布）
+
+基底 `edd97ae53a6a4557d1b917522a3e7ea837a6b040`（main）；分支 `claude/st-host-check`，`VERSION` 維持 5.0。來源：全專案審查 SEC-01。
+
+**問題**：後端只綁 loopback，但 `server/server.py` 從不檢查 `Host` 標頭。惡意網頁以 DNS rebinding 把自己的網域解析到 127.0.0.1 後，對 `http://<惡意網域>:18432/` 的請求在瀏覽器看來是同源，可以讀到 GET 回應（例如 `/research/portfolio`、`/decision/context`、`/alert/config`）。寫入有 `Origin` 檢查而不受影響。WaveDeck 已有主機白名單，ST 後端沒有。
+
+**處理**：`server/http_boundary.py` 新增 `is_local_host_header`，只接受 `127.0.0.1`、`localhost`、`[::1]`（可帶本服務實際綁定的埠）；`Handler.parse_request` 對所有方法套用，不符回 403。比對的是伺服器實際綁定的埠（測試伺服器使用隨機埠）。正式站閘道轉發時會把 `Host` 改寫成 `127.0.0.1:<後端埠>`（`private_web_gateway.py` `_proxy`），不受影響。沒有 `Host` 標頭的非瀏覽器 HTTP/1.0 呼叫維持放行。
+
+**驗證（本機 targeted）**：新增 `tests/test_st_host_header.py` 4 個案例（規則單元測試，以及啟動真實 Handler：loopback 主機回 200、外部網域的 GET 與 POST 回 403）；外部網域案例在舊 `server.py` 上失敗。會實際啟動 Handler 或涉及 Host／閘道的 32 個測試模組 396 項中，只有 `tests.test_dist_scrub` 的 `setUpClass` 失敗，原因與本次無關：main 上 `docs/加權行情錯誤8D.md`、`docs/當日分時修復.md` 含絕對使用者路徑而被分享封存掃描器擋下（另開 PR 修正），因此本計畫不列該案例。**未驗證**：真實瀏覽器的 DNS rebinding；正式站經閘道的實機請求。
+
+發布狀態：候選，未合併、未部署。
+
+---
+
 ## v5.0 修訂 — 2026-10-17 加權行情基準與來源優先（本機候選）
 
 修正加權主圖與行情列將 10/16 的 47111.26 配上 10/14 收盤而顯示 -1514.57 的錯誤。當日日 K 缺值時，改依現價交易日選前收；同日正式行情可校正晚 25 秒的 Yahoo 備援。保留跨日、同品質時間排序與台指期既有行為。缺現價時價格、日期與前收一起退回最後有效日 K；metadata 未提供日期時不推定。
