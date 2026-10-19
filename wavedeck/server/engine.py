@@ -540,8 +540,6 @@ def enforce_no_overnight(now: datetime | None = None) -> dict:
         unresolved = execution_pending(execution) or (execution.get("status") == "filled" and not execution.get("position_confirmed"))
         if account_known and positions.get("account") == 0 and positions.get("txt_target") == 0 and not unresolved:
             progress.update(status="confirmed", message="已核對平倉" + ("（紙上模擬）" if get_broker().name == "paper" else ""))
-        elif st.get("kill_switch") or st.get("fsm") == "Halted":
-            progress.update(status="blocked", message="緊急停止中；平倉尚未完成")
         elif execution.get("target") == 0 and unresolved:
             progress.update(status="pending", message="平倉委託已送出，等待核對；不重複送單")
         elif not account_known:

@@ -34,7 +34,8 @@ OVERLAY_STALE_SEC = float(os.environ.get("WD_ST_OVERLAY_STALE_SEC", "90"))
 FAIL_AFTER = int(os.environ.get("WD_ST_FAIL_AFTER", "2"))
 FAIL_SAFE_STYLE = int(os.environ.get("WD_FAIL_SAFE_STYLE", "35"))
 # When daily DD breaches, also flatten TXT (default: pause new only)
-DD_FLATTEN = os.environ.get("WD_DD_FLATTEN", "0").lower() in ("1", "true", "yes")
+# 回撤達上限時預設自動全平（Sam 2026-10-19）：只急停不平倉會把虧損部位鎖在場內。設 WD_DD_FLATTEN=0 可改回只急停。
+DD_FLATTEN = os.environ.get("WD_DD_FLATTEN", "1").lower() in ("1", "true", "yes")
 
 _FS_BANNER_RE = re.compile(
     r"〔Fail-safe：[^\]]*〕(?:\s*風格→保守、降載、收緊失效。?)*\s*",
