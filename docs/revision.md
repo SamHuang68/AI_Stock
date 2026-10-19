@@ -1,3 +1,14 @@
+## 2026-10-20 WaveDeck 更新到 7074b03，WD-01 生效
+
+- 基底：`7074b03167cca8ae4f5cbd4f286e65df722d878a`（main）。只補記狀態，不改程式；本段補充上一段「WaveDeck 未生效」的後續。
+- 依 Sam 指示更新主工作樹並重啟 WaveDeck：主工作樹以 `git pull --ff-only` 從 `edd44f6` 快轉到 `7074b03`，根目錄 `data/` 的既有修改保留未動；重啟前已備份 `wavedeck/data`。
+- 實測（健康端點）：PID 74832，`runtimeCommit` 為 `7074b03167cca8ae4f5cbd4f286e65df722d878a`，`releaseVerified` 為 true；paper、Halted、急停維持，只監聽 127.0.0.1:18433。
+- WD-01 實際行為：重啟前是 paper 帳戶 1 口、急停中，不留倉狀態自 2026-10-11 起卡在 blocked。新程式啟動後送出 1 筆紙上 EXIT，持倉歸 0、不留倉狀態變為 confirmed，急停維持。broker 為 paper，不寫委託檔。
+- 發現：WaveDeck 的發布收據 `wavedeck/data/程式版本.json` 不會隨 `git pull` 更新。第一次重啟時因收據缺少新增的 `server/request_guard.py`，回報 `releaseVerified=false`；逐檔核對 Git blob 後重建收據，再重啟才通過。
+- 發布狀態：本機 ST、正式後端與 WaveDeck 三者皆已在 `aeaecef3` 以後的版本執行（WaveDeck 為 `7074b03`，比 `aeaecef3` 只多文件提交）。
+
+---
+
 ## 2026-10-20 發布狀態補記（aeaecef3）
 
 - 基底：`aeaecef388eaa2e90763451ebdd68793050e88bc`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。
