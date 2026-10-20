@@ -4,69 +4,106 @@
   ],
   "cases": [
     {
-      "id": "推播送達待送匣",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "全部通道失敗時保留待送並重試、記錄失敗原因（AL-01）",
+      "id": "持倉風險面板已載價口徑",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "風險面板與持倉清單共用彙總（FE-03）",
       "targets": [
-        "tests.test_alert_delivery_outbox",
-        "tests.test_警報日線來源",
-        "tests.test_完整審查警報權限",
-        "tests.test_stock_signals",
-        "tests.test_watch_breakout_day_volume",
-        "tests.test_secret_migration",
-        "tests.test_daemon_lock",
-        "tests.test_no_new_silent_exceptions",
-        "tests.test_Pulse讀寫分離",
-        "tests.test_signal_narrative"
+        "tests/portfolio_risk_known_cost_selftest.js"
       ],
       "changes": [
-        "server/alert_daemon.py",
-        "server/watch_daemon.py",
-        "server/signal_digest.py",
-        "tests/test_alert_delivery_outbox.py",
-        "tests/test_警報日線來源.py"
-      ],
-      "inputs": [
-        "server/alert_daemon.py",
-        "server/atomic_store.py",
-        "server/log_once.py",
-        "server/signal_digest.py",
-        "server/stock_signals_routes.py",
-        "server/watch_daemon.py",
-        "tests/silent_except_baseline.json",
-        "tests/test_Pulse讀寫分離.py",
-        "tests/test_alert_delivery_outbox.py",
-        "tests/test_daemon_lock.py",
-        "tests/test_no_new_silent_exceptions.py",
-        "tests/test_secret_migration.py",
-        "tests/test_signal_narrative.py",
-        "tests/test_stock_signals.py",
-        "tests/test_watch_breakout_day_volume.py",
-        "tests/test_完整審查警報權限.py",
-        "tests/test_警報日線來源.py"
-      ]
-    },
-    {
-      "id": "分享封存排除待送匣",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "待送匣是執行期資料，不進分享封存",
-      "targets": [
-        "tests.test_dist_scrub"
-      ],
-      "changes": [
-        "scripts/build_dist.py",
-        ".gitignore"
+        "src/core/pro_v2.js",
+        "src/core/position_v2.js",
+        "tests/portfolio_risk_known_cost_selftest.js"
       ],
       "inputs": [
         ".gitignore",
-        "scripts/build_dist.py",
-        "tests/test_dist_scrub.py"
+        "src/core/colors_v3.js",
+        "src/core/position_v2.js",
+        "src/core/pro_v2.js",
+        "tests/portfolio_risk_known_cost_selftest.js"
+      ]
+    },
+    {
+      "id": "持倉清單已載價口徑",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "#229 的持倉清單行為不退化",
+      "targets": [
+        "tests/position_total_known_cost_selftest.js"
+      ],
+      "changes": [
+        "src/core/position_v2.js"
+      ],
+      "inputs": [
+        ".gitignore",
+        "src/core/position_v2.js",
+        "tests/position_total_known_cost_selftest.js"
+      ]
+    },
+    {
+      "id": "持倉共用者_即時報價",
+      "kind": "node",
+      "timeoutSeconds": 120,
+      "reason": "持倉現價優先順序與合計市值不退化",
+      "targets": [
+        "tests/台股即時報價_selftest.js"
+      ],
+      "changes": [
+        "src/core/position_v2.js",
+        "src/core/pro_v2.js",
+        "tests/台股即時報價_selftest.js"
+      ],
+      "inputs": [
+        ".gitignore",
+        "src/core/market_data_v5.js",
+        "src/core/position_v2.js",
+        "src/core/pro_v2.js",
+        "src/core/wl_live_v3.js",
+        "tests/台股即時報價_selftest.js"
+      ]
+    },
+    {
+      "id": "持倉共用者_shell",
+      "kind": "node",
+      "timeoutSeconds": 120,
+      "reason": "殼層與持倉頁不退化",
+      "targets": [
+        "tests/shell_v5_selftest.js"
+      ],
+      "changes": [
+        "src/core/pro_v2.js"
+      ],
+      "inputs": [
+        ".gitignore",
+        "src/core/pro_v2.js",
+        "tests/shell_v5_selftest.js"
+      ]
+    },
+    {
+      "id": "追蹤中的前端產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 120,
+      "reason": "src 變更後重建產物",
+      "targets": [
+        "tests.test_bundle_fresh"
+      ],
+      "changes": [
+        "src/core/pro_v2.js",
+        "src/core/position_v2.js",
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        ".gitignore",
+        "build_v2.py",
+        "src/core/position_v2.js",
+        "src/core/pro_v2.js",
+        "stock_terminal_v2.html",
+        "tests/test_bundle_fresh.py"
       ]
     }
   ],
-  "baseCommit": "bde4462e89da54e6aeff11584f084a30c0500d84",
+  "baseCommit": "d1ec70c4e79f32788bd72344b1588542dcb138d5",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
