@@ -25,6 +25,29 @@
 
 ---
 
+## 2026-10-20 個股融資融券增減改以餘額差計算，盤後融資異常門檻改為 500 張（CM-04）
+
+- 基底：`4457d52597ef4ebcf5d4ef282104696c0df57897`（origin/main）；分支 `claude/margin-change-balance-delta`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查補齊 CM-04，主控以 TWSE 2026-10-16 MI_MARGN 真實資料實證）：
+  - `chip_api` 的 `marginChange` 用「融資買進−賣出」，漏了現金償還；
+  - `shortChange` 用「融券買進−賣出」，正負號相反（融券賣出是新增空單），也漏了現券償還；
+  - `postmarket_report` 的 `MARGIN_CHANGE_SIGNIFICANT = 500.0` 與單位為股的 `marginChange` 比較，等於 0.5 張就算異常，標籤印出股數而沒有單位。
+  - 實測 2026-10-16 全市場 1,301 檔：舊門檻會讓 1,045 檔標「融資異常」，以真實增減與 500 張計算為 77 檔；另有 11 檔「買進−賣出」與真實增減方向相反。
+- 修正後行為（Sam 2026-10-20「CM-04 照建議修（門檻 500 張）」）：
+  - 增減一律為「今日餘額−前日餘額」，乘 1000 與餘額同單位（股）；前日餘額缺值時回 None，不退回買進−賣出、也不補 0；
+  - 融資異常門檻改為 500 張（500,000 股），標籤顯示「融資餘額增加／減少 N 張」；
+  - 快取只在記憶體（`_SNAP`），沒有需要修正的已存歷史。
+- 契約變更與測試：
+  - `tests/test_chip_api.py` 的 `snap_margn` 斷言改為餘額差：融資 −292 張（舊式 −251），融券 −5 張（舊式 +5）；
+  - 新增 `tests/test_margin_change_balance_delta.py`（以 2026-10-16 實際兩列資料核對融資含現金償還、融券正負號、前日餘額缺值回 None、門檻 500 張與標籤單位），在舊程式上 3 案例失敗。
+- 驗證：
+  - 新案例與 `tests.test_postmarket_report`、`test_postmarket_http`、`test_decision_context`、`test_chip_official_date_safety`、`test_三合一選股`、`test_三項限制解方`、`test_個股研究資料更新`、`test_全檢資料邊界`、`test_no_new_silent_exceptions` 共 125 案例通過（含敘事數字紅線案例）；
+  - `tests/test_chip_api.py`（裸函式，unittest 不收集）以 pytest 6 案例通過。
+- 影響：盤後報告的融資異常由「幾乎每檔」降為真正有 500 張以上變化的個股；圖表 `chip_v3.js` 只用餘額，不受影響。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-20 WaveDeck 部署狀態補記（#237、#238）
 
 - 基底：`474c509270ca6f45f2299da0f9466fa586dd6b87`（main）。只補記狀態，不改程式；本段補充下方 WD-04、WD-05、WD-06 兩段的「未合併、未部署」。
