@@ -384,12 +384,13 @@ class WaveDeckSmoke(unittest.TestCase):
         self.assertFalse(g["allow"])
         self.assertTrue(any("信心度" in r for r in g["reasons"]))
 
-    def test_panic_flatten_writes_zero_target(self):
+    def test_panic_flatten_paper_does_not_touch_master_files(self):
+        # 2026-10-20 Sam 核准的契約變更（審查 WD-05）：舊版 paper 急停也寫下單大師的目標與委託檔。
         from server.broker import panic_flatten, write_invalidation_txt
         from server import broker as broker_mod
 
         with tempfile.TemporaryDirectory() as td:
-            with mock.patch.object(broker_mod, "_txt_dir", return_value=Path(td)):
+            with mock.patch.object(broker_mod, "_txt_dir", return_value=Path(td)),                     mock.patch.object(broker_mod, "get_broker", return_value=broker_mod.PaperBroker()):
                 st = {
                     "symbol": "TXF",
                     "exec": {"price": 45020, "lots": 2},
@@ -397,8 +398,10 @@ class WaveDeckSmoke(unittest.TestCase):
                 }
                 out = panic_flatten(st)
                 self.assertEqual((out.get("positions") or {}).get("txt_target"), 0)
-                self.assertTrue((Path(td) / "target_position.txt").is_file())
-                self.assertIn("EXIT", (Path(td) / "order_signal.txt").read_text(encoding="utf-8"))
+                self.assertEqual((out.get("positions") or {}).get("account"), 0)
+                self.assertFalse((Path(td) / "target_position.txt").exists())
+                self.assertFalse((Path(td) / "order_signal.txt").exists())
+                self.assertFalse(broker_mod.writes_master_files())
                 write_invalidation_txt(45019, "below", "TXF")
                 self.assertIn("45019", (Path(td) / "invalidation.txt").read_text(encoding="utf-8"))
 

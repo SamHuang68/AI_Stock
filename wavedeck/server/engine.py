@@ -457,9 +457,8 @@ def _finish_decision(st, decision, err, preferred, event, source, body):
     # Soft-sync invalidation → TXT side file for 下單大師
     try:
         inv = (snap.get("ai") or {}).get("invalidation") or {}
-        if inv.get("price") is not None:
-            from .broker import write_invalidation_txt
-
+        from .broker import write_invalidation_txt, writes_master_files
+        if inv.get("price") is not None and writes_master_files():
             write_invalidation_txt(
                 float(inv["price"]),
                 str(inv.get("side") or "below"),

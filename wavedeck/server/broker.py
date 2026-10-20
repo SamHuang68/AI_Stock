@@ -109,9 +109,7 @@ def write_invalidation_txt(price: float, side: str = "below", symbol: str = "TXF
 
 
 def panic_flatten(state: dict[str, Any]) -> dict[str, Any]:
-    """Kill-side flatten: target 0 + EXIT signal for 下單大師／紙上帳戶。"""
-    symbol = str(state.get("symbol") or "TXF")
-    price = float((state.get("exec") or {}).get("price") or 0)
+    """Kill-side flatten：txt_master 寫目標 0 與 EXIT 委託；paper 只改紙上部位。"""
     broker = get_broker()
     decision = {
         "action": "EXIT",
@@ -120,9 +118,7 @@ def panic_flatten(state: dict[str, Any]) -> dict[str, Any]:
         "process": {"gate": "PANIC", "gate_reasons": ["panic_flatten"]},
     }
     applied = broker.apply_intent(state, decision, 0)
-    if broker.name == "paper":
-        write_txt_target(0, symbol)
-        write_order_signal("EXIT", 0, price, symbol)
+    # paper 只改紙上部位，不寫下單大師的目標與委託檔（審查 WD-05）；txt_master 由 apply_intent 自行寫入。
     pos = dict(applied.get("positions") or state.get("positions") or {})
     pos["ai_suggested"] = 0
     pos["txt_target"] = 0
@@ -140,6 +136,11 @@ def panic_flatten(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def writes_master_files() -> bool:
+    """只有 txt_master 券商可寫下單大師的文字檔；paper 必須與外部下單隔離（審查 WD-05）。"""
+    return get_broker().name == "txt_master"
+
+
 def now_line() -> str:
     from .state import now_iso
     return now_iso()
@@ -149,11 +150,17 @@ def execution_pending(execution: dict[str, Any]) -> bool:
     return bool(execution.get("order_id") and not execution.get("position_confirmed") and execution.get("status") != "rejected")
 
 
-def _target(action: str, lots: int) -> int | None:
+def _target(action: str, lots: int, current: int | None = None, requested: int | None = None) -> int | None:
     if action == "ENTER_LONG":
         return max(1, int(lots))
     if action == "ENTER_SHORT":
         return -max(1, int(lots))
+    if action == "REDUCE" and current:
+        # 減碼只降低曝險、不翻向：策略指定口數就減該口數，否則保留一半（向下取整，1 口減碼即平倉；審查 WD-06）。
+        size = abs(int(current))
+        cut = int(requested) if requested else size - size // 2
+        return (1 if current > 0 else -1) * max(0, size - cut)
+    # 部位未知或為 0 時，減碼沿用平倉目標（與舊行為相同）。
     return 0 if action in ("REDUCE", "EXIT") else None
 
 
@@ -178,7 +185,8 @@ class PaperBroker:
                 "account": {"broker_api": "paper", "position_sync": "simulated"}}
 
     def apply_intent(self, state, decision, lots):
-        target = _target(decision.get("action"), lots)
+        current = (state.get("positions") or {}).get("account")
+        target = _target(decision.get("action"), lots, current, decision.get("requested_lots"))
         if target is None:
             return self.sync_positions(state)
         pos = dict(state.get("positions") or {})
@@ -296,12 +304,12 @@ class TxtMasterBroker:
                         "order_action": reason, "lights": {"broker_api": "warn", "position_sync": "warn"},
                         "account": {"broker_api": "txt_master", "position_sync": "unknown"}}
         result = self.sync_positions(state, observed=observed)
-        target = _target(decision.get("action"), lots)
+        current = result["positions"].get("account")
+        target = _target(decision.get("action"), lots, current, decision.get("requested_lots"))
         if target is None:
             result["order_action"] = decision.get("action_label") or "續抱"
             return result
         prior = result["execution"]
-        current = result["positions"].get("account")
         signal = decision.get("signal_id")
         if prior.get("tracking_invalid"):
             result["order_action"] = "委託追蹤損壞，停止送單"
@@ -316,7 +324,7 @@ class TxtMasterBroker:
         if execution_pending(prior) and target != 0:
             result["order_action"] = "先平倉確認，再以新訊號進場"
             target = 0
-        requested_target = _target(decision.get("action"), lots)
+        requested_target = _target(decision.get("action"), lots, current, decision.get("requested_lots"))
         if current is not None and current * target < 0:
             target = 0
         if target == 0 and prior.get("target") == 0 and execution_pending(prior):

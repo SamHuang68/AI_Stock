@@ -46,6 +46,15 @@ class 成交確認測試(unittest.TestCase):
         data.update(status=status, updated_at=datetime.now(timezone.utc).isoformat())
         self.write("成交回報.json", json.dumps(data))
 
+    def test_減碼依現有部位送出部分目標而非全平(self):
+        # 審查 WD-06：舊版減碼一律送目標 0，等同全平。
+        self.write("account_position.txt", "TXF 2")
+        self.state["positions"].update(account=2, strategy=2, txt_target=2)
+        result = self.bridge.apply_intent(self.state, {"action": "REDUCE", "signal_id": "減碼一"}, 2)
+        self.assertEqual(result["execution"]["target"], 1)
+        self.assertEqual((self.path / "target_position.txt").read_text(), "TXF 1\n")
+        self.assertIn("REDUCE lots=1", (self.path / "order_signal.txt").read_text())
+
     def test_送出不等於成交且不覆寫外部帳戶(self):
         result = self.submit()
         self.assertEqual(result["execution"]["status"], "sent")
