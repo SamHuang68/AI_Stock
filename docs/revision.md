@@ -1,3 +1,27 @@
+## 2026-10-20 WaveDeck 部署狀態補記（#237、#238）
+
+- 基底：`474c509270ca6f45f2299da0f9466fa586dd6b87`（main）。只補記狀態，不改程式；本段補充下方 WD-04、WD-05、WD-06 兩段的「未合併、未部署」。
+
+| PR | 內容 | 實作 SHA（合併前分支頭） | 合併 SHA | WaveDeck 部署（本機時間） |
+| --- | --- | --- | --- | --- |
+| #237 | WD-04 回撤鎖不以示範參考帳戶觸發 | `3e57fab04ac785aa9ac5fa8e11196e0cb1eace3f` | `f52b8c3ebe9b25a2fa266f225b2c5d0ed60a455c` | 2026-10-20 08:35 |
+| #238 | WD-05 紙上不寫下單大師檔、WD-06 減碼不等於全平 | `b1b4f884908e7cd5f349569cae772d43efcd9ef4` | `474c509270ca6f45f2299da0f9466fa586dd6b87` | 2026-10-20 08:43 |
+
+- 部署方式（兩次相同）：
+  1. 核對健康端點 PID、baseDir 與完整命令列後停止 WaveDeck；
+  2. 停止後備份 `wavedeck/data`；
+  3. 主工作樹 `git pull --ff-only`，根目錄 `data/` 既有修改未動；
+  4. 逐檔核對 Git blob 後重建 `wavedeck/data/程式版本.json`；
+  5. 以 `START_WAVEDECK.cmd --no-browser` 重啟。
+- 實測（目前 PID 68736）：`runtimeCommit` 為 `474c509…`，`releaseVerified` 為 true；Halted、paper、急停維持、持倉 0；`daily_dd_status` 為 `unknown_reference`，風控燈維持 warn。
+  - #237 部署後：單日回撤格實機顯示「未知（參考帳戶）/ 5%」，08:30 之後沒有 `daily_dd_lock` 或 `panic_flatten`。
+  - #238 部署後：`wavedeck/data/master/` 三個檔案在重啟前後大小與修改時間完全相同。
+- 未在實機驗證：WD-06 的減碼行為。WaveDeck 處於急停且無部位，沒有可減碼的部位；只有自動化案例涵蓋。
+- 本機 ST 與正式後端不受影響（兩者沒有 WaveDeck 程式），仍為 `aeaecef3`。
+- 未決：WD-07——WaveDeck 沒有真實權益來源，每日回撤上限在任何模式都顯示未知、不生效；待 Sam 決定設計。
+
+---
+
 ## 2026-10-20 WaveDeck 紙上模式不寫下單大師檔、減碼不再等於全平（WD-05、WD-06）
 
 - 基底：`f52b8c3ebe9b25a2fa266f225b2c5d0ed60a455c`（origin/main）；分支 `claude/wd-paper-isolation-reduce`。實作與合併 SHA 待 PR 合併後補記。
