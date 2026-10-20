@@ -27,16 +27,18 @@ vm.runInContext(fs.readFileSync(path.join(root, 'src/core/wl_live_v3.js'), 'utf8
   assert.equal(S.positions['2330'].quoteTimestampMs, 1789607970000);
 
   // 執行正式投資組合計算，證明選中個股不再被舊 K 線收盤覆寫。
+  // 正式頁面 position_v2.js 先於 pro_v2.js 載入；兩者共用 positionTotals（審查 FE-03），故先載入共用彙總。
+  const positionsSource = fs.readFileSync(path.join(root, 'src/core/position_v2.js'), 'utf8');
+  const sharedStart = positionsSource.indexOf('function positionRefPrice(');
+  const listStart = positionsSource.indexOf('function renderPositionList()');
+  const listEnd = positionsSource.indexOf('\nfunction ', listStart + 1);
+  vm.runInContext(positionsSource.slice(sharedStart, listEnd), context);
+
   const source = fs.readFileSync(path.join(root, 'src/core/pro_v2.js'), 'utf8');
   const start = source.indexOf('function computePortfolioMetrics()');
   const next = source.indexOf('\nfunction ', start + 1);
   vm.runInContext(source.slice(start, next), context);
   assert.equal(context.computePortfolioMetrics().items[0].ref, 2430);
-
-  const positionsSource = fs.readFileSync(path.join(root, 'src/core/position_v2.js'), 'utf8');
-  const listStart = positionsSource.indexOf('function renderPositionList()');
-  const listEnd = positionsSource.indexOf('\nfunction ', listStart + 1);
-  vm.runInContext(positionsSource.slice(listStart, listEnd), context);
   assert(context.renderPositionList().includes('2,430,000'), '持倉合計市值須使用最新成交');
   assert(!context.renderPositionList().includes('2,380,000'), '持倉合計不得使用舊 K 線收盤');
 

@@ -550,42 +550,41 @@ document.addEventListener('click', ev => {
 // 4 + 5. PORTFOLIO RISK PANEL & HEATMAP (extends POS tab)
 // ============================================================
 function computePortfolioMetrics() {
-  const positions = S.positions || {};
-  const codes = Object.keys(positions);
+  // 與持倉清單共用 positionTotals：未載價部位不再以成本當市值、損益 0（審查 FE-03）。
+  const t = positionTotals();
+  const codes = t.codes;
   if (codes.length === 0) return null;
-  let totalCost = 0, totalValue = 0, totalPnl = 0;
-  const items = [];
-  for (const code of codes) {
-    const p = positions[code];
-    const ref = p.quoteTimestampMs ? p.lastPrice : code === S.sym?.toUpperCase()
-      ? (S.data?.candles?.[S.data.candles.length-1]?.close ?? p.lastPrice)
-      : p.lastPrice;
-    const cost = p.entry * p.shares;
-    const val  = ref != null ? ref * p.shares : cost;
-    const pnl  = ref != null ? (ref - p.entry) * p.shares : 0;
-    const pnlPct = ref != null ? ((ref - p.entry) / p.entry * 100) : 0;
-    const activeCandles = code === S.sym?.toUpperCase() ? (S.data?.candles || []) : [];
+  const items = t.items.map(({ code, p, ref, cost, val, pnl, pnlPct, known }) => {
+    const sym = S.sym == null ? '' : String(S.sym);
+    const activeCandles = code === sym || code === sym.toUpperCase() ? (S.data?.candles || []) : [];
     const activePrev = activeCandles.length >= 2 ? activeCandles[activeCandles.length - 2]?.close : null;
     const prevClose = p.prevClose ?? activePrev;
     const dayChangePct = p.quoteStale ? null : p.dayChangePct != null ? Number(p.dayChangePct) :
       (ref != null && prevClose != null && prevClose > 0 ? (ref - prevClose) / prevClose * 100 : null);
-    totalCost += cost; totalValue += val; totalPnl += pnl;
-    items.push({code, cost, val, pnl, pnlPct, dayChangePct, ref, shares: p.shares});
-  }
-  // Sort by market value desc
-  items.sort((a, b) => b.val - a.val);
-  // Concentration: top 1, top 3, HHI
-  const wts = items.map(x => x.val / totalValue);
-  const top1 = wts[0] * 100;
-  const top3 = wts.slice(0, 3).reduce((s, w) => s + w, 0) * 100;
-  const hhi = wts.reduce((s, w) => s + w * w, 0);   // 0~1, higher = more concentrated
+    return {code, cost, val, pnl, pnlPct, dayChangePct, ref, shares: p.shares, known};
+  });
+  // Sort by market value desc；未載價部位排在最後
+  items.sort((a, b) => (b.val ?? -Infinity) - (a.val ?? -Infinity));
+  // Concentration: top 1, top 3, HHI —— 只有全部部位都有市值時才計算，否則標示未計算
+  const concentrationKnown = t.unknownCount === 0 && t.totalValue > 0;
+  const wts = concentrationKnown ? items.map(x => x.val / t.totalValue) : [];
+  const top1 = concentrationKnown ? wts[0] * 100 : null;
+  const top3 = concentrationKnown ? wts.slice(0, 3).reduce((s, w) => s + w, 0) * 100 : null;
+  const hhi = concentrationKnown ? wts.reduce((s, w) => s + w * w, 0) : null;   // 0~1, higher = more concentrated
   // Risk warnings
   const warnings = [];
-  if (top1 > 40) warnings.push({lvl:'red',  msg:`單股 ${items[0].code} 佔 ${top1.toFixed(0)}%（建議 ≤ 30%）`});
-  else if (top1 > 30) warnings.push({lvl:'yellow', msg:`單股 ${items[0].code} 佔 ${top1.toFixed(0)}%（接近上限）`});
+  if (t.unknownCount) warnings.push({lvl:'yellow', msg:`${t.unknownCount} 檔未載價：市值與損益只計已載價部位，集中度未計算`});
+  if (top1 != null && top1 > 40) warnings.push({lvl:'red',  msg:`單股 ${items[0].code} 佔 ${top1.toFixed(0)}%（建議 ≤ 30%）`});
+  else if (top1 != null && top1 > 30) warnings.push({lvl:'yellow', msg:`單股 ${items[0].code} 佔 ${top1.toFixed(0)}%（接近上限）`});
   if (codes.length < 3) warnings.push({lvl:'yellow', msg:`持股集中度高（僅 ${codes.length} 檔），建議至少 3~5 檔分散`});
-  if (hhi > 0.5) warnings.push({lvl:'red', msg:`HHI 集中度 ${hhi.toFixed(2)}（> 0.5 風險高）`});
-  return {totalCost, totalValue, totalPnl, totalPnlPct: totalCost > 0 ? totalPnl/totalCost*100 : 0, items, top1, top3, hhi, warnings};
+  if (hhi != null && hhi > 0.5) warnings.push({lvl:'red', msg:`HHI 集中度 ${hhi.toFixed(2)}（> 0.5 風險高）`});
+  return {totalCost: t.totalCost, knownCost: t.knownCost, totalValue: t.totalValue, totalPnl: t.totalPnl,
+    totalPnlPct: t.totalPnlPct, knownCount: t.knownCount, unknownCount: t.unknownCount,
+    items, top1, top3, hhi, warnings};
+}
+
+function _pfUnknownNote(m) {
+  return m.knownCount && m.unknownCount ? `（${m.unknownCount} 檔未載價）` : '';
 }
 
 function renderPortfolioRisk() {
@@ -594,11 +593,13 @@ function renderPortfolioRisk() {
   const pnlCol = window.Colors ? Colors.gain(m.totalPnl) : (m.totalPnl >= 0 ? 'var(--green)' : 'var(--red)');
   let h = '<div class="stat-sect">投資組合風險</div>';
   h += `<div class="stat-row"><span class="stat-k">總成本</span><span class="stat-v">${Math.round(m.totalCost).toLocaleString()}</span></div>`;
-  h += `<div class="stat-row"><span class="stat-k">總市值</span><span class="stat-v">${Math.round(m.totalValue).toLocaleString()}</span></div>`;
-  h += `<div class="stat-row"><span class="stat-k">合計損益</span><span class="stat-v" style="color:${pnlCol}">${m.totalPnl>=0?'+':''}${m.totalPnlPct.toFixed(2)}% (${m.totalPnl>=0?'+':''}${Math.round(m.totalPnl).toLocaleString()})</span></div>`;
-  h += `<div class="stat-row"><span class="stat-k">最大單股佔比</span><span class="stat-v">${m.top1.toFixed(1)}%</span></div>`;
-  h += `<div class="stat-row"><span class="stat-k">前 3 檔佔比</span><span class="stat-v">${m.top3.toFixed(1)}%</span></div>`;
-  h += `<div class="stat-row"><span class="stat-k">HHI 集中度</span><span class="stat-v">${m.hhi.toFixed(3)}</span></div>`;
+  const note = _pfUnknownNote(m);
+  const partial = '--（部分未載價）';
+  h += `<div class="stat-row"><span class="stat-k">總市值</span><span class="stat-v">${m.knownCount ? Math.round(m.totalValue).toLocaleString() + note : '--'}</span></div>`;
+  h += `<div class="stat-row"><span class="stat-k">合計損益</span><span class="stat-v" style="color:${pnlCol}">${m.knownCount ? `${m.totalPnl>=0?'+':''}${m.totalPnlPct.toFixed(2)}% (${m.totalPnl>=0?'+':''}${Math.round(m.totalPnl).toLocaleString()})${note}` : '價格未載入'}</span></div>`;
+  h += `<div class="stat-row"><span class="stat-k">最大單股佔比</span><span class="stat-v">${m.top1 == null ? partial : m.top1.toFixed(1) + '%'}</span></div>`;
+  h += `<div class="stat-row"><span class="stat-k">前 3 檔佔比</span><span class="stat-v">${m.top3 == null ? partial : m.top3.toFixed(1) + '%'}</span></div>`;
+  h += `<div class="stat-row"><span class="stat-k">HHI 集中度</span><span class="stat-v">${m.hhi == null ? partial : m.hhi.toFixed(3)}</span></div>`;
   if (m.warnings.length) {
     h += '<div style="padding:6px 12px 0">';
     for (const w of m.warnings) {
@@ -619,6 +620,8 @@ function renderPortfolioRisk() {
   const hueStep = 360 / Math.max(5, m.items.length);
   
   m.items.forEach((item, idx) => {
+    // 圓餅只畫有市值的部位；未載價部位仍列在下方清單並標示
+    if (!item.known || !(m.totalValue > 0)) { colors.push('var(--tlo)'); return; }
     const wt = item.val / m.totalValue;
     const dashArray = `${(wt * C).toFixed(3)} ${C}`;
     const dashOffset = `-${(accumPercent * C).toFixed(3)}`;
@@ -653,8 +656,8 @@ function renderPortfolioRisk() {
       </svg>
       <div id="pf-donut-center" style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; text-align:center;">
         <span id="pf-donut-center-lbl" style="font-size:9px; color:var(--tlo); text-transform:uppercase; letter-spacing:0.5px;">總市值</span>
-        <span id="pf-donut-center-val" style="font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:var(--text); margin-top:2px;">${Math.round(m.totalValue).toLocaleString()}</span>
-        <span id="pf-donut-center-sub" style="font-size:8px; color:var(--tlo); margin-top:1px;">${m.items.length} 檔持股</span>
+        <span id="pf-donut-center-val" style="font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:var(--text); margin-top:2px;">${m.knownCount ? Math.round(m.totalValue).toLocaleString() : '--'}</span>
+        <span id="pf-donut-center-sub" style="font-size:8px; color:var(--tlo); margin-top:1px;">${m.items.length} 檔持股${m.unknownCount ? `（${m.unknownCount} 檔未載價）` : ''}</span>
       </div>
     </div>
   </div>
@@ -664,7 +667,7 @@ function renderPortfolioRisk() {
   h += '<div class="stat-sect">持股部位比例</div>';
   h += '<div style="padding:6px 12px; display:flex; flex-direction:column; gap:6px;">';
   m.items.forEach((item, idx) => {
-    const wt = item.val / m.totalValue;
+    const wt = item.known && m.totalValue > 0 ? item.val / m.totalValue : null;
     const color = colors[idx];
     const pnlCol = window.Colors ? Colors.dir(item.code, item.pnlPct) : (item.pnlPct >= 0 ? 'var(--red)' : 'var(--green)');
     const pnlBg = item.pnlPct >= 0 ? 'rgba(248,113,113,0.1)' : 'rgba(74,222,128,0.1)';
@@ -680,16 +683,16 @@ function renderPortfolioRisk() {
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
           ${item.dayChangePct == null ? '' : `<span title="相較上一交易日收盤" style="font-size:8px;color:${dayCol}">今日 ${item.dayChangePct >= 0 ? '+' : ''}${item.dayChangePct.toFixed(1)}%</span>`}
-          <span title="相較持倉成本" style="font-size:9.5px; font-weight:bold; padding:1px 4px; border-radius:3px; color:${pnlCol}; background:${pnlBg}">持有 ${item.pnlPct >= 0 ? '+' : ''}${item.pnlPct.toFixed(1)}%</span>
-          <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text); opacity:0.8;">${(wt*100).toFixed(1)}%</span>
+          <span title="相較持倉成本" style="font-size:9.5px; font-weight:bold; padding:1px 4px; border-radius:3px; color:${pnlCol}; background:${pnlBg}">${item.pnlPct == null ? '持有 --' : `持有 ${item.pnlPct >= 0 ? '+' : ''}${item.pnlPct.toFixed(1)}%`}</span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text); opacity:0.8;">${wt == null ? '未載價' : (wt*100).toFixed(1) + '%'}</span>
         </div>
       </div>
       <div style="display:flex; justify-content:space-between; align-items:center; font-size:9px; color:var(--tlo);">
-        <span>市值 $${Math.round(item.val).toLocaleString()}</span>
+        <span>${item.val == null ? `市值 --（成本 $${Math.round(item.cost).toLocaleString()}）` : `市值 $${Math.round(item.val).toLocaleString()}`}</span>
         <span>${item.shares.toLocaleString()} 股</span>
       </div>
       <div style="width:100%; height:3px; background:rgba(255,255,255,0.06); border-radius:1.5px; overflow:hidden; margin-top:2px;">
-        <div style="width:${(wt*100).toFixed(1)}%; height:100%; background:${barCol}; border-radius:1.5px;"></div>
+        <div style="width:${wt == null ? 0 : (wt*100).toFixed(1)}%; height:100%; background:${barCol}; border-radius:1.5px;"></div>
       </div>
     </div>
     `;
@@ -1028,8 +1031,8 @@ document.addEventListener('mouseout', ev => {
       lbl.textContent = '總市值';
       lbl.style.color = 'var(--tlo)';
       lbl.style.fontWeight = 'normal';
-      val.textContent = Math.round(metrics.totalValue).toLocaleString();
-      sub.textContent = `${metrics.items.length} 檔持股`;
+      val.textContent = metrics.knownCount ? Math.round(metrics.totalValue).toLocaleString() : '--';
+      sub.textContent = `${metrics.items.length} 檔持股${metrics.unknownCount ? `（${metrics.unknownCount} 檔未載價）` : ''}`;
     }
   }
 });

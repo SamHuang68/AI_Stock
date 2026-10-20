@@ -292,29 +292,49 @@ function generateSignals() {
   return signals;
 }
 
+// ── 持倉彙總：持倉清單與 pro_v2 風險面板共用同一份口徑（審查 PB-07、FE-03） ──
+function positionRefPrice(code, p) {
+  const sym = S.sym == null ? '' : String(S.sym);
+  const active = code === sym || code === sym.toUpperCase();
+  return p.quoteTimestampMs ? p.lastPrice : active
+    ? (S.data?.candles?.[S.data.candles.length - 1]?.close ?? p.lastPrice)
+    : p.lastPrice;
+}
+
+// 損益%的分子分母用同一組已載價部位；未載價部位只計入總成本，市值與損益記為 null 並明示檔數。
+function positionTotals() {
+  const codes = Object.keys(S.positions || {});
+  let totalCost = 0, knownCost = 0, totalValue = 0, totalPnl = 0, knownCount = 0;
+  const items = [];
+  for (const code of codes) {
+    const p = S.positions[code];
+    const ref = positionRefPrice(code, p);
+    const cost = p.entry * p.shares;
+    const known = ref != null;
+    totalCost += cost;
+    if (known) {
+      knownCost  += cost;
+      totalValue += ref * p.shares;
+      totalPnl   += (ref - p.entry) * p.shares;
+      knownCount++;
+    }
+    items.push({ code, p, ref, cost, known,
+      val: known ? ref * p.shares : null,
+      pnl: known ? (ref - p.entry) * p.shares : null,
+      pnlPct: known ? (ref - p.entry) / p.entry * 100 : null });
+  }
+  return { codes, items, totalCost, knownCost, totalValue, totalPnl, knownCount,
+    unknownCount: codes.length - knownCount,
+    totalPnlPct: knownCost > 0 ? (totalPnl / knownCost * 100) : 0 };
+}
+
 // ── Render: position list (all held positions, jump on click) ──
 function renderPositionList() {
   const codes = Object.keys(S.positions || {});
   if (codes.length === 0) return '';
 
   // Aggregate portfolio totals
-  // 損益%的分子分母用同一組已載價部位；未載價部位只計入總成本並明示檔數。
-  let totalCost = 0, knownCost = 0, totalValue = 0, totalPnl = 0, knownCount = 0;
-  for (const code of codes) {
-    const p = S.positions[code];
-    const ref = p.quoteTimestampMs ? p.lastPrice : code === S.sym
-      ? (S.data?.candles?.[S.data.candles.length - 1]?.close ?? p.lastPrice)
-      : p.lastPrice;
-    totalCost += p.entry * p.shares;
-    if (ref != null) {
-      knownCost  += p.entry * p.shares;
-      totalValue += ref * p.shares;
-      totalPnl   += (ref - p.entry) * p.shares;
-      knownCount++;
-    }
-  }
-  const totalPnlPct = knownCost > 0 ? (totalPnl / knownCost * 100) : 0;
-  const unknownCount = codes.length - knownCount;
+  const { totalCost, totalValue, totalPnl, knownCount, unknownCount, totalPnlPct } = positionTotals();
   const unknownNote = knownCount && unknownCount ? `（${unknownCount} 檔未載價）` : '';
   const pnlCol = window.Colors ? Colors.gain(totalPnl) : (totalPnl >= 0 ? 'var(--green)' : 'var(--red)');
 

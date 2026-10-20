@@ -1,3 +1,27 @@
+## 2026-10-20 持倉風險面板與持倉清單共用同一份彙總，未載價不以成本當市值（FE-03）
+
+- 基底：`d1ec70c4e79f32788bd72344b1588542dcb138d5`（origin/main）；分支 `claude/portfolio-risk-known-cost`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查補齊 FE-03）：
+  - `src/core/pro_v2.js` 的 `computePortfolioMetrics` 是持倉損益的第二份實作，未載價部位以成本當市值、損益與損益% 記 0；
+  - 風險面板的總市值、合計損益%、最大單股佔比、前 3 檔佔比、HHI 與圓餅都因此失真，且沒有任何標示。例：2330 已載價（+10%）、2317 未載價時，面板顯示 +5.00%。
+  - #229 只修了 `position_v2.js` 的持倉清單，沒有發現這份平行計算，屬 Claude 在 PB-07 修正範圍上的遺漏。
+- 修正後行為（Sam 2026-10-20「FE-03 照建議修」）：
+  - `position_v2.js` 新增 `positionRefPrice`、`positionTotals`，持倉清單與風險面板共用同一份彙總：損益% 的分子分母都只用已載價部位，未載價部位的市值與損益為 null；
+  - 風險面板的總市值與合計損益在有未載價時加「（N 檔未載價）」，全部未載價時顯示 `--`／「價格未載入」；
+  - 集中度（最大單股、前 3 檔、HHI）只在全部部位都有市值時計算，否則顯示「--（部分未載價）」並列一條警示；
+  - 圓餅只畫有市值的部位，未載價部位仍列在清單中，顯示「持有 --」「未載價」「市值 --（成本 $…）」，不刪除任何部位；
+  - 圓餅中心與重設事件顯示「N 檔持股（M 檔未載價）」；
+  - 已重建 `stock_terminal_v2.html`（只有 `?v=` 雜湊變動）。
+- 測試：
+  - 新增 `tests/portfolio_risk_known_cost_selftest.js`（兩檔一缺價時 +10%、總市值只計已載價、集中度未計算、清單標示未載價、無 NaN；全部已載價時集中度照算；全部未載價時顯示 --），在舊程式上失敗；
+  - `tests/台股即時報價_selftest.js` 以名稱切片載入函式，原本先載入 `computePortfolioMetrics`、後載入持倉清單；依正式頁面的載入順序改為先載入 `position_v2.js` 的共用彙總，斷言不變。
+- 驗證：
+  - 新案例與 `position_total_known_cost_selftest.js`、`position_lot_rounding_selftest.js`、`完整審查前端_selftest.js`、`shell_v5_selftest.js`、`台股即時報價_selftest.js`、`review_market_state_selftest.js` 通過；`tests.test_bundle_fresh` 通過。
+  - `pattern_modal_browser.cjs`、`手機行情遮蔽_browser.cjs` 需要 Playwright，只用到 `pro_v2.js` 的對話框，未執行。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-20 推播送達失敗時保留待送並重試，記錄失敗原因（AL-01）
 
 - 基底：`4457d52597ef4ebcf5d4ef282104696c0df57897`（origin/main）；分支 `claude/alert-delivery-outbox`。實作與合併 SHA 待 PR 合併後補記。
