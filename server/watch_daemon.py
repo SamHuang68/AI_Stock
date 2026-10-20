@@ -260,10 +260,11 @@ def check_once():
                 icon = '🎯' if status == 'trigger' else '⚠️'
                 lbl = _STRAT_LBL.get(sig.get('strategy'), sig.get('strategy'))
                 text = f"{icon} {code} — {lbl}：{detail}（現價 {cur_px:.2f}）"
-                if alert_daemon:
-                    alert_daemon.notify(cfg, text, subject=f'WATCH 訊號 {code}')
+                delivery = (alert_daemon.deliver(cfg, text, subject=f'WATCH 訊號 {code}', source='watch', now=now)
+                            if alert_daemon else {'status': 'no_channel', 'id': None})
                 _log(text)
-                _state['fired'].append({'t': now, 'text': text})
+                _state['fired'].append({'t': now, 'text': text, 'delivery': delivery['status'],
+                                        'deliveryId': delivery['id']})
                 _state['fired'] = _state['fired'][-100:]
                 
                 state[key] = {
@@ -296,6 +297,11 @@ def check_once():
 
 def _loop():
     while not _state['stop']:
+        if alert_daemon:
+            try:
+                alert_daemon.retry_outbox()
+            except Exception as e:
+                _log('outbox retry error: ' + str(e))
         try:
             check_once()
         except Exception as e:

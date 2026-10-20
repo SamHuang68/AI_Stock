@@ -166,7 +166,7 @@ class 警報日線來源(unittest.TestCase):
                             {'left': 'rsi14', 'op': 'gt', 'right': '70'}]}
                 with patch.object(alert_daemon, '_fetch_daily_candles', return_value=self.bars), \
                      patch.object(alert_daemon, '_calc_ind', return_value={'close': close, 'rsi14': None}), \
-                     patch.object(alert_daemon, 'notify'):
+                     patch.object(alert_daemon, 'notify', return_value=(True, {})):
                     self.assertEqual(alert_daemon._check_composite(rule, {}), changed)
                 self.assertEqual(rule['_last_fired'], expected)
 

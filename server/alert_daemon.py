@@ -12,6 +12,7 @@
 import os, json, time, threading, urllib.request, urllib.parse, smtplib, ssl
 import copy
 import hashlib
+import uuid
 from email.mime.text import MIMEText
 from datetime import datetime
 
@@ -29,6 +30,14 @@ CONFIG_FILE = os.path.join(_BASE, 'data', 'alert_config.json')
 RULES_FILE = os.path.join(_BASE, 'data', 'alert_rules.json')
 SECRETS_FILE = os.path.join(_BASE, 'data', 'alert_secrets.bin')
 LOG_DIR = os.path.join(_BASE, 'logs', 'alerts')
+# 送達待送匣：全部已設定通道都失敗的推播在此保留並重試（審查 AL-01）。
+OUTBOX_FILE = os.path.join(_BASE, 'data', 'alert_outbox.json')
+OUTBOX_MAX_ATTEMPTS = 5
+OUTBOX_MAX_AGE_SECONDS = 3600
+OUTBOX_RETRY_GAP_SECONDS = 60
+OUTBOX_MAX_ITEMS = 50
+_UNCONFIGURED = 'disabled/unconfigured'
+_outbox_lock = threading.Lock()
 # 本機埠所有權：ST 18432、WaveDeck 18433、Private Web 18434／18435。
 # 通知守護程序只以 18436 作為跨進程單例鎖，不得占用服務埠。
 ALERT_DAEMON_LOCK_PORT = 18436
@@ -50,7 +59,7 @@ _DEFAULT_CONFIG = {
 
 # rule: {id, sym, market, type, price, note, enabled, _last_side}
 #   type: 'cross_up' 過壓力 | 'cross_down' 破支撐
-_state = {'thread': None, 'stop': False, 'last_quotes': {}, 'fired': []}
+_state = {'thread': None, 'stop': False, 'last_quotes': {}, 'fired': [], 'deliveries': []}
 _lock = threading.Lock()
 _config_lock = threading.RLock()
 _rules_lock = threading.RLock()
@@ -321,6 +330,114 @@ def notify(cfg, text, subject='Stock Terminal 警報'):
     return (ok1 or ok2 or ok3), results
 
 
+def _redact(cfg, value):
+    """失敗原因寫入日誌前移除權杖、密碼與 webhook 網址。"""
+    text = str(value)
+    for secret in ((cfg.get('telegram') or {}).get('bot_token'),
+                   (cfg.get('email') or {}).get('app_password'),
+                   (cfg.get('webhook') or {}).get('url')):
+        if secret:
+            text = text.replace(str(secret), '***')
+    return text[:300]
+
+
+def _failures(cfg, results):
+    """已設定且失敗的通道；未設定的通道不算送達失敗。"""
+    return {name: _redact(cfg, detail) for name, detail in (results or {}).items()
+            if detail != 'ok' and _UNCONFIGURED not in str(detail)}
+
+
+def _note_delivery(entry):
+    with _lock:
+        _state['deliveries'].append(entry)
+        _state['deliveries'] = _state['deliveries'][-50:]
+
+
+def _outbox_load():
+    items = load_json(OUTBOX_FILE, default=[], expected_type=list)
+    return [item for item in items if isinstance(item, dict) and item.get('id') and item.get('text')]
+
+
+def deliver(cfg, text, subject='Stock Terminal 警報', *, source='alert', now=None):
+    """送出推播並回傳送達狀態：sent／queued／no_channel。
+
+    舊版各路徑直接呼叫 notify 並忽略結果，全部通道失敗時警報仍記為已觸發、不重送（審查 AL-01）。
+    """
+    now = time.time() if now is None else now
+    ok, results = notify(cfg, text, subject)
+    failed = _failures(cfg, results)
+    delivery_id = uuid.uuid4().hex
+    if failed:
+        _log(f'送出失敗（{source}，第 1 次）：' + '；'.join(f'{k}={v}' for k, v in failed.items()))
+    if ok:
+        status = 'sent'
+    elif not failed:
+        status = 'no_channel'
+    else:
+        status = 'queued'
+        with _outbox_lock:
+            items = _outbox_load()
+            items.append({'id': delivery_id, 'source': source, 'subject': subject, 'text': text,
+                          'createdAt': now, 'attempts': 1, 'nextAt': now + OUTBOX_RETRY_GAP_SECONDS,
+                          'lastError': failed})
+            for item in items[:-OUTBOX_MAX_ITEMS]:
+                _log(f"待送匣已滿，放棄最舊一筆（{item.get('source')}）：{item.get('text')}")
+            atomic_write_json(OUTBOX_FILE, items[-OUTBOX_MAX_ITEMS:], private=True)
+    _note_delivery({'t': now, 'id': delivery_id, 'source': source, 'status': status, 'attempts': 1,
+                    'failed': failed})
+    return {'status': status, 'id': delivery_id}
+
+
+def retry_outbox(cfg=None, now=None):
+    """重送待送匣；本輪只要有一筆仍全部失敗就停止，避免網路中斷時逐筆等候逾時。"""
+    now = time.time() if now is None else now
+    out = {'sent': 0, 'pending': 0, 'dropped': 0}
+    with _outbox_lock:
+        items = _outbox_load()
+        if not items:
+            return out
+        cfg = cfg if cfg is not None else load_config()
+        keep, stalled = [], False
+        for item in items:
+            if now - float(item.get('createdAt') or 0) > OUTBOX_MAX_AGE_SECONDS:
+                _log(f"放棄送出（{item.get('source')}，逾 {OUTBOX_MAX_AGE_SECONDS // 60} 分鐘未送達）：{item['text']}")
+                _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'), 'status': 'failed',
+                                'attempts': item.get('attempts'), 'failed': item.get('lastError') or {}})
+                out['dropped'] += 1
+                continue
+            if stalled or now < float(item.get('nextAt') or 0):
+                keep.append(item)
+                continue
+            ok, results = notify(cfg, item['text'], item.get('subject') or 'Stock Terminal 警報')
+            item['attempts'] = int(item.get('attempts') or 0) + 1
+            failed = _failures(cfg, results)
+            if ok or not failed:
+                _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'),
+                                'status': 'sent' if ok else 'no_channel', 'attempts': item['attempts'],
+                                'failed': failed})
+                out['sent'] += int(ok)
+                continue
+            _log(f"送出失敗（{item.get('source')}，第 {item['attempts']} 次）："
+                 + '；'.join(f'{k}={v}' for k, v in failed.items()))
+            if item['attempts'] >= OUTBOX_MAX_ATTEMPTS:
+                _log(f"放棄送出（{item.get('source')}，已試 {item['attempts']} 次）：{item['text']}")
+                _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'), 'status': 'failed',
+                                'attempts': item['attempts'], 'failed': failed})
+                out['dropped'] += 1
+                continue
+            item.update(nextAt=now + OUTBOX_RETRY_GAP_SECONDS, lastError=failed)
+            keep.append(item)
+            stalled = True
+        atomic_write_json(OUTBOX_FILE, keep, private=True)
+        out['pending'] = len(keep)
+    return out
+
+
+def outbox_pending():
+    with _outbox_lock:
+        return len(_outbox_load())
+
+
 def deliver_signal_events(events):
     """Transport canonical transition events without recomputing their score."""
     rows = [row for row in (events or []) if isinstance(row, dict)]
@@ -464,8 +581,8 @@ def _check_composite(r, cfg):
         r['_last_fired_time'] = now
         combine = (r.get('combine') or 'AND').upper()
         text = f"🎯 {r.get('sym')} 複合警示成立（{combine}）：{detail}　{r.get('note', '')}".strip()
-        notify(cfg, text)
-        _state['fired'].append({'t': now, 'text': text})
+        sent = deliver(cfg, text, source='composite', now=now)
+        _state['fired'].append({'t': now, 'text': text, 'delivery': sent['status'], 'deliveryId': sent['id']})
         _state['fired'] = _state['fired'][-100:]
     return True
 
@@ -533,8 +650,8 @@ def _check_once():
             r['_last_fired_time'] = now
             arrow = '突破↑ 過壓力' if typ == 'cross_up' else '跌破↓ 破支撐'
             text = f"⚠️ {r.get('sym')} {arrow} {target} (現價 {price})  {r.get('note', '')}".strip()
-            notify(cfg, text)
-            _state['fired'].append({'t': now, 'text': text})
+            sent = deliver(cfg, text, source='price', now=now)
+            _state['fired'].append({'t': now, 'text': text, 'delivery': sent['status'], 'deliveryId': sent['id']})
             _state['fired'] = _state['fired'][-100:]
     if changed:
         _merge_rule_state(original_rules, rules)
@@ -542,6 +659,10 @@ def _check_once():
 
 def _loop():
     while not _state['stop']:
+        try:
+            retry_outbox()
+        except Exception as e:
+            _log('outbox retry error: ' + str(e))
         try:
             _check_once()
         except Exception as e:
@@ -582,6 +703,8 @@ def status():
         'email_on': cfg.get('email', {}).get('enabled', False),
         'rules_count': len(load_rules()),
         'recent_fired': _state['fired'][-20:],
+        'recent_deliveries': _state['deliveries'][-20:],
+        'pending_deliveries': outbox_pending(),
         'last_quotes': _state['last_quotes'],
         'running': bool(_state['thread'] and _state['thread'].is_alive()),
         'daily_sources': _state.get('daily_sources', {}),

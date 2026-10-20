@@ -4,23 +4,69 @@
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "推播送達待送匣",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "部署狀態只改文件；分享封存掃描",
+      "reason": "全部通道失敗時保留待送並重試、記錄失敗原因（AL-01）",
+      "targets": [
+        "tests.test_alert_delivery_outbox",
+        "tests.test_警報日線來源",
+        "tests.test_完整審查警報權限",
+        "tests.test_stock_signals",
+        "tests.test_watch_breakout_day_volume",
+        "tests.test_secret_migration",
+        "tests.test_daemon_lock",
+        "tests.test_no_new_silent_exceptions",
+        "tests.test_Pulse讀寫分離",
+        "tests.test_signal_narrative"
+      ],
+      "changes": [
+        "server/alert_daemon.py",
+        "server/watch_daemon.py",
+        "server/signal_digest.py",
+        "tests/test_alert_delivery_outbox.py",
+        "tests/test_警報日線來源.py"
+      ],
+      "inputs": [
+        "server/alert_daemon.py",
+        "server/atomic_store.py",
+        "server/log_once.py",
+        "server/signal_digest.py",
+        "server/stock_signals_routes.py",
+        "server/watch_daemon.py",
+        "tests/silent_except_baseline.json",
+        "tests/test_Pulse讀寫分離.py",
+        "tests/test_alert_delivery_outbox.py",
+        "tests/test_daemon_lock.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/test_secret_migration.py",
+        "tests/test_signal_narrative.py",
+        "tests/test_stock_signals.py",
+        "tests/test_watch_breakout_day_volume.py",
+        "tests/test_完整審查警報權限.py",
+        "tests/test_警報日線來源.py"
+      ]
+    },
+    {
+      "id": "分享封存排除待送匣",
+      "kind": "unittest",
+      "timeoutSeconds": 600,
+      "reason": "待送匣是執行期資料，不進分享封存",
       "targets": [
         "tests.test_dist_scrub"
       ],
       "changes": [
-        "docs/revision.md"
+        "scripts/build_dist.py",
+        ".gitignore"
       ],
       "inputs": [
-        "docs/revision.md",
+        ".gitignore",
+        "scripts/build_dist.py",
         "tests/test_dist_scrub.py"
       ]
     }
   ],
-  "baseCommit": "474c509270ca6f45f2299da0f9466fa586dd6b87",
+  "baseCommit": "4457d52597ef4ebcf5d4ef282104696c0df57897",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

@@ -86,6 +86,8 @@ data/chip_history/
 data/draw_store.json
 data/alert_config.json
 data/alert_rules.json
+data/alert_outbox.json
+data/alert_outbox.json.bak
 data/watch_rules.json
 data/watch_state.json
 data/stock_signal_watchlist.json
