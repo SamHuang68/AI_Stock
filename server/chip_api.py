@@ -271,19 +271,23 @@ def snap_margn(tdate: str) -> Optional[Dict[str, dict]]:
                     mb_lot = _col(fields, row, '融資餘額', '融資今日餘額')
                 if sb_lot is None:
                     sb_lot = _col(fields, row, '融券餘額', '融券今日餘額')
-                m_buy, s_buy = _margn_pair(fields, row, '買進')
-                m_sell, s_sell = _margn_pair(fields, row, '賣出')
+                mp_lot, sp_lot = _margn_pair(fields, row, '前日餘額')
+                if mp_lot is None:
+                    mp_lot = _col(fields, row, '融資前日餘額')
+                if sp_lot is None:
+                    sp_lot = _col(fields, row, '融券前日餘額')
                 # 張 → 股（前端 chip_v3 以 /1000 顯示張）
                 mb = mb_lot * 1000.0 if mb_lot is not None else None
                 sb = sb_lot * 1000.0 if sb_lot is not None else None
                 by[code] = {
                     'marginBalance': mb,
                     'shortBalance':  sb,
-                    # 增減以張計（買進−賣出）；乘 1000 與餘額同單位（股）
-                    'marginChange':  ((m_buy or 0) - (m_sell or 0)) * 1000.0
-                                    if (m_buy is not None or m_sell is not None) else None,
-                    'shortChange':   ((s_buy or 0) - (s_sell or 0)) * 1000.0
-                                    if (s_buy is not None or s_sell is not None) else None,
+                    # 增減＝今日餘額−前日餘額（含現金／現券償還；融券賣出增加、回補減少），乘 1000 與餘額同單位（股）。
+                    # 舊版用「買進−賣出」：融資漏算現金償還、融券正負號相反（審查 CM-04）。
+                    'marginChange':  (mb_lot - mp_lot) * 1000.0
+                                    if (mb_lot is not None and mp_lot is not None) else None,
+                    'shortChange':   (sb_lot - sp_lot) * 1000.0
+                                    if (sb_lot is not None and sp_lot is not None) else None,
                 }
         if not by:
             by = None

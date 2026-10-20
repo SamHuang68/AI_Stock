@@ -121,9 +121,11 @@ def test_snap_margn_parses_lots_to_shares():
         assert '2330' in by
         assert by['2330']['marginBalance'] == 29657.0 * 1000
         assert by['2330']['shortBalance'] == 33.0 * 1000
-        # 融資買進−賣出 = 262−513 = −251 張 → 股
-        assert by['2330']['marginChange'] == -251.0 * 1000
-        assert by['2330']['shortChange'] == (8 - 3) * 1000
+        # 2026-10-20 Sam 核准的契約變更（審查 CM-04）：增減＝今日餘額−前日餘額。
+        # 融資 29,657−29,949 = −292 張（＝買進 262 − 賣出 513 − 現金償還 41）；舊式「買進−賣出」得 −251。
+        assert by['2330']['marginChange'] == -292.0 * 1000
+        # 融券 33−38 = −5 張（回補 8 多於新增 3）；舊式「買進−賣出」得 +5，正負號相反。
+        assert by['2330']['shortChange'] == -5.0 * 1000
     finally:
         ca._fetch_json = old
         ca._SNAP.clear()

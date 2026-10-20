@@ -4,23 +4,48 @@
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "融資融券增減餘額差與異常門檻",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "部署狀態只改文件；分享封存掃描",
+      "reason": "融資含現金償還、融券正負號、盤後異常門檻 500 張（CM-04）",
       "targets": [
-        "tests.test_dist_scrub"
+        "tests.test_margin_change_balance_delta",
+        "tests.test_postmarket_report",
+        "tests.test_postmarket_http",
+        "tests.test_decision_context",
+        "tests.test_chip_official_date_safety",
+        "tests.test_三合一選股",
+        "tests.test_三項限制解方",
+        "tests.test_個股研究資料更新",
+        "tests.test_全檢資料邊界",
+        "tests.test_no_new_silent_exceptions"
       ],
       "changes": [
-        "docs/revision.md"
+        "server/chip_api.py",
+        "server/postmarket_report.py",
+        "tests/test_margin_change_balance_delta.py",
+        "tests/test_chip_api.py"
       ],
       "inputs": [
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "server/chip_api.py",
+        "server/log_once.py",
+        "server/postmarket_report.py",
+        "tests/silent_except_baseline.json",
+        "tests/test_chip_api.py",
+        "tests/test_chip_official_date_safety.py",
+        "tests/test_decision_context.py",
+        "tests/test_margin_change_balance_delta.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/test_postmarket_http.py",
+        "tests/test_postmarket_report.py",
+        "tests/test_三合一選股.py",
+        "tests/test_三項限制解方.py",
+        "tests/test_個股研究資料更新.py",
+        "tests/test_全檢資料邊界.py"
       ]
     }
   ],
-  "baseCommit": "474c509270ca6f45f2299da0f9466fa586dd6b87",
+  "baseCommit": "4457d52597ef4ebcf5d4ef282104696c0df57897",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
