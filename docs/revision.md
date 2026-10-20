@@ -1,3 +1,24 @@
+## 2026-10-20 WaveDeck 紙上模式不寫下單大師檔、減碼不再等於全平（WD-05、WD-06）
+
+- 基底：`f52b8c3ebe9b25a2fa266f225b2c5d0ed60a455c`（origin/main）；分支 `claude/wd-paper-isolation-reduce`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查補齊，主控讀碼並以執行中 WaveDeck 實證）：
+  - **WD-05**：`broker.panic_flatten` 在 paper 模式也寫 `target_position.txt` 與 `order_signal.txt`。`engine.py` 與 `st_link.py` 在任何券商模式都寫 `invalidation.txt`。2026-10-20 兩次重啟各寫出一行 `TXF EXIT lots=0` 到 `wavedeck/data/master/`。
+  - **WD-06**：`broker._target` 對 REDUCE 一律回 0。說明文字寫「減碼降低曝險」，實際送出的卻是全平。
+- 修正後行為（Sam 2026-10-20「WD-05、WD-06 照建議修」）：
+  - 新增 `broker.writes_master_files()`，只有 `txt_master` 券商回 true；paper 急停只改紙上部位，兩處 `invalidation.txt` 寫入也改為只在 txt_master 時進行；
+  - 減碼依現有部位計算：策略指定口數時減該口數，否則保留一半（向下取整，所以 1 口減碼即平倉），不會翻向；部位未知或為 0 時沿用舊的平倉目標；
+  - paper 與 txt_master 共用同一規則；txt_master 的 `order_signal.txt` 維持既有格式（`lots` 是目標部位的絕對值）；
+  - 解除 fail-safe 時不再把風控燈蓋成 ok，參考帳戶的回撤未知時維持 warn（#237 部署後發現的燈號反覆）。
+- 契約變更與測試：
+  - `test_smoke.test_panic_flatten_writes_zero_target` 改寫為 `test_panic_flatten_paper_does_not_touch_master_files`；
+  - 新增 `wavedeck/tests/test_reduce_and_paper_isolation.py`（減碼口數、部位未知時平倉、paper 不產生任何下單大師檔），以及 `test_成交確認.test_減碼依現有部位送出部分目標而非全平`（txt_master 送出目標 1）；
+  - 新案例在舊程式上全部失敗。
+- 驗證：WaveDeck 相關 10 個模組共 130 案例通過；`tests/wavedeck_onepage_selftest.js` 通過。
+- 部署注意：合併後須更新主工作樹、重建 `wavedeck/data/程式版本.json` 再重啟 WaveDeck，另行授權。
+- 發布狀態：未合併、未部署。
+
+---
+
 ## 2026-10-20 WaveDeck 每日回撤鎖不再以示範參考帳戶觸發（WD-04）
 
 - 基底：`f361ec1e7da0702c2efe64c43b35bccdf5fd66ae`（origin/main）；分支 `claude/wd-dd-reference-account`。實作與合併 SHA 待 PR 合併後補記。

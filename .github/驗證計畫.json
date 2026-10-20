@@ -4,25 +4,29 @@
   ],
   "cases": [
     {
-      "id": "WaveDeck回撤鎖參考帳戶",
+      "id": "WaveDeck紙上隔離與減碼",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "示範參考帳戶不觸發回撤鎖與全平（WD-04）",
+      "reason": "paper 不寫下單大師檔、減碼依現有部位（WD-05、WD-06）",
       "targets": [
+        "wavedeck.tests.test_reduce_and_paper_isolation",
+        "wavedeck.tests.test_smoke",
+        "wavedeck.tests.test_成交確認",
         "wavedeck.tests.test_dd_reference_account",
         "wavedeck.tests.test_不留倉",
         "wavedeck.tests.test_完整審查執行",
         "wavedeck.tests.test_策略訊號整合",
-        "wavedeck.tests.test_smoke",
         "wavedeck.tests.test_策略HTTP",
         "wavedeck.tests.test_exec_md",
-        "wavedeck.tests.test_request_guard",
-        "wavedeck.tests.test_成交確認"
+        "wavedeck.tests.test_request_guard"
       ],
       "changes": [
-        "wavedeck/server/risk.py",
+        "wavedeck/server/broker.py",
         "wavedeck/server/engine.py",
-        "wavedeck/tests/test_dd_reference_account.py"
+        "wavedeck/server/st_link.py",
+        "wavedeck/tests/test_reduce_and_paper_isolation.py",
+        "wavedeck/tests/test_smoke.py",
+        "wavedeck/tests/test_成交確認.py"
       ],
       "inputs": [
         "wavedeck/server/broker.py",
@@ -30,8 +34,10 @@
         "wavedeck/server/risk.py",
         "wavedeck/server/st_link.py",
         "wavedeck/server/state.py",
+        "wavedeck/server/策略契約.py",
         "wavedeck/tests/test_dd_reference_account.py",
         "wavedeck/tests/test_exec_md.py",
+        "wavedeck/tests/test_reduce_and_paper_isolation.py",
         "wavedeck/tests/test_request_guard.py",
         "wavedeck/tests/test_smoke.py",
         "wavedeck/tests/test_不留倉.py",
@@ -40,25 +46,9 @@
         "wavedeck/tests/test_策略HTTP.py",
         "wavedeck/tests/test_策略訊號整合.py"
       ]
-    },
-    {
-      "id": "WaveDeck前端單頁",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "deck.js 回撤格顯示修改後單頁檢查不退化",
-      "targets": [
-        "tests/wavedeck_onepage_selftest.js"
-      ],
-      "changes": [
-        "wavedeck/web/js/deck.js"
-      ],
-      "inputs": [
-        "tests/wavedeck_onepage_selftest.js",
-        "wavedeck/web/js/deck.js"
-      ]
     }
   ],
-  "baseCommit": "f361ec1e7da0702c2efe64c43b35bccdf5fd66ae",
+  "baseCommit": "f52b8c3ebe9b25a2fa266f225b2c5d0ed60a455c",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

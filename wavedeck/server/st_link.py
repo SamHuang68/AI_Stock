@@ -101,7 +101,9 @@ def touch_overlay() -> None:
         ov["fail_safe"] = False
         ov["fail_safe_reason"] = None
         patch["st_overlay"] = ov
-        patch["lights"] = {"st_bridge": "ok", "risk_watchdog": "ok"}
+        from .risk import daily_dd_known
+        # 解除 fail-safe 時不蓋掉回撤狀態：參考帳戶的回撤未知，燈號維持 warn。
+        patch["lights"] = {"st_bridge": "ok", "risk_watchdog": "ok" if daily_dd_known(RUNTIME.snapshot()) else "warn"}
     if cleaned != str(ai.get("summary") or ""):
         ai["summary"] = cleaned
         patch["ai"] = ai
@@ -246,10 +248,10 @@ def _tighten_invalidation(ai: dict[str, Any], price: float) -> dict[str, Any]:
 def _write_inv_txt(ai: dict[str, Any], symbol: str = "TXF") -> None:
     """Soft-sync invalidation for 下單大師 side-file (non-fatal)."""
     try:
-        from .broker import write_invalidation_txt
+        from .broker import write_invalidation_txt, writes_master_files
 
         inv = ai.get("invalidation") if isinstance(ai.get("invalidation"), dict) else {}
-        if inv.get("price") is not None:
+        if inv.get("price") is not None and writes_master_files():
             write_invalidation_txt(
                 float(inv["price"]),
                 str(inv.get("side") or "below"),
