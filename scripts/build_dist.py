@@ -50,6 +50,7 @@ BLOCKED_BASENAMES = {
     "alert_secrets.bin",
     "alert_config.json",
     "alert_rules.json",
+    "alert_outbox.json",
     "watch_rules.json",
     "watch_state.json",
     "draw_store.json",

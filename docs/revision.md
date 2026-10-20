@@ -1,3 +1,30 @@
+## 2026-10-20 推播送達失敗時保留待送並重試，記錄失敗原因（AL-01）
+
+- 基底：`4457d52597ef4ebcf5d4ef282104696c0df57897`（origin/main）；分支 `claude/alert-delivery-outbox`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查補齊 AL-01）：
+  - 價格警報、複合警報、WATCH 與個股訊號即時推播都直接呼叫 `alert_daemon.notify()` 並忽略回傳值；
+  - Telegram、Email、Webhook 全部失敗時，警報仍記為已觸發（冷卻、穿越狀態與 `sent` 記號照樣更新），不重送；
+  - 日誌只寫警報文字，不寫失敗原因；`recent_fired` 也看不出是否送達。
+- 修正後行為（Sam 2026-10-20「AL-01 照建議修」）：
+  - 新增 `alert_daemon.deliver()`，四條路徑改用它。仍先立即送出，至少一個通道成功即為 `sent`；
+  - 已設定的通道全部失敗時為 `queued`，寫入 `data/alert_outbox.json`；
+  - 沒有任何已設定的通道時為 `no_channel`，不排入待送。
+  - `retry_outbox()` 由警報、WATCH、個股訊號三個背景迴圈每輪呼叫，共用同一把鎖：
+    - 每筆間隔 60 秒、最多 5 次、最久 1 小時，逾時或用盡次數即放棄並記錄；
+    - 本輪只要有一筆仍全部失敗就停止，避免網路中斷時逐筆等候逾時；
+    - 待送匣上限 50 筆。
+  - 每次失敗都把各通道原因寫入警報日誌，寫入前移除 Telegram 權杖、Email 密碼與 webhook 網址。
+  - `recent_fired` 各筆加上 `delivery`（sent／queued／no_channel）；`/alert/status` 新增 `recent_deliveries` 與 `pending_deliveries`。前端目前沒有顯示這兩個清單，資訊在 API。
+  - 待送匣檔案加入 `.gitignore` 與分享封存的 `BLOCKED_BASENAMES`；本機服務只允許下載 `src/`、`assets/`，不會外流。
+  - 手動推播（`/notify`、測試推播）仍直接回報結果給呼叫者，不排入待送。
+- 測試：
+  - 新增 `tests/test_alert_delivery_outbox.py`（失敗排入且日誌不含權杖、60 秒後重送成功即清除、5 次後放棄、逾 1 小時不送即放棄、無通道不排入、一筆失敗即停止本輪、複合警報記錄送達狀態），在舊程式上 7 案例皆失敗；
+  - `tests/test_警報日線來源.py` 的複合警報案例把 `notify` 替身改為回傳 `(True, {})`（新流程會解讀回傳值），斷言不變。
+- 驗證：新案例與 `test_警報日線來源`、`test_完整審查警報權限`、`test_stock_signals`、`test_watch_breakout_day_volume`、`test_secret_migration`、`test_daemon_lock`、`test_no_new_silent_exceptions`、`test_Pulse讀寫分離`、`test_signal_narrative` 共 105 案例通過；`tests.test_dist_scrub` 12 案例通過。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-20 個股融資融券增減改以餘額差計算，盤後融資異常門檻改為 500 張（CM-04）
 
 - 基底：`4457d52597ef4ebcf5d4ef282104696c0df57897`（origin/main）；分支 `claude/margin-change-balance-delta`。實作與合併 SHA 待 PR 合併後補記。

@@ -4,48 +4,69 @@
   ],
   "cases": [
     {
-      "id": "融資融券增減餘額差與異常門檻",
+      "id": "推播送達待送匣",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "融資含現金償還、融券正負號、盤後異常門檻 500 張（CM-04）",
+      "reason": "全部通道失敗時保留待送並重試、記錄失敗原因（AL-01）",
       "targets": [
-        "tests.test_margin_change_balance_delta",
-        "tests.test_postmarket_report",
-        "tests.test_postmarket_http",
-        "tests.test_decision_context",
-        "tests.test_chip_official_date_safety",
-        "tests.test_三合一選股",
-        "tests.test_三項限制解方",
-        "tests.test_個股研究資料更新",
-        "tests.test_全檢資料邊界",
-        "tests.test_no_new_silent_exceptions"
+        "tests.test_alert_delivery_outbox",
+        "tests.test_警報日線來源",
+        "tests.test_完整審查警報權限",
+        "tests.test_stock_signals",
+        "tests.test_watch_breakout_day_volume",
+        "tests.test_secret_migration",
+        "tests.test_daemon_lock",
+        "tests.test_no_new_silent_exceptions",
+        "tests.test_Pulse讀寫分離",
+        "tests.test_signal_narrative"
       ],
       "changes": [
-        "server/chip_api.py",
-        "server/postmarket_report.py",
-        "tests/test_margin_change_balance_delta.py",
-        "tests/test_chip_api.py"
+        "server/alert_daemon.py",
+        "server/watch_daemon.py",
+        "server/signal_digest.py",
+        "tests/test_alert_delivery_outbox.py",
+        "tests/test_警報日線來源.py"
       ],
       "inputs": [
-        "server/chip_api.py",
+        "server/alert_daemon.py",
+        "server/atomic_store.py",
         "server/log_once.py",
-        "server/postmarket_report.py",
+        "server/signal_digest.py",
+        "server/stock_signals_routes.py",
+        "server/watch_daemon.py",
         "tests/silent_except_baseline.json",
-        "tests/test_chip_api.py",
-        "tests/test_chip_official_date_safety.py",
-        "tests/test_decision_context.py",
-        "tests/test_margin_change_balance_delta.py",
+        "tests/test_Pulse讀寫分離.py",
+        "tests/test_alert_delivery_outbox.py",
+        "tests/test_daemon_lock.py",
         "tests/test_no_new_silent_exceptions.py",
-        "tests/test_postmarket_http.py",
-        "tests/test_postmarket_report.py",
-        "tests/test_三合一選股.py",
-        "tests/test_三項限制解方.py",
-        "tests/test_個股研究資料更新.py",
-        "tests/test_全檢資料邊界.py"
+        "tests/test_secret_migration.py",
+        "tests/test_signal_narrative.py",
+        "tests/test_stock_signals.py",
+        "tests/test_watch_breakout_day_volume.py",
+        "tests/test_完整審查警報權限.py",
+        "tests/test_警報日線來源.py"
+      ]
+    },
+    {
+      "id": "分享封存排除待送匣",
+      "kind": "unittest",
+      "timeoutSeconds": 600,
+      "reason": "待送匣是執行期資料，不進分享封存",
+      "targets": [
+        "tests.test_dist_scrub"
+      ],
+      "changes": [
+        "scripts/build_dist.py",
+        ".gitignore"
+      ],
+      "inputs": [
+        ".gitignore",
+        "scripts/build_dist.py",
+        "tests/test_dist_scrub.py"
       ]
     }
   ],
-  "baseCommit": "4457d52597ef4ebcf5d4ef282104696c0df57897",
+  "baseCommit": "bde4462e89da54e6aeff11584f084a30c0500d84",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

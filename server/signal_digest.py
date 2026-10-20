@@ -184,7 +184,7 @@ def check_once(now: Optional[datetime] = None, notify=None) -> Dict[str, int]:
     counts = {'events': 0, 'digests': 0}
     if mode == 'off':
         return counts
-    send = notify or (lambda text, subject: alert_daemon.notify(cfg, text, subject=subject)
+    send = notify or (lambda text, subject: alert_daemon.deliver(cfg, text, subject=subject, source='signal_digest')
                       if alert_daemon else None)
     st = _load_state()
     st.setdefault('sent', {})
@@ -316,6 +316,11 @@ def _maybe_refresh_pooled(items: List[Dict[str, str]]) -> None:
 
 def _loop():
     while not _state['stop']:
+        if alert_daemon:
+            try:
+                alert_daemon.retry_outbox()
+            except Exception as exc:
+                print('[stock-signal] outbox retry error:', type(exc).__name__, exc)
         try:
             check_once()
         except Exception as exc:
