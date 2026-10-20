@@ -324,7 +324,8 @@ MA_DEVIATION_PCT = 2.0
 RSI_OVERSOLD = 30.0
 RSI_OVERBOUGHT = 70.0
 INST_SIGNIFICANT_SHARES = 1_000_000  # ≈1000 張
-MARGIN_CHANGE_SIGNIFICANT = 500.0
+# marginChange 的單位是股（chip_api 由張×1000）；門檻 500 張（Sam 2026-10-20 確認，審查 CM-04）。
+MARGIN_CHANGE_SIGNIFICANT = 500_000.0
 
 
 def _next_tw_session_date(now: datetime) -> str:
@@ -448,14 +449,14 @@ def detect_anomalies(
             anomalies.append(_anomaly(
                 'margin_expanding', metric='chips.margin.marginChange',
                 value=_round(margin_chg_f), threshold=MARGIN_CHANGE_SIGNIFICANT,
-                direction='above', label=f'融資餘額增加 {margin_chg_f:.0f}',
+                direction='above', label=f'融資餘額增加 {margin_chg_f / 1000:.0f} 張',
                 as_of=(chips or {}).get('asOf') or as_of, severity='watch',
             ))
         elif margin_chg_f <= -MARGIN_CHANGE_SIGNIFICANT:
             anomalies.append(_anomaly(
                 'margin_contracting', metric='chips.margin.marginChange',
                 value=_round(margin_chg_f), threshold=-MARGIN_CHANGE_SIGNIFICANT,
-                direction='below', label=f'融資餘額減少 {abs(margin_chg_f):.0f}',
+                direction='below', label=f'融資餘額減少 {abs(margin_chg_f) / 1000:.0f} 張',
                 as_of=(chips or {}).get('asOf') or as_of, severity='info',
             ))
 
