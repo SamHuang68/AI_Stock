@@ -1,3 +1,28 @@
+## 2026-10-20 WaveDeck 每日回撤鎖不再以示範參考帳戶觸發（WD-04）
+
+- 基底：`f361ec1e7da0702c2efe64c43b35bccdf5fd66ae`（origin/main）；分支 `claude/wd-dd-reference-account`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查補齊 WD-04，主控以執行中 WaveDeck 與稽核庫實證）：
+  - 預設帳戶是示範參考數值（`source: wave_ai_ref`、`reference: True`、昨日 72312、權益 59888），券商不會更新；
+  - `daily_dd_ratio` 不分辨，固定算出 17.18%，高於 5% 上限；
+  - 稽核庫顯示自 2026-10-09 起，每次啟動都觸發 `daily_dd_lock`，比率全部相同；
+  - #225（WD-01）把 `WD_DD_FLATTEN` 預設改為開啟後，每次啟動還會自動全平（2026-10-20 兩次重啟各一次，當時紙上持倉已是 0）。
+  - WD-01 實作時沒有查核回撤數字的來源，屬 Claude 的驗證遺漏。
+- 修正後行為（Sam 2026-10-20「WD-04 照建議修」）：
+  - 新增 `risk.daily_dd_known`：帳戶有 `reference` 旗標時以旗標為準，沒有旗標時以 `source` 是否為 `wave_ai_ref`／`reference`／`demo` 判定，與前端 `deck.js` 的判定一致；
+  - 參考帳戶的 `daily_dd_ratio` 回 0，`enforce_daily_drawdown` 不鎖定、不平倉，帳戶標 `daily_dd_status: unknown_reference`、`daily_dd_pct: None`，風控燈為 warn；
+  - **不解除既有急停**；
+  - 閘門在新單理由中註明「單日回撤未知：帳戶為示範參考數值，回撤上限未生效」，但不據此擋單；
+  - 前端單日回撤格顯示「未知（參考帳戶）」，不再以參考數字重算；
+  - 明確標示為實盤（`reference: False`）的帳戶照舊計算、鎖定並全平。
+- 驗證：
+  - 新增 `wavedeck/tests/test_dd_reference_account.py`（參考帳戶回撤未知且不擋單、不鎖定也不全平且不解除既有急停、實盤帳戶照舊鎖定並全平），在舊程式上 3 案例皆失敗；
+  - WaveDeck 相關 9 個模組共 123 案例通過，`tests/wavedeck_onepage_selftest.js` 通過，`deck.js` 語法檢查通過；
+  - 前端回撤格的顯示沒有自動化案例，需部署後實機確認。
+- 部署注意：WaveDeck 由主工作樹執行，合併後須更新主工作樹、重建 `wavedeck/data/程式版本.json` 再重啟，另行授權。
+- 發布狀態：未合併、未部署。
+
+---
+
 ## 2026-10-20 WaveDeck 更新到 7074b03，WD-01 生效
 
 - 基底：`7074b03167cca8ae4f5cbd4f286e65df722d878a`（main）。只補記狀態，不改程式；本段補充上一段「WaveDeck 未生效」的後續。

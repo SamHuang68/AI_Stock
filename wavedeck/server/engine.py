@@ -14,7 +14,7 @@ from .broker import execution_pending, get_broker
 from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
 from .providers import infer_with_fallback
-from .risk import evaluate_gate, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
+from .risk import evaluate_gate, daily_dd_known, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, TZ8, now_iso
 from . import 策略契約 as contracts
 from .不留倉 import deadline_status
@@ -54,8 +54,14 @@ def panic() -> dict:
 def enforce_daily_drawdown(flatten: bool, already_locked: bool) -> bool:
     """回撤偵測、急停與平倉共用送單鎖，避免舊進場覆蓋平倉。"""
     st = RUNTIME.snapshot()
+    if not daily_dd_known(st):
+        # 示範參考帳戶：回撤未知，不鎖定也不平倉；不解除既有急停。
+        RUNTIME.patch(account={"daily_dd_pct": None, "daily_dd_status": "unknown_reference",
+                               "daily_dd_limit_pct": round(MAX_DAILY_DD * 100, 2)},
+                      lights={"risk_watchdog": "warn"})
+        return already_locked and bool(st.get("kill_switch"))
     ratio = daily_dd_ratio(st)
-    account = {"daily_dd_pct": round(ratio * 100, 2),
+    account = {"daily_dd_pct": round(ratio * 100, 2), "daily_dd_status": "measured",
                "daily_dd_limit_pct": round(MAX_DAILY_DD * 100, 2)}
     if ratio < MAX_DAILY_DD:
         RUNTIME.patch(account=account, **({"lights": {"risk_watchdog": "warn"}} if ratio >= WARN_DAILY_DD else {}))
