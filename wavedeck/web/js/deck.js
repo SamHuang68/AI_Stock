@@ -373,10 +373,12 @@
       ? Number(a.daily_dd_pct)
       : (yb > 0 ? Math.max(0, (yb - eq) / yb * 100) : 0);
     var ddLim = (a.daily_dd_limit_pct != null) ? Number(a.daily_dd_limit_pct) : 5;
-    var ddCls = ddPct >= ddLim ? 'down' : (ddPct >= ddLim * 0.6 ? 'down' : '');
     /* 種子／參考 Wave AI 權益數：僅攻能驗證，勿當成使用者實盤持倉 */
     var src = String(a.source || a.ref || 'wave_ai_ref');
     var isRef = src === 'wave_ai_ref' || src === 'reference' || src === 'demo' || a.reference === true;
+    /* 參考帳戶的回撤不是實盤數字，後端不以它鎖定；畫面也不重算成真實回撤 */
+    var ddUnknown = a.daily_dd_status === 'unknown_reference';
+    var ddCls = ddUnknown ? '' : (ddPct >= ddLim ? 'down' : (ddPct >= ddLim * 0.6 ? 'down' : ''));
     var noteEl = $('acctNote');
     if (noteEl) {
       noteEl.textContent = isRef
@@ -393,7 +395,7 @@
       '<div class="a"><div class="k">當前權益' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.equity) + '</div></div>' +
       '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(chg) + '</div></div>' +
       '<div class="a"><div class="k">單日回撤</div><div class="v ' + ddCls + '">' +
-        (ddPct ? (ddPct.toFixed(2) + '% / ' + ddLim + '%') : ('0% / ' + ddLim + '%')) + '</div></div>' +
+        (ddUnknown ? ('未知（參考帳戶）/ ' + ddLim + '%') : ddPct ? (ddPct.toFixed(2) + '% / ' + ddLim + '%') : ('0% / ' + ddLim + '%')) + '</div></div>' +
       '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>' +
       '<div class="a"><div class="k">Email 監控</div><div class="v">' +
         (((s.lights || {}).email_monitor === 'ok') ? '正常' : lightLabel((s.lights || {}).email_monitor || '—')) +

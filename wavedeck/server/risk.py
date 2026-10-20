@@ -16,8 +16,21 @@ MAX_DAILY_DD = float(os.environ.get("WD_MAX_DAILY_DD", "0.05"))
 WARN_DAILY_DD = float(os.environ.get("WD_WARN_DAILY_DD", "0.03"))
 
 
+REFERENCE_ACCOUNT_SOURCES = {"wave_ai_ref", "reference", "demo"}
+
+
+def daily_dd_known(state: dict[str, Any]) -> bool:
+    """示範／參考帳戶的權益不是使用者實盤，不能拿來觸發回撤鎖（審查 WD-04）。"""
+    acct = state.get("account") or {}
+    if "reference" in acct:  # 明確旗標優先；沒有旗標時才看來源
+        return acct.get("reference") is not True
+    return acct.get("source") not in REFERENCE_ACCOUNT_SOURCES
+
+
 def daily_dd_ratio(state: dict[str, Any]) -> float:
-    """Session drawdown ratio vs yesterday_balance; 0 if unknown / flat-or-up."""
+    """Session drawdown ratio vs yesterday_balance; 0 if unknown / flat-or-up / reference account."""
+    if not daily_dd_known(state):
+        return 0.0
     acct = state.get("account") or {}
     try:
         yb = float(acct.get("yesterday_balance") or 0)
@@ -57,6 +70,8 @@ def evaluate_gate(
         "ENTER_LONG", "ENTER_SHORT"
     }:
         reasons.append(f"單日回撤警戒 {dd:.1%}（上限 {MAX_DAILY_DD:.0%}）")
+    elif not daily_dd_known(state) and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
+        reasons.append("單日回撤未知：帳戶為示範參考數值，回撤上限未生效")
 
     no = deadline_status(state, now)
     if no["blocked_new"] and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
