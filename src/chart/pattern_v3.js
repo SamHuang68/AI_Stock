@@ -356,16 +356,22 @@ function detectBreakout(candles) {
   const lo = Math.min(...prior.map(c => c.low));
   const width = (hi - lo) / ((hi + lo) / 2) * 100;
   if (width >= 12) return null;
-  let v5 = 0, v20 = 0;
-  for (let i = candles.length - 5; i < candles.length; i++) v5 += candles[i].volume || 0;
-  for (let i = candles.length - 20; i < candles.length; i++) v20 += candles[i].volume || 0;
-  const volRatio = (v20 / 20) > 0 ? (v5 / 5) / (v20 / 20) : 1;
+  // 當日量／前 20 日均量（不含當日），與 WATCH 及個股訊號「帶量突破」同口徑（審查 CH-02）；
+  // 舊版用 5 日／20 日均量比，同一天會與 WATCH 給出相反判斷。前 20 日量有缺值時視為量能未知。
+  const prior20 = candles.slice(-21, -1).map(x => x.volume);
+  const todayVol = candles[candles.length - 1].volume;
+  const base = prior20.length === 20 && prior20.every(v => Number.isFinite(v) && v >= 0)
+    ? prior20.reduce((a, v) => a + v, 0) / 20 : null;
+  const volRatio = base > 0 && Number.isFinite(todayVol) ? todayVol / base : null;
   if (c > hi) {
+    const volKnown = volRatio != null;
     return {
       type: 'breakout_up', name: '區間向上突破', icon: '🚀', severity: 'bullish',
-      description: `價格 ${fmt(c)} 突破 ${N} 日整理上緣 ${fmt(hi)}。量能 ${fmt(volRatio,1)}x。`,
-      action: volRatio >= 1.5 ? `量增有效，目標 ${fmt(hi+(hi-lo))}。` : '量能不足，假突破風險。',
-      reliability: volRatio >= 1.5 ? '量增突破' : '量不足',
+      description: `價格 ${fmt(c)} 突破 ${N} 日整理上緣 ${fmt(hi)}。` +
+        (volKnown ? `當日量為前 20 日均量 ${fmt(volRatio,1)}x。` : '量能資料不足。'),
+      action: !volKnown ? '量能未知，無法確認突破品質。'
+        : volRatio >= 1.5 ? `量增有效，目標 ${fmt(hi+(hi-lo))}。` : '量能不足，假突破風險。',
+      reliability: !volKnown ? '量能未知' : volRatio >= 1.5 ? '量增突破' : '量不足',
       marks: [
         { price: hi, time: prior[0].time, label: `突破 ${fmt(hi)}`, color: COL.bull },
         { price: hi + (hi - lo), time: candles[candles.length-1].time, label: `目標 ${fmt(hi+(hi-lo))}`, color: COL.accent },

@@ -1,3 +1,24 @@
+## 2026-10-20 主圖型態「區間向上突破」改用當日量口徑（CH-02）
+
+- 基底：`d42daea3e0a410d534905dbf2e6d041d7fc78f89`（origin/main）；分支 `claude/pattern-breakout-day-volume`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查補齊 CH-02）：
+  - `src/chart/pattern_v3.js` 的 `detectBreakout` 以「近 5 日量均／近 20 日量均」（兩窗都含當日）判斷突破量能；
+  - #233 已依 Sam 選擇把 WATCH 改為「當日量／前 20 日均量」，個股訊號本來就是這個口徑；
+  - 同一天單日 3 倍量的突破，WATCH 推播「帶量突破」，主圖型態面板卻寫「量能不足，假突破風險」。
+- 修正後行為（Sam 2026-10-20「CH-02 照建議修」）：
+  - 量能改為當日量／前 20 日均量（不含當日），`>= 1.5` 為「量增突破」；
+  - 前 20 日量有缺值、或均量為 0 時，標「量能未知」，不再以預設值 1 判定；
+  - 說明改為「當日量為前 20 日均量 N.Nx」；跌破分支不變。
+  - 型態歷史命中率（`patternHitRatesV3`）以型態名稱分組，「區間向上突破」的偵測條件不變（量能只影響說明與可靠度標籤），樣本數不受影響。
+  - 已重建 `stock_terminal_v2.html`（只有 `?v=` 雜湊變動）。
+- 驗證：
+  - 新增 `tests/pattern_breakout_day_volume_selftest.js`（3 倍量為量增突破、正常量為量不足、前 20 日缺量為量能未知、跌破分支不受影響），在舊程式上失敗；
+  - `tests/完整審查前端_selftest.js`、`tests.test_bundle_fresh` 通過；
+  - `tests/pattern_modal_browser.cjs`（Playwright，本機借用 `nvm-hub` 專案已安裝的 playwright 模組）11 項通過、0 頁面錯誤、0 網路請求。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-20 持倉風險面板與持倉清單共用同一份彙總，未載價不以成本當市值（FE-03）
 
 - 基底：`d1ec70c4e79f32788bd72344b1588542dcb138d5`（origin/main）；分支 `claude/portfolio-risk-known-cost`。實作與合併 SHA 待 PR 合併後補記。

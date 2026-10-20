@@ -4,80 +4,21 @@
   ],
   "cases": [
     {
-      "id": "持倉風險面板已載價口徑",
+      "id": "主圖突破型態當日量口徑",
       "kind": "node",
       "timeoutSeconds": 60,
-      "reason": "風險面板與持倉清單共用彙總（FE-03）",
+      "reason": "突破量能與 WATCH、個股訊號同口徑（CH-02）",
       "targets": [
-        "tests/portfolio_risk_known_cost_selftest.js"
+        "tests/pattern_breakout_day_volume_selftest.js"
       ],
       "changes": [
-        "src/core/pro_v2.js",
-        "src/core/position_v2.js",
-        "tests/portfolio_risk_known_cost_selftest.js"
+        "src/chart/pattern_v3.js",
+        "tests/pattern_breakout_day_volume_selftest.js"
       ],
       "inputs": [
         ".gitignore",
-        "src/core/colors_v3.js",
-        "src/core/position_v2.js",
-        "src/core/pro_v2.js",
-        "tests/portfolio_risk_known_cost_selftest.js"
-      ]
-    },
-    {
-      "id": "持倉清單已載價口徑",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "#229 的持倉清單行為不退化",
-      "targets": [
-        "tests/position_total_known_cost_selftest.js"
-      ],
-      "changes": [
-        "src/core/position_v2.js"
-      ],
-      "inputs": [
-        ".gitignore",
-        "src/core/position_v2.js",
-        "tests/position_total_known_cost_selftest.js"
-      ]
-    },
-    {
-      "id": "持倉共用者_即時報價",
-      "kind": "node",
-      "timeoutSeconds": 120,
-      "reason": "持倉現價優先順序與合計市值不退化",
-      "targets": [
-        "tests/台股即時報價_selftest.js"
-      ],
-      "changes": [
-        "src/core/position_v2.js",
-        "src/core/pro_v2.js",
-        "tests/台股即時報價_selftest.js"
-      ],
-      "inputs": [
-        ".gitignore",
-        "src/core/market_data_v5.js",
-        "src/core/position_v2.js",
-        "src/core/pro_v2.js",
-        "src/core/wl_live_v3.js",
-        "tests/台股即時報價_selftest.js"
-      ]
-    },
-    {
-      "id": "持倉共用者_shell",
-      "kind": "node",
-      "timeoutSeconds": 120,
-      "reason": "殼層與持倉頁不退化",
-      "targets": [
-        "tests/shell_v5_selftest.js"
-      ],
-      "changes": [
-        "src/core/pro_v2.js"
-      ],
-      "inputs": [
-        ".gitignore",
-        "src/core/pro_v2.js",
-        "tests/shell_v5_selftest.js"
+        "src/chart/pattern_v3.js",
+        "tests/pattern_breakout_day_volume_selftest.js"
       ]
     },
     {
@@ -89,21 +30,19 @@
         "tests.test_bundle_fresh"
       ],
       "changes": [
-        "src/core/pro_v2.js",
-        "src/core/position_v2.js",
+        "src/chart/pattern_v3.js",
         "stock_terminal_v2.html"
       ],
       "inputs": [
         ".gitignore",
         "build_v2.py",
-        "src/core/position_v2.js",
-        "src/core/pro_v2.js",
+        "src/chart/pattern_v3.js",
         "stock_terminal_v2.html",
         "tests/test_bundle_fresh.py"
       ]
     }
   ],
-  "baseCommit": "d1ec70c4e79f32788bd72344b1588542dcb138d5",
+  "baseCommit": "d42daea3e0a410d534905dbf2e6d041d7fc78f89",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
