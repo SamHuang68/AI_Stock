@@ -45,6 +45,7 @@
   - `tests/test_readme_api_routes.py`：以 AST 讀 `do_GET`／`do_POST` 中與路徑 `p` 比較的常數，核對 README API 表的方法與路徑；
   - `package.json` 新增 `test:ui-baseline`、`test:ui-baseline-selftest`；README「開發與測試」補使用說明。
 - 開發中觀察到的工具問題與處置：Chromium 預設 GPU 光柵化造成同版截圖 2–51 像素雜訊，改用固定渲染參數後同版逐位元組相同；曾考慮 0.1% 雜訊門檻，實測一行標題改字只有約 0.03% 像素會被誤放過，因此不設門檻。
+- 2026-10-21 CI 修正（#244 首次 CI 的 `test (windows-latest)` 失敗）：工具原以 `git archive` + `tar` 取出版本；CI 在 PowerShell 下呼叫 Windows 內建 `tar.exe`（bsdtar），解壓時把中文檔名弄壞（`Invalid empty pathname`），`build_v2.py` 找不到 `src/core/投組資料契約_v5.js`。本機在 Git Bash 下用的是 GNU tar，Ubuntu 也通過，所以開發時沒暴露。已在本機 PowerShell 重現，改用 git 暫時索引（`GIT_INDEX_FILE` + `read-tree` + `checkout-index`）取出檔案，不再依賴外部 tar，也不動倉庫索引；修正後在 PowerShell 下自我驗證 4 組全部相同。
 - 順帶發現（未在本次處理）：圖表頁右側價格軸的「今／昨」小標籤在部分載入時序下不會畫出（`renderCloseReadout` 呼叫時 `priceToCoordinate` 尚無座標，之後不重畫）；工具把該組判為版本內不穩定。
 - 驗證：
   - `python -m unittest tests.test_readme_api_routes`：4 案例通過（含刻意不存在的路徑與錯誤方法會被抓出）；
