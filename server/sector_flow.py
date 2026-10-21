@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from datetime import date
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 TWSE_TURNOVER_SCOPE = 'TWSE_FOUR_DIGIT_SECURITIES_BY_INDUSTRY'
@@ -114,6 +115,70 @@ def attach_sector_metrics(
         if key in returns and returns[key] is not None:
             row['return20Pct'] = returns[key]
             row['return20Source'] = 'TWSE MI_INDEX IND daily close'
+        out.append(row)
+    return out
+
+
+def find_prev_session(
+    session_date: Any,
+    fetch_day: Callable[[str], list[dict[str, Any]]],
+    *,
+    max_calendar_days: int = 7,
+    budget_seconds: float = 8.0,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """找 ``session_date`` 的前一個交易日並取回當日類股列。
+
+    ``fetch_day(YYYYMMDD)`` 回傳該日的類股列；回傳空清單代表官方確認當日無資料（非交易日），
+    拋出例外代表抓取失敗。抓取失敗時立即停止，不往更早的日期找，
+    以免把更早一天誤當成「前一交易日」。週末直接略過，不發請求。
+    """
+    day = normalize_session_date(session_date)
+    if not day:
+        return {'status': 'error', 'error': 'invalid session date', 'date': None, 'rows': []}
+    base = date(int(day[:4]), int(day[4:6]), int(day[6:]))
+    started = clock()
+    for offset in range(1, max_calendar_days + 1):
+        candidate = date.fromordinal(base.toordinal() - offset)
+        if candidate.weekday() >= 5:
+            continue
+        if clock() - started > budget_seconds:
+            return {'status': 'error', 'error': 'budget exceeded', 'date': None, 'rows': []}
+        key = candidate.strftime('%Y%m%d')
+        try:
+            rows = fetch_day(key)
+        except Exception as exc:  # 交給呼叫端記錄；不往前猜
+            return {'status': 'error', 'error': f'{key}: {exc}', 'date': key, 'rows': []}
+        if rows:
+            return {'status': 'found', 'error': None, 'date': key, 'rows': list(rows)}
+    return {'status': 'none', 'error': None, 'date': None, 'rows': []}
+
+
+def attach_prev_session_change(
+    sectors: Iterable[dict[str, Any]] | None,
+    prev_sectors: Iterable[dict[str, Any]] | None,
+    *,
+    prev_session_date: Any,
+) -> list[dict[str, Any]]:
+    """以正規化產業名稱，把前一交易日的官方漲跌幅附為 ``prevChangePct``；對不到的列不加欄位。"""
+    prev_day = normalize_session_date(prev_session_date)
+    prev: dict[str, float] = {}
+    for raw in prev_sectors or []:
+        if not isinstance(raw, dict):
+            continue
+        key = normalize_sector_name(raw.get('sector') or raw.get('name'))
+        value = _number(raw.get('changePct'))
+        if key and value is not None:
+            prev[key] = value
+    out = []
+    for raw in sectors or []:
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        key = normalize_sector_name(row.get('sector') or row.get('name'))
+        if prev_day and key in prev:
+            row['prevChangePct'] = prev[key]
+            row['prevSessionDate'] = prev_day
         out.append(row)
     return out
 

@@ -3,7 +3,7 @@
   "counts": {
     "server/ai_local.py": 2,
     "server/ai_routes.py": 4,
-    "server/alert_daemon.py": 4,
+    "server/alert_daemon.py": 3,
     "server/benchmark_research.py": 1,
     "server/breadth_build.py": 4,
     "server/chip_api.py": 6,
