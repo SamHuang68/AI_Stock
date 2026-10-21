@@ -764,6 +764,8 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
             benchmark_return20_pct=_sec_hist_status.get('benchmarkReturn20Pct'),
             proxy_basket=('proxy' in str(_sec_source).lower()),
         )
+        # 決策中心的產業卡只列單一產業；非產業列已在上面存進類股歷史（RS20 基準）。
+        _sec_flow['rows'] = _sector_flow.industry_rows(_sec_flow.get('rows'))
         _sec_flow['historyStatus'] = _sec_hist_status
         _sec_flow['turnoverSource'] = _turnover_source
         _sec_flow['turnoverDate'] = _turnover_session

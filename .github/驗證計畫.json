@@ -1,28 +1,301 @@
 {
+  "project": "SamHuang68/AI_Stock",
+  "schemaVersion": 1,
+  "scope": "targeted",
+  "baseCommit": "f219007905479a2f92e3e60e2db4e90afe1a71ea",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "產業類股判定與參與率",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "timeoutSeconds": 300,
+      "reason": "證交所原始名稱判定 32 個單一產業；/sectors 每列標記 industry 並保留非產業列；參與率與成交集中度只算單一產業；既有類股歷史、產業營收、行情類股契約與決策資料品質不變",
       "targets": [
-        "tests.test_dist_scrub"
+        "tests.test_sector_flow",
+        "tests.test_sector_rank_change",
+        "tests.test_sector_history",
+        "tests.test_industry_revenue",
+        "tests.test_行情類股契約",
+        "tests.test_決策資料品質"
       ],
       "changes": [
-        "docs/revision.md"
+        "server/sector_flow.py",
+        "server/server.py",
+        "tests/test_sector_flow.py",
+        "tests/test_sector_rank_change.py"
       ],
       "inputs": [
-        ".gitignore",
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "server/decision_context.py",
+        "server/http_client.py",
+        "server/industry_revenue.py",
+        "server/log_once.py",
+        "server/lru_cache.py",
+        "server/market_contract.py",
+        "server/market_routes.py",
+        "server/portfolio.py",
+        "server/pulse_extras.py",
+        "server/sector_flow.py",
+        "server/sector_history.py",
+        "server/server.py",
+        "server/tdcc_holders.py",
+        "server/類股成員.py",
+        "tests/test_decision_context.py",
+        "tests/test_decision_http.py",
+        "tests/test_industry_revenue.py",
+        "tests/test_sector_flow.py",
+        "tests/test_sector_history.py",
+        "tests/test_sector_rank_change.py",
+        "tests/test_決策資料品質.py",
+        "tests/test_行情類股契約.py",
+        "tests/已核對資料.py"
+      ]
+    },
+    {
+      "id": "Pulse 只用單一產業",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "Pulse 解析器標記 industry；計分、產業排行與決策中心產業卡排除非產業列；既有 Pulse 快取鍵、回補與夜盤案例不變",
+      "targets": [
+        "tests.test_pulse_extras",
+        "tests.test_pulse_intel",
+        "tests.test_pulse_extraction",
+        "tests.test_完整審查資料"
+      ],
+      "changes": [
+        "server/pulse_extras.py",
+        "server/pulse_intel.py",
+        "server/pulse_orchestration.py",
+        "tests/test_pulse_extras.py",
+        "tests/test_pulse_intel.py"
+      ],
+      "inputs": [
+        "server/breadth_build.py",
+        "server/datastore.py",
+        "server/deadline.py",
+        "server/exchange_source_dates.py",
+        "server/industry_revenue.py",
+        "server/market_routes.py",
+        "server/pulse_extras.py",
+        "server/pulse_intel.py",
+        "server/pulse_layout.py",
+        "server/pulse_orchestration.py",
+        "server/sector_flow.py",
+        "server/trend_quant.py",
+        "server/turnover_quant.py",
+        "tests/test_pulse_extraction.py",
+        "tests/test_pulse_extras.py",
+        "tests/test_pulse_intel.py",
+        "tests/test_完整審查資料.py"
+      ]
+    },
+    {
+      "id": "熱力圖只列單一產業",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "industry: false 的列不進熱力圖也不佔名次；沒有標記的舊資料照舊；美股不受影響",
+      "targets": [
+        "tests/heat_rank_selftest.js"
+      ],
+      "changes": [
+        "src/ui/heat_v5.js",
+        "tests/heat_rank_selftest.js"
+      ],
+      "inputs": [
+        "src/ui/heat_v5.js",
+        "tests/heat_rank_selftest.js"
+      ]
+    },
+    {
+      "id": "類股成員與更新入口既有行為",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "heat_v5.js 修改後，類股成員、缺值、延遲回應、純讀焦點與更新入口行為不變",
+      "targets": [
+        "tests/類股成員與更新入口_selftest.js"
+      ],
+      "changes": [
+        "src/ui/heat_v5.js"
+      ],
+      "inputs": [
+        "src/ui/heat_v5.js",
+        "src/ui/shell_v5.js",
+        "tests/類股成員與更新入口_selftest.js"
+      ]
+    },
+    {
+      "id": "Pulse 產業輪動只列單一產業",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "Pulse 從 /sectors 取台股類股時排除 industry: false 的列，沒有標記的列照舊",
+      "targets": [
+        "tests/pulse_sector_rotation_selftest.js"
+      ],
+      "changes": [
+        "src/ui/pulse_v5.js",
+        "tests/pulse_sector_rotation_selftest.js"
+      ],
+      "inputs": [
+        "src/ui/pulse_v5.js",
+        "tests/pulse_sector_rotation_selftest.js"
+      ]
+    },
+    {
+      "id": "脈動介面既有契約",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "pulse_v5.js 修改後，來源日期、取消、純讀焦點、持久快照及 AI 完成契約不變",
+      "targets": [
+        "tests/脈動日期與介面契約_selftest.js"
+      ],
+      "changes": [
+        "src/ui/pulse_v5.js"
+      ],
+      "inputs": [
+        "src/ui/pulse_v5.js",
+        "tests/脈動日期與介面契約_selftest.js"
+      ]
+    },
+    {
+      "id": "打包產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "heat_v5.js、pulse_v5.js 修改後 stock_terminal_v2.html 等於重建結果",
+      "targets": [
+        "tests.test_bundle_fresh"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_order.py",
+        "build_v2.py",
+        "src/ai/ai_runtime_client.js",
+        "src/ai/cmdpalette_v3.js",
+        "src/ai/copilot_v3.js",
+        "src/alert/alert_push_v3.js",
+        "src/alert/calendar_v3.js",
+        "src/alert/datahealth_v3.js",
+        "src/alert/settle_v3.js",
+        "src/alert/toast_v3.js",
+        "src/chart/aftermarket_v3.js",
+        "src/chart/drawtools_v3.js",
+        "src/chart/hotkeys_v3.js",
+        "src/chart/market_chart_v3.js",
+        "src/chart/market_score_bar_v3.js",
+        "src/chart/multichart_v3.js",
+        "src/chart/overnight_v3.js",
+        "src/chart/pattern_v3.js",
+        "src/chart/spread_v3.js",
+        "src/chart/volume_profile_v3.js",
+        "src/core/app_kernel_v5.js",
+        "src/core/chart_registry_v3.js",
+        "src/core/colors_v3.js",
+        "src/core/decision_data_v5.js",
+        "src/core/epistemic_badges_v5.js",
+        "src/core/etf_flow_tip_v3.js",
+        "src/core/etf_v3.js",
+        "src/core/feature_flags_v5.js",
+        "src/core/fields_v3.js",
+        "src/core/indicator_cache_v3.js",
+        "src/core/indices_v3.js",
+        "src/core/info_v2.js",
+        "src/core/intraday_volume_v3.js",
+        "src/core/live_v2.js",
+        "src/core/liverefresh_v3.js",
+        "src/core/market_data_v5.js",
+        "src/core/market_freshness_v5.js",
+        "src/core/market_intel_v5.js",
+        "src/core/market_v3.js",
+        "src/core/namesearch_v3.js",
+        "src/core/position_v2.js",
+        "src/core/pro_v2.js",
+        "src/core/realtime_v3.js",
+        "src/core/table_sort_v5.js",
+        "src/core/watch_v2.js",
+        "src/core/wl_live_v3.js",
+        "src/core/估值承接核心.js",
+        "src/core/投組資料契約_v5.js",
+        "src/core/更新工作_v5.js",
+        "src/core/研究任務.js",
+        "src/core/研究工作流.js",
+        "src/fundamental/chainmom_v3.js",
+        "src/fundamental/chip_v3.js",
+        "src/fundamental/fundamental_v3.js",
+        "src/fundamental/supplychain_v3.js",
+        "src/fundamental/valuation_v3.js",
+        "src/screener/backtest_v3.js",
+        "src/screener/strategy_builder_v3.js",
+        "src/screener/strategy_script_v3.js",
+        "src/screener/wizard_v3.js",
+        "src/screener/策略版本.js",
+        "src/ui/K線事件研究.js",
+        "src/ui/afterhours_v5.js",
+        "src/ui/ai_v5.js",
+        "src/ui/book_v5.js",
+        "src/ui/breadth_v5.js",
+        "src/ui/bridge_v5.js",
+        "src/ui/chart_visual_v5.js",
+        "src/ui/conditional_expectation_v5.js",
+        "src/ui/consensus_attention_v5.js",
+        "src/ui/daily_cache_v3.js",
+        "src/ui/datasources_v3.js",
+        "src/ui/decision_v5.js",
+        "src/ui/dragwin_v3.js",
+        "src/ui/enhance_v3.js",
+        "src/ui/heat_v5.js",
+        "src/ui/hub_v5.js",
+        "src/ui/mobile_v2.css",
+        "src/ui/news_v5.js",
+        "src/ui/peak_observation_100d_v5.js",
+        "src/ui/peak_observation_v5.js",
+        "src/ui/polish_v3.js",
+        "src/ui/postmarket_v5.js",
+        "src/ui/pulse_v5.js",
+        "src/ui/scan_v5.js",
+        "src/ui/share_v3.js",
+        "src/ui/shell_v5.js",
+        "src/ui/stock_health_v5.js",
+        "src/ui/toolbar_v3.js",
+        "src/ui/touxin_5d_v5.js",
+        "src/ui/txf_intraday_v3.js",
+        "src/ui/visual_system_v5.js",
+        "src/ui/viz_v5.js",
+        "src/ui/wavedeck_bridge_v5.js",
+        "src/ui/估值承接研究.js",
+        "src/ui/更新工作中心.js",
+        "src/ui/研究任務面板.js",
+        "src/ui/研究工作台.js",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/test_bundle_fresh.py"
+      ]
+    },
+    {
+      "id": "靜默例外棘輪",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "server.py、sector_flow.py 與 Pulse 三個模組修改後沒有新增靜默寬鬆例外",
+      "targets": [
+        "tests.test_no_new_silent_exceptions"
+      ],
+      "changes": [
+        "server/pulse_extras.py",
+        "server/pulse_intel.py",
+        "server/pulse_orchestration.py",
+        "server/sector_flow.py",
+        "server/server.py"
+      ],
+      "inputs": [
+        "server/pulse_extras.py",
+        "server/pulse_intel.py",
+        "server/pulse_orchestration.py",
+        "server/sector_flow.py",
+        "server/server.py",
+        "tests/silent_except_baseline.json",
+        "tests/test_no_new_silent_exceptions.py"
       ]
     }
-  ],
-  "baseCommit": "dd3e3eaabda88bb0e350ebb3c451698a174030ed",
-  "schemaVersion": 1,
-  "scope": "targeted",
-  "project": "SamHuang68/AI_Stock"
+  ]
 }

@@ -5067,7 +5067,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
 
         def parse_twse_indices(raw_json):
             """從 TWSE MI_INDEX 回應抓出類股指數 list。
-            傳回 [{name, close, change, changePct}, ...]，找不到回 []。"""
+            傳回 [{name, close, change, changePct, industry}, ...]，找不到回 []。"""
+            import sector_flow as _sf_parse
             try:
                 data = json.loads(raw_json) if isinstance(raw_json, (bytes, bytearray, str)) else raw_json
             except Exception:
@@ -5133,6 +5134,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                         'close': close,
                         'change': chg,
                         'changePct': pct,
+                        # 大盤、主題、槓桿反向與合併類標 False：畫面與計分只用單一產業，列本身保留給類股歷史的 RS20 基準。
+                        'industry': _sf_parse.is_twse_industry_index(name),
                     })
                 if out_list:
                     return out_list

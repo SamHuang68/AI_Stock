@@ -37,6 +37,24 @@ def test_parse_sector_tables_strict():
     assert abs(rows[0]['changePct'] - 1.0) < 1e-9
 
 
+def test_parse_sector_tables_marks_single_industries_and_keeps_other_rows():
+    data = {
+        'tables': [{
+            'title': '類股指數漲跌',
+            'fields': ['指數', '收盤指數', '漲跌點數', '漲跌百分比(%)'],
+            'data': [
+                ['發行量加權股價指數', '46887.77', '590', '1.28'],
+                ['電子工業類指數', '2928.19', '31', '1.08'],
+                ['半導體類指數', '1552.34', '14', '0.96'],
+                ['電子類兩倍槓桿指數', '364136.12', '7700', '2.16'],
+            ],
+        }]
+    }
+    rows = px.parse_sector_tables(data)
+    assert [(r['name'], r['industry']) for r in rows] == [
+        ('發行量加權股價', False), ('電子工業', False), ('半導體', True), ('電子類兩倍槓桿', False)]
+
+
 def test_compute_tx_oi_same_contract():
     by_day = {
         '2026-07-31': [
@@ -119,6 +137,7 @@ def test_fetch_all_key_shape_offline():
 
 if __name__ == '__main__':
     test_parse_sector_tables_strict()
+    test_parse_sector_tables_marks_single_industries_and_keeps_other_rows()
     test_compute_tx_oi_same_contract()
     test_compute_tx_oi_rejects_roll_week()
     test_aggregate_sbl_rows()

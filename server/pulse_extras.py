@@ -22,8 +22,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from .deadline import BoundedExecutor, Deadline, collect_named
+    from .sector_flow import is_twse_industry_index
 except ImportError:
     from deadline import BoundedExecutor, Deadline, collect_named
+    from sector_flow import is_twse_industry_index
 
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
@@ -133,6 +135,8 @@ def parse_sector_tables(data: dict) -> List[dict]:
                 'close': close,
                 'change': _fnum(row[i_chg] if i_chg < len(row) else None),
                 'changePct': pct,
+                # 與 /sectors 同一個產業判定；非產業列保留給類股歷史的 RS20 基準。
+                'industry': is_twse_industry_index(name),
             })
         if out:
             return out

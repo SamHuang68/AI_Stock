@@ -123,6 +123,9 @@ def filter_sectors(sectors: Optional[List[dict]]) -> List[dict]:
         cp = _n(s.get('changePct'))
         if not name or cp is None:
             continue
+        # 解析時已標記的大盤、主題、槓桿反向與合併類；沒有標記的列（Yahoo 代理籃）仍靠下面的名稱排除。
+        if s.get('industry') is False:
+            continue
         if any(k in name for k in SECTOR_SKIP):
             continue
         out.append({'name': name, 'changePct': cp, 'close': s.get('close')})

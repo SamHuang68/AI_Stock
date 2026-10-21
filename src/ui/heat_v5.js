@@ -205,7 +205,8 @@
   function filterSectors(list, mkt) {
     var rows = (list || []).filter(function (s) {
       if (!s || s.changePct == null || !s.name) return false;
-      if (mkt === 'TW' && SKIP_TW.test(s.name)) return false;
+      // 伺服器依證交所原始名稱標記：大盤、主題、槓桿反向與合併類指數為 false；沒有標記的舊資料仍靠名稱排除。
+      if (mkt === 'TW' && (s.industry === false || SKIP_TW.test(s.name))) return false;
       return true;
     });
     if (state.sort === 'name') {

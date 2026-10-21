@@ -50,4 +50,16 @@ T.state.sort = 'changePct';
 const shown = T.filterSectors([{ name: '發行量加權股價指數', changePct: 9 }, ...rows], 'TW');
 assert.equal(shown.some(r => r.name === '發行量加權股價指數'), false, '前提：加權指數不在熱力圖格子內');
 assert.equal(T.sectorRanks(shown)['航運'].rank, 1);
-console.log('heat_rank_selftest 通過：名次、前一日名次、同分排序、無資料不顯示、排除非產業指數');
+
+// 伺服器標記 industry: false 的大盤、主題、槓桿反向與合併類指數不進熱力圖，也不佔名次。
+const marked = T.filterSectors([
+  { name: '臺指日報酬兩倍', changePct: 2.57, industry: false },
+  { name: '電子工業', changePct: 1.08, industry: false },
+  { name: '塑膠', changePct: 6.52, industry: true },
+  { name: '光電', changePct: 3.61, industry: true },
+  { name: '航運', changePct: -0.24 },                      // 沒有標記的舊資料照舊顯示
+], 'TW');
+assert.deepEqual(marked.map(r => r.name), ['塑膠', '光電', '航運']);
+assert.equal(T.sectorRanks(marked)['光電'].rank, 2);
+assert.equal(T.filterSectors([{ name: 'XLK', changePct: 1, industry: false }], 'US').length, 1, '只套用在台股');
+console.log('heat_rank_selftest 通過：名次、前一日名次、同分排序、無資料不顯示、排除非產業指數與標記的非產業列');
