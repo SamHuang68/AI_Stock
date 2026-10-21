@@ -1,8 +1,4 @@
 {
-  "project": "SamHuang68/AI_Stock",
-  "schemaVersion": 1,
-  "scope": "targeted",
-  "baseCommit": "dba64e3b3bd010481dbb17fd1230e1177e1959f2",
   "documentation": [
     "docs/revision.md"
   ],
@@ -11,7 +7,7 @@
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "合併紀錄補記只改文件；分享封存掃描",
+      "reason": "發布狀態只改文件；分享封存掃描",
       "targets": [
         "tests.test_dist_scrub"
       ],
@@ -24,5 +20,9 @@
         "tests/test_dist_scrub.py"
       ]
     }
-  ]
+  ],
+  "baseCommit": "dd3e3eaabda88bb0e350ebb3c451698a174030ed",
+  "schemaVersion": 1,
+  "scope": "targeted",
+  "project": "SamHuang68/AI_Stock"
 }
