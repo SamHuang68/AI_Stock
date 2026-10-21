@@ -7,7 +7,7 @@
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "部署狀態只改文件；分享封存掃描",
+      "reason": "發布狀態只改文件；分享封存掃描",
       "targets": [
         "tests.test_dist_scrub"
       ],
@@ -21,7 +21,7 @@
       ]
     }
   ],
-  "baseCommit": "14e243ab4cce59b9c628372af05e836081c35062",
+  "baseCommit": "dba64e3b3bd010481dbb17fd1230e1177e1959f2",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

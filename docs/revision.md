@@ -1,3 +1,24 @@
+## 2026-10-21 發布狀態補記（dba64e3b）
+
+- 基底：`dba64e3b3bd010481dbb17fd1230e1177e1959f2`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。本段補充下方 `/sectors` 台股快取段落（#251）的「未推送、未合併、未發布」。
+
+| 版本 | 內容 | 發布時間（本機時間） | 狀態 |
+| --- | --- | --- | --- |
+| `dba64e3b3bd010481dbb17fd1230e1177e1959f2` | #251 `/sectors` 台股快取契約（實作 `804abaad3ef1cd1700f21d6b2a28143385a81f65`、合併 `14e243ab4cce59b9c628372af05e836081c35062`）；以及 #250、#253 文件與 #252 WaveDeck 檔案 | 2026-10-21 20:30（正式）、20:32（本機） | 本機與正式後端已發布 |
+
+- 依據：
+  - 本機 18432 `/health`、正式後端 18435 `/health` 與 `/health/live` 的 `runtimeCommit` 實測皆為目標 SHA；閘道 `ok`、`isolated-host`；本機 `/selftest` 21／21 通過。
+  - #251：兩端 `/sectors?mkt=TW` 都回完整契約（`date`、`prevSession`、56 列皆有 `prevChangePct` 與 `change`，並有 `sectorFlow`、`industryRevenue`，來源 `TWSE MI_INDEX IND`）。
+  - 20:33:03 與 20:35:02 各查一次，結果相同。第二次已超過完整回應的 60 秒快取期限，期間兩端 Pulse 各執行 4、5 次，沒有再以精簡版覆寫。
+- 流程：
+  - stage 為 `tests=passed`，main push CI 對目標為 success；
+  - 停止前兩端無執行中工作；停止後完整備份 14 個 SQLite，完整性 ok；
+  - promote rc 0，保留 `data/`；兩端 `market.db` 的 `quick_check` ok。
+- WaveDeck：不隨私有站發布，維持 `1a4d014b`、`releaseVerified` true（見上方 #252 部署狀態段落）。
+- 未驗證：閘道／Tailscale 端版本（需 Owner token）、實機畫面（類股名次升降、資金流向標籤與產業營收的顯示）。
+
+---
+
 ## 2026-10-21 WaveDeck 部署狀態補記（#252，WD-07）
 
 - 基底：`1a4d014bf32979c725b27d0f2d7ca421fc8a9989`（main）。只補記狀態，不改程式；本段補充下方「WaveDeck 紙上模式改用模擬權益」段落的「未合併、未部署」。
