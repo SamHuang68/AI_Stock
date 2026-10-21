@@ -1,5 +1,7 @@
 """已核對的公開交易參考；純本機讀取，不推論未收錄股票仍在交易。"""
 import json
+import sqlite3
+import time as _time
 from datetime import date, time, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -10,9 +12,64 @@ def references():
     return json.loads(Path(__file__).with_suffix('.json').read_text(encoding='utf-8'))
 
 
+# JSON 只收錄人工核對的年度；之後的年度改讀市場資料庫內由 台股日線.stored_calendar 自動抓取的
+# TWSE 官方開休市日曆（calendar_years），避免跨年後一律變成「未知」（審查 CAL-02）。
+# 只用於 JSON 年度之後；更早的年度維持原行為，不改變既有歷史計算。
+DB_CALENDAR_SOURCE = 'TWSE 開休市日曆（市場資料庫 calendar_years，自動更新）'
+_DB_CALENDAR_TTL_SECONDS = 3600
+_db_calendar_cache = {}
+
+
+def _db_calendar(year):
+    """回傳 (休市日集合, 補班日集合)；資料庫未收錄或內容矛盾時回 None。結果快取一小時。"""
+    now = _time.monotonic()
+    hit = _db_calendar_cache.get(year)
+    if hit and hit[0] > now:
+        return hit[1]
+    value = None
+    try:
+        import datastore
+        with datastore.read_snapshot() as conn:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='calendar_years'").fetchone():
+                row = conn.execute('SELECT closed,opened FROM calendar_years WHERE year=?', (year,)).fetchone()
+                if row:
+                    closed, opened = json.loads(row[0]), json.loads(row[1])
+                    if not isinstance(closed, list) or not isinstance(opened, list):
+                        raise ValueError('年度日曆內容不是日期清單')
+                    closed = {date.fromisoformat(day) for day in closed}
+                    opened = {date.fromisoformat(day) for day in opened}
+                    if any(day.year != year for day in closed | opened) or closed & opened:
+                        raise ValueError('年度日曆日期或開休市內容矛盾')
+                    value = (frozenset(closed), frozenset(opened))
+    except (OSError, sqlite3.Error, ValueError, TypeError) as exc:
+        from log_once import log_once
+        log_once('tw-calendar-db', '資料庫交易日曆無法讀取：' + str(exc))
+        value = None
+    _db_calendar_cache[year] = (now + _DB_CALENDAR_TTL_SECONDS, value)
+    return value
+
+
+def _official_later_year(year):
+    calendar_year = int(references()['calendar']['year'])
+    return _db_calendar(year) if year > calendar_year else None
+
+
+def calendar_covers(year):
+    """該年度是否有官方日曆（JSON 已核對年度，或之後年度的資料庫官方日曆）。"""
+    return str(year) == references()['calendar']['year'] or _official_later_year(int(year)) is not None
+
+
 def session(day):
     day = date.fromisoformat(day) if isinstance(day, str) else day
     calendar = references()['calendar']
+    official = _official_later_year(day.year) if str(day.year) != calendar['year'] else None
+    if official is not None:
+        closed, opened = official
+        if day in closed:
+            return {'status': 'closed', 'reason': '官方公告休市（TWSE 開休市日曆）', 'source': DB_CALENDAR_SOURCE}
+        if day.weekday() >= 5 and day not in opened:
+            return {'status': 'closed', 'reason': '週末休市', 'source': DB_CALENDAR_SOURCE}
+        return {'status': 'scheduled', 'reason': '表定交易日；仍以當日日線確認是否實際交易', 'source': DB_CALENDAR_SOURCE}
     holiday = calendar['closed'].get(day.isoformat())
     if holiday:
         source = calendar.get('closedSources', {}).get(day.isoformat(), calendar['source'])
@@ -51,7 +108,8 @@ def previous_session(day, *, session_lookup=None):
     """前一個已涵蓋的表定交易日；當日或回溯年度未知時停止。"""
     cursor = date.fromisoformat(day) if isinstance(day, str) else day
     lookup = session_lookup or session
-    if str(cursor.year) != references()['calendar']['year'] or lookup(cursor)['status'] == 'unknown':
+    # 只看日曆狀態：跨年時改由下一年度的官方日曆接續（審查 CAL-02），未知年度仍停止。
+    if lookup(cursor)['status'] == 'unknown':
         return None
     while True:
         cursor -= timedelta(days=1)

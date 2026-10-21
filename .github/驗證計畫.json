@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "1190f97719fdff71c6164428c440c075ecf03257",
+  "baseCommit": "020745108e1ac1a0fb4cc6e2656181c33e2e8ca8",
   "documentation": [
     "docs/revision.md"
   ],
@@ -33,6 +33,7 @@
         "server/server.py",
         "server/stock_signals.py",
         "server/stock_signals_routes.py",
+        "server/台股交易參考.py",
         "tests/silent_except_baseline.json",
         "tests/test_alert_conditions.py",
         "tests/test_alert_delivery_outbox.py",

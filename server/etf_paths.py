@@ -130,7 +130,7 @@ def freshness_calendar(dates: Iterable[_dt.date], today: _dt.date) -> dict:
     ref = trading_calendar.references()
     year = int(ref['calendar']['year'])
     oldest = min([today, *dates])
-    unknown = sorted(set(range(oldest.year, today.year + 1)) - {year})
+    unknown = sorted(y for y in range(oldest.year, today.year + 1) if not trading_calendar.calendar_covers(y))
     return {
         'basis': 'twse_calendar' if not unknown else 'twse_calendar_with_weekday_fallback',
         'verifiedYear': year,
