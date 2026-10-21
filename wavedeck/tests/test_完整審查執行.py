@@ -105,7 +105,11 @@ class 執行修正測試(unittest.TestCase):
             first.start()
             try:
                 self.assertTrue(entered.wait(3), "進場未到達隔離券商")
-                self.runtime.patch(account={"equity": 80000})
+                # 2026-10-21 WD-07：paper 權益來自模擬帳本；送單途中把當日起始權益記為 125 萬（現值 100 萬）製造回撤，
+                # 同時驗證送單用的舊快照不會覆寫交易日基準。
+                paper_account = importlib.import_module(self.package + ".paper_account")
+                self.runtime.patch(paper_ledger={"day": paper_account.trading_day(datetime.now(self.state.TZ8)),
+                                                 "dayStartEquity": 1_250_000})
                 second.start()
                 self.assertTrue(watchdog_started.wait(3))
                 self.assertFalse(flattened.wait(0.15), "進場尚未結束就平倉")

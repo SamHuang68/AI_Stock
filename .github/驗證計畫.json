@@ -4,24 +4,75 @@
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "WaveDeck紙上模擬權益",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "timeoutSeconds": 300,
+      "reason": "paper 模擬成交帳本、權益與每日回撤鎖（WD-07）",
       "targets": [
-        "tests.test_dist_scrub"
+        "wavedeck.tests.test_paper_sim_equity",
+        "wavedeck.tests.test_dd_reference_account",
+        "wavedeck.tests.test_完整審查執行",
+        "wavedeck.tests.test_策略訊號整合",
+        "wavedeck.tests.test_reduce_and_paper_isolation",
+        "wavedeck.tests.test_smoke",
+        "wavedeck.tests.test_成交確認",
+        "wavedeck.tests.test_不留倉",
+        "wavedeck.tests.test_策略HTTP",
+        "wavedeck.tests.test_exec_md",
+        "wavedeck.tests.test_request_guard"
       ],
       "changes": [
-        "docs/revision.md"
+        "wavedeck/server/paper_account.py",
+        "wavedeck/server/broker.py",
+        "wavedeck/server/config.py",
+        "wavedeck/server/engine.py",
+        "wavedeck/server/risk.py",
+        "wavedeck/tests/test_paper_sim_equity.py",
+        "wavedeck/tests/test_dd_reference_account.py",
+        "wavedeck/tests/test_完整審查執行.py"
       ],
       "inputs": [
         ".gitignore",
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "wavedeck/server/broker.py",
+        "wavedeck/server/config.py",
+        "wavedeck/server/engine.py",
+        "wavedeck/server/paper_account.py",
+        "wavedeck/server/risk.py",
+        "wavedeck/server/st_link.py",
+        "wavedeck/server/state.py",
+        "wavedeck/server/策略契約.py",
+        "wavedeck/tests/test_dd_reference_account.py",
+        "wavedeck/tests/test_exec_md.py",
+        "wavedeck/tests/test_paper_sim_equity.py",
+        "wavedeck/tests/test_reduce_and_paper_isolation.py",
+        "wavedeck/tests/test_request_guard.py",
+        "wavedeck/tests/test_smoke.py",
+        "wavedeck/tests/test_不留倉.py",
+        "wavedeck/tests/test_完整審查執行.py",
+        "wavedeck/tests/test_成交確認.py",
+        "wavedeck/tests/test_策略HTTP.py",
+        "wavedeck/tests/test_策略訊號整合.py"
+      ]
+    },
+    {
+      "id": "WaveDeck前端單頁",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "deck.js 紙上權益說明、未知回撤文字與未知金額顯示「—」後單頁檢查不退化",
+      "targets": [
+        "tests/wavedeck_onepage_selftest.js"
+      ],
+      "changes": [
+        "wavedeck/web/js/deck.js"
+      ],
+      "inputs": [
+        ".gitignore",
+        "tests/wavedeck_onepage_selftest.js",
+        "wavedeck/web/js/deck.js"
       ]
     }
   ],
-  "baseCommit": "a9214b8c115ad2dfe83dc42075a64ca8cdff3ed7",
+  "baseCommit": "cffe196bad2c61ea1bf0503f493b389febe97e00",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
