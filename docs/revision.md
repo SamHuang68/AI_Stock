@@ -1,3 +1,28 @@
+## 2026-10-21 WaveDeck 部署狀態補記（#252，WD-07）
+
+- 基底：`1a4d014bf32979c725b27d0f2d7ca421fc8a9989`（main）。只補記狀態，不改程式；本段補充下方「WaveDeck 紙上模式改用模擬權益」段落的「未合併、未部署」。
+
+| PR | 內容 | 實作 SHA（合併前分支頭） | 合併 SHA | WaveDeck 部署（本機時間） |
+| --- | --- | --- | --- | --- |
+| #252 | WD-07 紙上模擬權益，paper 每日回撤上限生效 | `84c5634903b9d8f54dce6dafa860283e9dba4da7` | `1a4d014bf32979c725b27d0f2d7ca421fc8a9989` | 2026-10-21 19:17 |
+
+- 部署方式（與 #237、#238 相同）：
+  1. 核對健康端點 PID、baseDir 與完整命令列後停止 WaveDeck；
+  2. 停止後備份 `wavedeck/data`（213 個檔案）；
+  3. 主工作樹 `git pull --ff-only`，根目錄 `data/` 既有修改未動；
+  4. 逐檔核對 Git blob 後重建 `wavedeck/data/程式版本.json`（47 檔，含新的 `server/paper_account.py`）；
+  5. 以 `START_WAVEDECK.cmd --no-browser` 重啟。
+- 實測（PID 59760）：
+  - `runtimeCommit` 為 `1a4d014…`，`releaseVerified` 為 true；Halted、paper、急停維持、持倉 0。
+  - 帳戶來源由 `wave_ai_ref` 改為 `paper_sim`：權益與昨日餘額皆 1,000,000，單日回撤 0%，`daily_dd_status` 由 `unknown_reference` 變為 `measured`。
+  - 交易日記為 2026-10-22（19:17 已過 15:00 換日點，屬夜盤），符合設計。
+  - `wavedeck/data/master/` 的檔案在重啟前後大小與修改時間相同。
+  - 帳戶面板 DOM 文字：說明列為「紙上模擬權益 · 起始 1,000,000 · 每點 200 元 · 未計費稅」，單日回撤格為「0% / 5%」；瀏覽器窗格當時隱藏，只讀文字、未截圖。
+- 未在實機驗證：有部位時的成交記帳，以及模擬虧損超過 5% 觸發急停與紙上平倉。目前急停中、沒有部位，只有自動化案例涵蓋。
+- 本機 ST 與正式後端不受影響（兩者沒有 WaveDeck 程式），仍為 `a9214b8c`。
+
+---
+
 ## 2026-10-21 `/sectors` 台股快取被 Pulse 精簡版取代（類股名次、資金流向、產業營收不顯示）
 
 - 基底：`cffe196bad2c61ea1bf0503f493b389febe97e00`（origin/main）；分支 `claude/sectors-cache-contract`。實作與合併 SHA 待 PR 合併後補記。

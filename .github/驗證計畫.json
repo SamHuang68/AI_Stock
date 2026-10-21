@@ -1,88 +1,28 @@
 {
-  "project": "SamHuang68/AI_Stock",
-  "schemaVersion": 1,
-  "scope": "targeted",
-  "baseCommit": "1a4d014bf32979c725b27d0f2d7ca421fc8a9989",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "類股快取只沿用完整回應",
-      "reason": "/sectors 台股與前一交易日查詢只沿用同資料日、官方來源、帶前一交易日欄位的完整回應；Pulse 精簡版改為重新計算；完整快取照舊不連網",
+      "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
+      "timeoutSeconds": 600,
+      "reason": "部署狀態只改文件；分享封存掃描",
       "targets": [
-        "tests.test_sector_rank_change",
-        "tests.test_sector_flow",
-        "tests.test_sector_history"
+        "tests.test_dist_scrub"
       ],
       "changes": [
-        "server/server.py",
-        "tests/test_sector_rank_change.py"
+        "docs/revision.md"
       ],
       "inputs": [
-        "server/industry_revenue.py",
-        "server/log_once.py",
-        "server/lru_cache.py",
-        "server/market_routes.py",
-        "server/sector_flow.py",
-        "server/sector_history.py",
-        "server/server.py",
-        "tests/test_decision_http.py",
-        "tests/test_sector_flow.py",
-        "tests/test_sector_history.py",
-        "tests/test_sector_rank_change.py"
-      ],
-      "timeoutSeconds": 300
-    },
-    {
-      "id": "Pulse 類股快取鍵分離",
-      "reason": "Pulse 先讀 /sectors 的完整回應，自己的精簡列只寫 sectors:pulse:{ymd}；完整回應存在時不寫入；既有 Pulse 回補與夜盤案例不變",
-      "kind": "unittest",
-      "targets": [
-        "tests.test_pulse_extraction",
-        "tests.test_完整審查資料"
-      ],
-      "changes": [
-        "server/pulse_orchestration.py",
-        "tests/test_pulse_extraction.py"
-      ],
-      "inputs": [
-        "server/breadth_build.py",
-        "server/datastore.py",
-        "server/deadline.py",
-        "server/exchange_source_dates.py",
-        "server/industry_revenue.py",
-        "server/market_routes.py",
-        "server/pulse_extras.py",
-        "server/pulse_intel.py",
-        "server/pulse_layout.py",
-        "server/pulse_orchestration.py",
-        "server/trend_quant.py",
-        "server/turnover_quant.py",
-        "tests/test_pulse_extraction.py",
-        "tests/test_完整審查資料.py"
-      ],
-      "timeoutSeconds": 300
-    },
-    {
-      "id": "靜默例外棘輪",
-      "reason": "server.py 與 pulse_orchestration.py 修改後沒有新增靜默寬鬆例外",
-      "kind": "unittest",
-      "targets": [
-        "tests.test_no_new_silent_exceptions"
-      ],
-      "changes": [
-        "server/pulse_orchestration.py",
-        "server/server.py"
-      ],
-      "inputs": [
-        "server/pulse_orchestration.py",
-        "server/server.py",
-        "tests/silent_except_baseline.json",
-        "tests/test_no_new_silent_exceptions.py"
-      ],
-      "timeoutSeconds": 300
+        ".gitignore",
+        "docs/revision.md",
+        "tests/test_dist_scrub.py"
+      ]
     }
-  ]
+  ],
+  "baseCommit": "14e243ab4cce59b9c628372af05e836081c35062",
+  "schemaVersion": 1,
+  "scope": "targeted",
+  "project": "SamHuang68/AI_Stock"
 }
