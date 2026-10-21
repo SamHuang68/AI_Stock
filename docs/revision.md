@@ -1,3 +1,21 @@
+## 2026-10-21 發布狀態補記（a9214b8c）
+
+- 基底：`a9214b8c115ad2dfe83dc42075a64ca8cdff3ed7`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。
+
+| 版本 | 內容 | 發布時間（本機時間） | 狀態 |
+| --- | --- | --- | --- |
+| `a9214b8c115ad2dfe83dc42075a64ca8cdff3ed7` | #249 QB-05（以及 #248 發布狀態補記） | 2026-10-21 14:20（正式）、14:23（本機） | 本機與正式後端已發布 |
+
+- 依據：本機 18432 `/health`、正式後端 18435 `/health` 與 `/health/live` 的 `runtimeCommit` 實測皆為目標 SHA；閘道 `ok`、`isolated-host`；本機 `/selftest` 21／21 通過，含 QB-05 新增的 4 項。
+- 流程：
+  - stage 為 `tests=passed`，main push CI 對目標為 success；
+  - 停止前兩端無執行中工作；停止後完整備份 14 個 SQLite，完整性 ok；
+  - promote rc 0，保留 `data/`；兩端 `market.db` 的 `quick_check` ok。
+- WaveDeck：`wavedeck/` 無變更，維持 `474c509`、`releaseVerified` true。
+- 未驗證：閘道／Tailscale 端版本（需 Owner token）、實機畫面。
+
+---
+
 ## 2026-10-21 Yahoo 報價的異常門檻不再對海外標的套用台股漲跌停（QB-05）
 
 - 基底：`85b1dc868b8a061f2a0fcbe8291e0497eca7168c`（origin/main）；分支 `claude/quote-anomaly-non-tw`。實作與合併 SHA 待 PR 合併後補記。
