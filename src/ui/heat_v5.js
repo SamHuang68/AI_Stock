@@ -99,6 +99,7 @@
       '#ht-root .ht-cell.dim{opacity:.38}' +
       '#ht-root .ht-cell .nm{font-size:10px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '#ht-root .ht-cell .pc{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}' +
+      '#ht-root .ht-cell .pc .rk{font-size:9px;font-weight:600;opacity:.85;margin-left:4px;vertical-align:middle;white-space:nowrap}' +
       '#ht-root .ht-cell .px{font-size:8px;opacity:.85;font-variant-numeric:tabular-nums}' +
       '#ht-root .ht-cell .pxcode{font-size:8px;opacity:.7;letter-spacing:.2px}' +
       '#ht-root .ht-focus-zone{min-height:0;display:flex;flex-direction:column;' +
@@ -213,6 +214,30 @@
       rows.sort(function (a, b) { return b.changePct - a.changePct; });
     }
     return rows;
+  }
+
+  // 名次：在畫面同一組類股（已排除非產業指數）內，依當日與前一交易日的官方漲跌幅各自排序；
+  // 同分依名稱排序以保持穩定。前一日沒有資料的類股不給前一日名次，畫面也不顯示升降。
+  function sectorRanks(rows) {
+    var byName = function (a, b) { return String(a.name).localeCompare(String(b.name), 'zh-TW'); };
+    var finite = function (v) { return v != null && v !== '' && isFinite(Number(v)); };
+    var out = {};
+    rows.filter(function (r) { return finite(r.changePct); }).slice()
+      .sort(function (a, b) { return (Number(b.changePct) - Number(a.changePct)) || byName(a, b); })
+      .forEach(function (r, i) { out[r.name] = { rank: i + 1, prevRank: null }; });
+    rows.filter(function (r) { return finite(r.prevChangePct) && out[r.name]; }).slice()
+      .sort(function (a, b) { return (Number(b.prevChangePct) - Number(a.prevChangePct)) || byName(a, b); })
+      .forEach(function (r, i) { out[r.name].prevRank = i + 1; });
+    return out;
+  }
+
+  // 精簡標記放在漲跌幅旁，不增加格子行數；完整說明放在 title 與 aria-label。
+  function rankBadge(info) {
+    if (!info || info.prevRank == null) return '';
+    var move = info.prevRank - info.rank;
+    var mark = move > 0 ? '▲' + move : move < 0 ? '▼' + (-move) : '＝';
+    var full = '名次 ' + info.rank + '（前一交易日 ' + info.prevRank + '）';
+    return '<span class="rk" title="' + esc(full) + '" aria-label="' + esc(full) + '">#' + info.rank + mark + '</span>';
   }
 
   function syncMktButtons() {
@@ -423,6 +448,7 @@
         '<i style="background:rgba(248,113,113,.8)"></i>跌　（美股綠漲紅跌）</div>';
 
     var grid = '<div class="ht-grid">';
+    var ranks = sectorRanks(rows);
     if (!rows.length) {
       grid += '<div class="ht-loading">無類股資料</div>';
     } else {
@@ -446,7 +472,7 @@
           esc(code || '') + '" data-mkt="' + mkt + '" data-name="' + esc(s.name) +
           '" data-sector-key="' + esc(sk) + '" title="' + esc(s.name) + ' · 查看類股成員' + '">' +
           '<div class="nm">' + esc(s.name) + '</div>' +
-          '<div class="pc">' + pct(s.changePct) + '</div>' +
+          '<div class="pc">' + pct(s.changePct) + rankBadge(ranks[s.name]) + '</div>' +
           (flowBits.length ? '<div class="pxcode">' + esc(flowBits.join(' · ')) + '</div>' : '') +
           (code ? '<div class="pxcode">' + esc(code) + '</div>' : '') +
           '<div class="px">' + fmt(s.close) + '</div></div>';
@@ -466,6 +492,9 @@
         '<div class="ht-main"><h4><span>類股熱力圖</span>' + focusTag + '</h4>' +
           legend + '<div class="ht-grid-wrap">' + grid + '</div>' +
           '<div class="ht-note">/sectors · ' + esc(((d && d.sectorFlow) || {}).label || '漲跌參與') +
+          (d && d.prevSession && d.prevSession.date
+            ? ' · 名次依當日漲跌幅，升降對照前一交易日 ' + esc(d.prevSession.date) + '（同為 TWSE MI_INDEX）'
+            : '') +
           ' · 無相同市場範圍成交額時不顯示資金流 · 點格查看類股成員 · 非投資建議</div>' +
           '<section id="ht-members" class="ht-member-panel" aria-live="polite"><div class="ht-note">選擇類股以查看可確認分類的成員；未提供的成員資料保持空白。</div></section></div>' +
         '<div class="ht-focus-zone"><h4 id="ht-focus-title">焦點掃描 · ' + mkt + '</h4>' +

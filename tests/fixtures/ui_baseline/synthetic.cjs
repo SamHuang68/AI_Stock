@@ -89,10 +89,18 @@ function sectors(mkt) {
   const rows = mkt === 'US'
     ? US_SECTORS.map(([symbol, name]) => ({ symbol, name: name + '（示意）' }))
     : TW_SECTORS.map(name => ({ name }));
+  // 台股另附前一交易日漲跌（對應 /sectors 的 prevChangePct／prevSession）；最後一個類股刻意不附，覆蓋「無前一日資料」。
+  const prevDate = '20260114';
   return { ok: true, market: mkt, date: FIXED_DATE.replace(/-/g, ''), source: SOURCE,
     sectorFlow: { label: '示意資料：同範圍漲跌參與' },
-    sectors: rows.map(row => ({ ...row, close: round(50 + rand() * 450), changePct: round((rand() - 0.45) * 6),
-      marketSharePct: mkt === 'TW' ? round(rand() * 12, 1) : null, rs20VsBenchmarkPct: round((rand() - 0.5) * 10, 1) })) };
+    prevSession: mkt === 'TW' ? { date: prevDate, status: 'found', source: SOURCE } : undefined,
+    sectors: rows.map((row, i) => {
+      const out = { ...row, close: round(50 + rand() * 450), changePct: round((rand() - 0.45) * 6),
+        marketSharePct: mkt === 'TW' ? round(rand() * 12, 1) : null, rs20VsBenchmarkPct: round((rand() - 0.5) * 10, 1) };
+      const prev = round((rand() - 0.5) * 5);
+      if (mkt === 'TW' && i < rows.length - 1) Object.assign(out, { prevChangePct: prev, prevSessionDate: prevDate });
+      return out;
+    }) };
 }
 
 // 回傳 { json } 表示有合成回應；回傳 null 表示這個端點沒有 fixture（呼叫端回 {} 並列入報告）。

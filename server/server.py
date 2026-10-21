@@ -1680,6 +1680,10 @@ def _chip_streak(clean_code):
 # 短 TTL（60s）對效能影響可忽略：同一張線型 60s 內被反覆點仍走 cache；
 # 而每分鐘整批數十 symbol 的 Screener 也只多抓一次。
 _cache = LRUCache(LRU_MAX, ttl_seconds=60)
+# 類股熱力圖「前一交易日」官方漲跌：{資料日: (取得時刻, 結果)}。找到後該資料日不再重抓
+# （過去交易日的官方數字不會再變）；失敗或查無時 10 分鐘後才重試，避免每分鐘多打證交所。
+_SECTORS_PREV_SESSION: dict = {}
+_SECTORS_PREV_RETRY_SECONDS = 600
 _pool  = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='yf')
 # Pulse bounded executors live in pulse_runtime.py (imported as _pulse_*_pool).
 _fundamental_pool = BoundedExecutor(5, 10, prefix='fundamental')
@@ -1926,6 +1930,11 @@ def _twse_mis_stock_quotes(codes):
         except Exception as error:
             print('[台股報價] MIS 請求失敗：', type(error).__name__)
     return out
+
+
+# 警報的盤中條件（漲跌幅、預估量比）沿用同一個官方報價入口，不在警報模組另建抓取。
+if alert_daemon is not None:
+    alert_daemon.configure(tw_quote=lambda code: _twse_mis_stock_quotes([code]).get(code))
 
 
 def _twse_mis_index(ex_ch):
@@ -4985,6 +4994,50 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             self._ok(json.dumps({'date': '', 'market': 'US', 'sectors': [], '_msg': 'SPDR ETFs all failed'}, ensure_ascii=False).encode())
 
     # ── TW: TWSE MI_INDEX → Yahoo 代理股後備 ───────────────────
+    def _tw_sectors_prev_session(self, date_str, parse_rows, url_templates):
+        """前一交易日的官方類股漲跌（TWSE MI_INDEX IND，與當日同一來源與解析）。
+
+        快取優先；官方回覆「無資料」才視為非交易日往前找，抓取或解析失敗就停止，不往前猜。
+        結果依資料日記住：找到後不再重抓，失敗或查無時 10 分鐘後才重試。"""
+        import sector_flow as _sf
+        now = time.time()
+        memo = _SECTORS_PREV_SESSION.get(date_str)
+        if memo and (memo[1].get('status') == 'found' or now - memo[0] < _SECTORS_PREV_RETRY_SECONDS):
+            return memo[1]
+
+        def fetch_day(day):
+            cached = _cache.get(f'sectors:{day}')
+            if cached is not None:
+                obj = json.loads(cached)
+                if obj.get('sectors') and obj.get('source') == 'TWSE MI_INDEX IND':
+                    return obj['sectors']
+            last_error = None
+            for tmpl in url_templates:
+                try:
+                    req = urllib.request.Request(tmpl.format(date=day), headers=YF_HEADERS)
+                    with urllib.request.urlopen(req, timeout=4) as resp:
+                        payload = json.loads(resp.read())
+                except (OSError, ValueError) as exc:
+                    last_error = exc
+                    continue
+                rows = parse_rows(payload) if isinstance(payload, dict) else []
+                if rows:
+                    return rows
+                stat = str((payload or {}).get('stat') or '') if isinstance(payload, dict) else ''
+                if stat and stat.upper() != 'OK':
+                    return []  # 官方確認當日無資料（非交易日）
+                last_error = ValueError(f'無法解析 {day} 的類股表（stat={stat or "空"}）')
+            raise last_error or ValueError(f'{day} 沒有可用回應')
+
+        result = _sf.find_prev_session(date_str, fetch_day, max_calendar_days=7, budget_seconds=8.0)
+        if result['status'] != 'found':
+            log_once(f'sectors-prev-session-{date_str}',
+                     f'[sectors] 前一交易日類股漲跌不可用（{result["status"]}）：{result.get("error") or "七日內查無交易日"}')
+        _SECTORS_PREV_SESSION[date_str] = (now, result)
+        while len(_SECTORS_PREV_SESSION) > 16:
+            _SECTORS_PREV_SESSION.pop(next(iter(_SECTORS_PREV_SESSION)))
+        return result
+
     def _handle_sectors_tw(self, nocache=False):
         from datetime import date as _date, timedelta
         qs = parse_qs(urlparse(self.path).query)
@@ -5128,9 +5181,17 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                         }
                 except Exception as _ir_sec_exc:
                     print('[sectors] industry revenue', _ir_sec_exc)
+                prev_session = self._tw_sectors_prev_session(date_str, parse_twse_indices, urls_template)
+                if prev_session.get('status') == 'found':
+                    import sector_flow as _sf_prev
+                    sectors = _sf_prev.attach_prev_session_change(
+                        sectors, prev_session.get('rows'), prev_session_date=prev_session.get('date'))
                 out = {'date': date_str, 'source': 'TWSE MI_INDEX IND',
                        'sectorFlow': flow, 'sectors': sectors,
-                       'industryRevenue': industry_rev_pack}
+                       'industryRevenue': industry_rev_pack,
+                       'prevSession': {'date': prev_session.get('date') if prev_session.get('status') == 'found' else None,
+                                       'status': prev_session.get('status'),
+                                       'source': 'TWSE MI_INDEX IND'}}
                 body = json.dumps(out, ensure_ascii=False).encode()
                 _cache.set(key, body)
                 self._ok(body)
