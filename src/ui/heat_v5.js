@@ -122,6 +122,7 @@
         '#ht-body .ht-dash{grid-template-columns:1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,.9fr)}' +
         '#ht-body .ht-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}' +
       '}' +
+      '#ht-root .ht-link{background:none;border:none;padding:0;font:inherit;color:var(--gold);cursor:pointer;text-decoration:underline}' +
       '#ht-root .ht-member-panel{margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);max-height:45vh;overflow:auto;flex:0 0 auto}' +
       '#ht-root .ht-member-panel h4{font-size:13px;margin:0 0 6px;overflow-wrap:anywhere}' +
       '#ht-root .ht-member-panel table{border-collapse:collapse;width:100%;font-size:12px}' +
@@ -205,7 +206,8 @@
   function filterSectors(list, mkt) {
     var rows = (list || []).filter(function (s) {
       if (!s || s.changePct == null || !s.name) return false;
-      if (mkt === 'TW' && SKIP_TW.test(s.name)) return false;
+      // 伺服器依證交所原始名稱標記：大盤、主題、槓桿反向與合併類指數為 false；沒有標記的舊資料仍靠名稱排除。
+      if (mkt === 'TW' && (s.industry === false || SKIP_TW.test(s.name))) return false;
       return true;
     });
     if (state.sort === 'name') {
@@ -495,7 +497,7 @@
           (d && d.prevSession && d.prevSession.date
             ? ' · 名次依當日漲跌幅，升降對照前一交易日 ' + esc(d.prevSession.date) + '（同為 TWSE MI_INDEX）'
             : '') +
-          ' · 無相同市場範圍成交額時不顯示資金流 · 點格查看類股成員 · 非投資建議</div>' +
+          ' · 無相同市場範圍成交額時不顯示資金流 · 點格查看類股成員' + memberGroupHtml(mkt) + ' · 非投資建議</div>' +
           '<section id="ht-members" class="ht-member-panel" aria-live="polite"><div class="ht-note">選擇類股以查看可確認分類的成員；未提供的成員資料保持空白。</div></section></div>' +
         '<div class="ht-focus-zone"><h4 id="ht-focus-title">焦點掃描 · ' + mkt + '</h4>' +
           '<div id="ht-focus" class="ht-loading">讀取已完成焦點快取…</div></div>' +
@@ -513,11 +515,33 @@
       };
     });
 
+    bindMemberGroup(body);
     applySectorHighlight(body);
     if (state.sector) loadMembers(state.sector, mkt);
 
     var cachedFocus = state.focusByMkt[mkt];
     if (cachedFocus) renderFocus(cachedFocus);
+  }
+
+  // 電子工業合併類不再是熱力圖格子；8 個電子次產業的合併成員清單改由說明列的按鈕開啟，
+  // 送出與原本點格子相同的類股名稱。
+  var MEMBER_GROUP_TW = '電子工業';
+
+  function memberGroupHtml(mkt) {
+    if (mkt !== 'TW') return '';
+    return '（<button type="button" class="ht-link" data-member-group="' + esc(MEMBER_GROUP_TW) +
+      '">電子相關產業合併成員</button>）';
+  }
+
+  function bindMemberGroup(body) {
+    var button = body && body.querySelector('[data-member-group]');
+    if (!button) return;
+    button.onclick = function () {
+      state.sector = button.getAttribute('data-member-group');
+      state.sectorKey = null;
+      applySectorHighlight(body);
+      loadMembers(state.sector, state.mkt);
+    };
   }
 
   function renderMembers(data, sector, mkt) {

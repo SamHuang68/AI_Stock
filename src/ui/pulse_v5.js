@@ -4053,7 +4053,8 @@
       return;
     }
     jget('/sectors?mkt=' + encodeURIComponent(sectorMkt)).then(function (d) {
-      var rows = (d && d.sectors) || [];
+      // 伺服器標記 industry: false 的大盤、主題、槓桿反向與合併類指數不列入產業輪動。
+      var rows = ((d && d.sectors) || []).filter(function (s) { return s && s.industry !== false; });
       sectorCache[sectorMkt] = rows.map(function (s) {
         return { name: s.name, changePct: s.changePct, close: s.close, symbol: s.symbol };
       });
