@@ -133,12 +133,98 @@ class ServerPrevSessionTest(unittest.TestCase):
         self.assertEqual(result['date'], '20260114', '格式異常時停在該日，不往前猜')
 
     def test_cached_official_response_is_reused_without_network(self):
-        cached = json.dumps({'source': 'TWSE MI_INDEX IND', 'sectors': [{'name': '航運', 'changePct': -0.4}]})
+        cached = json.dumps({'date': '20260114', 'source': 'TWSE MI_INDEX IND', 'prevSession': {'status': 'found'},
+                             'sectors': [{'name': '航運', 'changePct': -0.4}]})
         with patch.object(self.server._cache, 'get', side_effect=lambda key: cached if key == 'sectors:20260114' else None), \
                 patch('urllib.request.urlopen', side_effect=AssertionError('不應連網')):
             result = self.call()
         self.assertEqual((result['status'], result['date']), ('found', '20260114'))
         self.assertEqual(result['rows'][0]['name'], '航運')
+
+    def test_incomplete_cached_body_is_not_taken_as_that_day(self):
+        # Pulse 精簡版（沒有資料日、前一交易日欄位）可能是更早一天的資料，不能當成 0114 的官方漲跌。
+        pulse_shape = json.dumps({'ok': True, 'source': 'TWSE MI_INDEX IND', 'sectors': [{'name': '航運', 'changePct': 9.9}]})
+        official = {'stat': 'OK', 'rows': [{'name': '航運', 'changePct': -0.4}]}
+        with patch.object(self.server._cache, 'get', side_effect=lambda key: pulse_shape if key == 'sectors:20260114' else None), \
+                patch('urllib.request.urlopen', side_effect=lambda req, timeout: _Response(json.dumps(official).encode())) as opened:
+            result = self.call()
+        self.assertEqual((result['status'], result['date']), ('found', '20260114'))
+        self.assertEqual(result['rows'][0]['changePct'], -0.4)
+        self.assertIn('date=20260114', opened.call_args[0][0].full_url)
+
+
+def _mi_index(rows):
+    return {'stat': 'OK', 'tables': [{'title': '類股指數', 'fields': ['指數', '收盤指數', '漲跌點數', '漲跌百分比(%)'],
+                                      'data': [[name, close, chg, pct] for name, close, chg, pct in rows]}]}
+
+
+class SectorsHandlerCacheTest(unittest.TestCase):
+    """/sectors 台股只沿用自己寫入的完整回應；同一鍵上的 Pulse 精簡版不得取代資料日、前一交易日與資金流向。"""
+
+    @classmethod
+    def setUpClass(cls):
+        from tests.test_decision_http import st_server
+        cls.server = st_server
+
+    def setUp(self):
+        from datetime import date
+        self.today = date.today().strftime('%Y%m%d')
+        self.store = {}
+        self.sent = []
+        self.prev_calls = []
+        for p in (patch.object(self.server._cache, 'get', side_effect=self.store.get),
+                  patch.object(self.server._cache, 'set', side_effect=lambda key, value, *a, **k: self.store.__setitem__(key, value))):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def handle(self, official_rows=None):
+        server = self
+
+        class FakeHandler:
+            path = '/sectors?mkt=TW'
+
+            def _ok(self, body):
+                server.sent.append(body)
+
+            def _tw_sectors_prev_session(self, date_str, parse_rows, url_templates):
+                server.prev_calls.append(date_str)
+                return {'status': 'found', 'date': '20260114', 'rows': [{'name': '水泥', 'changePct': -2.0}]}
+
+        def urlopen(req, timeout):
+            if 'MI_INDEX' not in req.full_url or official_rows is None:
+                raise AssertionError(f'不應連網：{req.full_url}')
+            return _Response(json.dumps(_mi_index(official_rows)).encode())
+
+        import industry_revenue
+        with patch('urllib.request.urlopen', side_effect=urlopen) as opened, \
+                patch.object(industry_revenue, 'get_aggregate', return_value={'ok': False}):
+            self.server.Handler._handle_sectors_tw(FakeHandler())
+        self.assertEqual(len(self.sent), 1)
+        return json.loads(self.sent[0]), opened
+
+    def test_pulse_shaped_body_is_recomputed_into_the_full_contract(self):
+        self.store[f'sectors:{self.today}'] = json.dumps(
+            {'ok': True, 'source': 'TWSE MI_INDEX IND', 'sectors': [{'name': '水泥', 'close': 1, 'change': None, 'changePct': 1.0}]},
+            ensure_ascii=False).encode()
+        body, opened = self.handle(official_rows=[('水泥類指數', '150.5', '1.2', '0.80'), ('航運類指數', '120.0', '-0.6', '-0.50')])
+        self.assertTrue(opened.called, '精簡版不算命中，要重新抓官方資料')
+        self.assertEqual(body['date'], self.today)
+        self.assertEqual(body['prevSession']['date'], '20260114')
+        self.assertIn('sectorFlow', body)
+        self.assertIn('industryRevenue', body)
+        cement = next(row for row in body['sectors'] if row['name'] == '水泥')
+        self.assertEqual((cement['changePct'], cement['prevChangePct']), (0.8, -2.0))
+        self.assertEqual(json.loads(self.store[f'sectors:{self.today}'])['date'], self.today, '完整回應寫回同一鍵')
+
+    def test_complete_cached_body_is_served_without_network(self):
+        complete = json.dumps({'date': self.today, 'source': 'TWSE MI_INDEX IND', 'sectorFlow': None,
+                               'sectors': [{'name': '水泥', 'changePct': 0.8, 'prevChangePct': -2.0}],
+                               'industryRevenue': None, 'prevSession': {'date': '20260114', 'status': 'found'}},
+                              ensure_ascii=False).encode()
+        self.store[f'sectors:{self.today}'] = complete
+        self.handle()
+        self.assertEqual(self.sent[0], complete)
+        self.assertEqual(self.prev_calls, [])
 
 
 if __name__ == '__main__':

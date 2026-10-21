@@ -145,6 +145,7 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
     mf = _cache_first([marketflow_cache_key(today)])
     sec = _cache_first([
         f'sectors:{ymd}',
+        f'sectors:pulse:{ymd}',
         f'sectors:TW:yahoo:{ymd}',
         f'sectors:TW:{ymd}',
     ])
@@ -219,9 +220,11 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
         ex_sec = extras.get('sectors') if isinstance(extras, dict) else None
         if isinstance(ex_sec, dict) and ex_sec.get('sectors'):
             sectors = ex_sec.get('sectors') or []
+            # sectors:{ymd} 屬於 /sectors 的完整回應（資料日、前一交易日、資金流向）；
+            # 精簡列寫進去會讓 /sectors 回傳缺欄位的版本，所以只寫 Pulse 自己的鍵。
             try:
                 _deps.cache.set(
-                    f'sectors:{ymd}',
+                    f'sectors:pulse:{ymd}',
                     json.dumps({'ok': True, 'sectors': sectors, 'source': ex_sec.get('source')},
                                ensure_ascii=False).encode(),
                     ttl=300,

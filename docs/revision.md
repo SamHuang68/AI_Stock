@@ -1,3 +1,35 @@
+## 2026-10-21 `/sectors` 台股快取被 Pulse 精簡版取代（類股名次、資金流向、產業營收不顯示）
+
+- 基底：`cffe196bad2c61ea1bf0503f493b389febe97e00`（origin/main）；分支 `claude/sectors-cache-contract`。實作與合併 SHA 待 PR 合併後補記。
+- 發現經過：
+  - `a9214b8c` 部署後做唯讀驗證，正式後端與本機的 `/sectors?mkt=TW` 回應都只有 `ok`、`sectors`、`source` 三個欄位；
+  - `date` 為空，沒有 `prevSession`，56 列都沒有 `prevChangePct`；
+  - 也沒有 `sectorFlow`、`industryRevenue`；`change` 為空，並混入寶島股價、臺灣50 等非產業指數。
+- 根因：
+  - `pulse_orchestration.py` 在三個類股快取鍵都未命中時，把 `pulse_extras` 的精簡列以 `{ok, sectors, source}` 寫進 `sectors:{ymd}`，存 300 秒；這也是 `/sectors` 台股完整回應的鍵。
+  - `/sectors` 讀到任何帶 `sectors` 的快取就直接回傳，走不到前一交易日、資金流向與產業營收的組裝。
+  - `/sectors` 自己的完整回應只存 60 秒（`_cache` 預設）。Pulse 持續更新，所以完整回應過期後，多半是 Pulse 先寫回精簡版。
+  - 精簡版可能是 `pulse_extras` 往前找到的較早資料日，卻存在今天的鍵下；前一交易日查詢若讀到它，會把別天的漲跌當成該日官方數字。
+- 引入時間：
+  - Pulse 從 `6f50baa`（2026-08-03）開始寫 `sectors:{ymd}`；`fe9dd67`（2026-09-06）搬到 `pulse_orchestration.py` 時沿用。
+  - 因此資金流向標籤、產業營收與資料日從 8 月起就常常不見。
+  - #245 的名次升降已隨 `4de979bd` 發布，但在正式站沒有作用。
+- 修正後行為：
+  - Pulse 照舊先讀 `/sectors` 的完整回應；自己的精簡列改寫到 `sectors:pulse:{ymd}`，不再寫 `/sectors` 的鍵。
+  - 新增 `_tw_sectors_body_complete`。`/sectors` 讀快取和前一交易日查詢都只沿用「同資料日、官方來源、帶 `prevSession`」的完整回應，其餘一律當作未命中、重新計算。這一步防止其他寫入者再造成同類的欄位消失。
+  - 沒有刪減任何欄位；畫面會恢復顯示 #245 的名次升降、資金流向標籤與產業營收。
+- 驗證：
+  - `tests/test_sector_rank_change.py` 新增 `SectorsHandlerCacheTest` 的兩個案例：精簡版會重新計算成完整契約；完整快取照舊不連網。
+  - 同一檔新增一個案例：前一交易日查詢不採用精簡版。既有「快取沿用」案例的夾具補上 `date` 與 `prevSession`，以對應收緊後的契約。
+  - `tests/test_pulse_extraction.py` 新增 `SectorsCacheKeyContractTests`：檢查 Pulse 讀寫哪些鍵；完整回應存在時不寫入。
+  - 在未修改的 main 上，三個新行為案例失敗，兩個保留案例通過。
+  - 修改後，`tests.test_sector_rank_change` 與 `tests.test_pulse_extraction` 共 28 個案例通過；其餘見驗證計畫證據。
+- 未驗證：實機畫面，需部署後檢查。
+- 後續（不在本次範圍）：Pulse 的 `pulse_extras.fetch_sectors_light` 與 `/sectors` 用不同解析器讀同一個 MI_INDEX 來源（Pulse 版本含非產業指數、沒有漲跌點），仍是兩條契約不同的管線；是否統一待 Sam 決定。
+- 發布狀態：未推送、未合併、未發布。
+
+---
+
 ## 2026-10-21 發布狀態補記（a9214b8c）
 
 - 基底：`a9214b8c115ad2dfe83dc42075a64ca8cdff3ed7`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。
