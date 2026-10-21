@@ -2,44 +2,377 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "d42daea3e0a410d534905dbf2e6d041d7fc78f89",
+  "baseCommit": "bd59a81282e8f2fa1ea4d5a5dc6e5ec424213214",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "README主要API表與路由一致",
-      "reason": "README「主要 API」表的每個端點都要對應 server.py 實際存在的路由與方法；新增說明段落不影響 API 表",
+      "id": "警報盤中條件與只提醒一次",
+      "reason": "漲跌幅與預估量比依官方報價跨越觸發；只提醒一次；既有價位與複合規則、待送匣、日線來源不變；靜默例外棘輪降為 3",
       "kind": "unittest",
       "targets": [
-        "tests.test_readme_api_routes"
+        "tests.test_alert_conditions",
+        "tests.test_警報日線來源",
+        "tests.test_完整審查警報權限",
+        "tests.test_alert_delivery_outbox",
+        "tests.test_no_new_silent_exceptions"
       ],
       "changes": [
-        "README.md",
-        "tests/test_readme_api_routes.py"
+        "server/alert_daemon.py",
+        "tests/test_alert_conditions.py",
+        "tests/silent_except_baseline.json"
       ],
       "inputs": [
-        "README.md",
+        "server/alert_daemon.py",
+        "server/atomic_store.py",
+        "server/indicators.py",
+        "server/log_once.py",
+        "server/secret_store.py",
+        "server/sector_flow.py",
         "server/server.py",
-        "tests/test_readme_api_routes.py"
+        "server/stock_signals.py",
+        "server/stock_signals_routes.py",
+        "tests/silent_except_baseline.json",
+        "tests/test_alert_conditions.py",
+        "tests/test_alert_delivery_outbox.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/test_完整審查警報權限.py",
+        "tests/test_警報日線來源.py"
+      ],
+      "timeoutSeconds": 600
+    },
+    {
+      "id": "類股前一交易日官方漲跌",
+      "reason": "/sectors 以同一 MI_INDEX 來源附前一交易日漲跌；抓取失敗不往前猜；記住結果與 10 分鐘重試；警報注入官方報價入口",
+      "kind": "unittest",
+      "targets": [
+        "tests.test_sector_rank_change",
+        "tests.test_sector_flow",
+        "tests.test_sector_history"
+      ],
+      "changes": [
+        "server/sector_flow.py",
+        "server/server.py",
+        "tests/test_sector_rank_change.py"
+      ],
+      "inputs": [
+        "server/log_once.py",
+        "server/lru_cache.py",
+        "server/market_routes.py",
+        "server/sector_flow.py",
+        "server/sector_history.py",
+        "server/server.py",
+        "tests/test_decision_http.py",
+        "tests/test_sector_flow.py",
+        "tests/test_sector_history.py",
+        "tests/test_sector_rank_change.py"
+      ],
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "類股名次與升降標記",
+      "reason": "名次在畫面同一組類股內依當日與前一交易日漲跌各自排序；無前一日資料不顯示；標記放在漲跌幅旁不增加格子行數",
+      "kind": "node",
+      "targets": [
+        "tests/heat_rank_selftest.js"
+      ],
+      "changes": [
+        "src/ui/heat_v5.js",
+        "tests/heat_rank_selftest.js"
+      ],
+      "inputs": [
+        "src/ui/heat_v5.js",
+        "tests/heat_rank_selftest.js"
       ],
       "timeoutSeconds": 60
     },
     {
-      "id": "UI同條件對照工具自我驗證",
-      "reason": "同一版本對自己：建置、合成資料、固定時鐘、攔下對外請求、每版兩次截圖，不得判為有差異",
+      "id": "類股成員與更新入口既有行為",
+      "reason": "heat_v5.js 修改後，類股成員、缺值、延遲回應、純讀焦點與更新入口行為不變",
       "kind": "node",
+      "targets": [
+        "tests/類股成員與更新入口_selftest.js"
+      ],
+      "changes": [
+        "src/ui/heat_v5.js"
+      ],
+      "inputs": [
+        "src/ui/heat_v5.js",
+        "src/ui/shell_v5.js",
+        "tests/類股成員與更新入口_selftest.js"
+      ],
+      "timeoutSeconds": 60
+    },
+    {
+      "id": "警報表單完整頁面",
+      "reason": "新條件門檻欄位、範圍檢查、只提醒一次；既有價位規則與舊規則清單原樣保留；輸入列版面不變",
+      "kind": "node",
+      "targets": [
+        "tests/alert_rule_form_browser.cjs"
+      ],
+      "changes": [
+        "src/alert/alert_push_v3.js",
+        "stock_terminal_v2.html",
+        "tests/alert_rule_form_browser.cjs"
+      ],
+      "inputs": [
+        "package-lock.json",
+        "package.json",
+        "src/ai/ai_runtime_client.js",
+        "src/ai/cmdpalette_v3.js",
+        "src/ai/copilot_v3.js",
+        "src/alert/alert_push_v3.js",
+        "src/alert/calendar_v3.js",
+        "src/alert/datahealth_v3.js",
+        "src/alert/settle_v3.js",
+        "src/alert/toast_v3.js",
+        "src/chart/aftermarket_v3.js",
+        "src/chart/drawtools_v3.js",
+        "src/chart/hotkeys_v3.js",
+        "src/chart/market_chart_v3.js",
+        "src/chart/market_score_bar_v3.js",
+        "src/chart/multichart_v3.js",
+        "src/chart/overnight_v3.js",
+        "src/chart/pattern_v3.js",
+        "src/chart/spread_v3.js",
+        "src/chart/volume_profile_v3.js",
+        "src/core/app_kernel_v5.js",
+        "src/core/chart_registry_v3.js",
+        "src/core/colors_v3.js",
+        "src/core/decision_data_v5.js",
+        "src/core/epistemic_badges_v5.js",
+        "src/core/etf_flow_tip_v3.js",
+        "src/core/etf_v3.js",
+        "src/core/feature_flags_v5.js",
+        "src/core/fields_v3.js",
+        "src/core/indicator_cache_v3.js",
+        "src/core/indices_v3.js",
+        "src/core/info_v2.js",
+        "src/core/intraday_volume_v3.js",
+        "src/core/live_v2.js",
+        "src/core/liverefresh_v3.js",
+        "src/core/market_data_v5.js",
+        "src/core/market_freshness_v5.js",
+        "src/core/market_intel_v5.js",
+        "src/core/market_v3.js",
+        "src/core/namesearch_v3.js",
+        "src/core/position_v2.js",
+        "src/core/pro_v2.js",
+        "src/core/realtime_v3.js",
+        "src/core/table_sort_v5.js",
+        "src/core/watch_v2.js",
+        "src/core/wl_live_v3.js",
+        "src/core/估值承接核心.js",
+        "src/core/投組資料契約_v5.js",
+        "src/core/更新工作_v5.js",
+        "src/core/研究任務.js",
+        "src/core/研究工作流.js",
+        "src/fundamental/chainmom_v3.js",
+        "src/fundamental/chip_v3.js",
+        "src/fundamental/fundamental_v3.js",
+        "src/fundamental/supplychain_v3.js",
+        "src/fundamental/valuation_v3.js",
+        "src/screener/backtest_v3.js",
+        "src/screener/strategy_builder_v3.js",
+        "src/screener/strategy_script_v3.js",
+        "src/screener/wizard_v3.js",
+        "src/screener/策略版本.js",
+        "src/ui/K線事件研究.js",
+        "src/ui/afterhours_v5.js",
+        "src/ui/ai_v5.js",
+        "src/ui/book_v5.js",
+        "src/ui/breadth_v5.js",
+        "src/ui/bridge_v5.js",
+        "src/ui/chart_visual_v5.js",
+        "src/ui/conditional_expectation_v5.js",
+        "src/ui/consensus_attention_v5.js",
+        "src/ui/daily_cache_v3.js",
+        "src/ui/datasources_v3.js",
+        "src/ui/decision_v5.js",
+        "src/ui/dragwin_v3.js",
+        "src/ui/enhance_v3.js",
+        "src/ui/heat_v5.js",
+        "src/ui/hub_v5.js",
+        "src/ui/mobile_v2.css",
+        "src/ui/news_v5.js",
+        "src/ui/peak_observation_100d_v5.js",
+        "src/ui/peak_observation_v5.js",
+        "src/ui/polish_v3.js",
+        "src/ui/postmarket_v5.js",
+        "src/ui/pulse_v5.js",
+        "src/ui/scan_v5.js",
+        "src/ui/share_v3.js",
+        "src/ui/shell_v5.js",
+        "src/ui/stock_health_v5.js",
+        "src/ui/toolbar_v3.js",
+        "src/ui/touxin_5d_v5.js",
+        "src/ui/txf_intraday_v3.js",
+        "src/ui/visual_system_v5.js",
+        "src/ui/viz_v5.js",
+        "src/ui/wavedeck_bridge_v5.js",
+        "src/ui/估值承接研究.js",
+        "src/ui/更新工作中心.js",
+        "src/ui/研究任務面板.js",
+        "src/ui/研究工作台.js",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/alert_rule_form_browser.cjs",
+        "tests/fixtures/lightweight-charts-4.2.0.js"
+      ],
+      "timeoutSeconds": 300,
       "prepare": [
         "node",
         "browser"
+      ]
+    },
+    {
+      "id": "警報寫入與行情效期既有行為",
+      "reason": "alert_push_v3.js 修改後，Owner 警報寫入錯誤處理與行情效期行為不變",
+      "kind": "node",
+      "targets": [
+        "tests/review_market_state_selftest.js"
       ],
+      "changes": [
+        "src/alert/alert_push_v3.js"
+      ],
+      "inputs": [
+        "src/alert/alert_push_v3.js",
+        "src/core/market_data_v5.js",
+        "src/core/market_freshness_v5.js",
+        "src/core/pro_v2.js",
+        "src/screener/backtest_v3.js",
+        "src/ui/daily_cache_v3.js",
+        "src/ui/datasources_v3.js",
+        "src/ui/news_v5.js",
+        "src/ui/shell_v5.js",
+        "tests/review_market_state_selftest.js"
+      ],
+      "timeoutSeconds": 120
+    },
+    {
+      "id": "打包產物與原始碼一致",
+      "reason": "heat_v5.js、alert_push_v3.js 修改後 stock_terminal_v2.html 等於重建結果",
+      "kind": "unittest",
+      "targets": [
+        "tests.test_bundle_fresh"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_order.py",
+        "build_v2.py",
+        "src/ai/ai_runtime_client.js",
+        "src/ai/cmdpalette_v3.js",
+        "src/ai/copilot_v3.js",
+        "src/alert/alert_push_v3.js",
+        "src/alert/calendar_v3.js",
+        "src/alert/datahealth_v3.js",
+        "src/alert/settle_v3.js",
+        "src/alert/toast_v3.js",
+        "src/chart/aftermarket_v3.js",
+        "src/chart/drawtools_v3.js",
+        "src/chart/hotkeys_v3.js",
+        "src/chart/market_chart_v3.js",
+        "src/chart/market_score_bar_v3.js",
+        "src/chart/multichart_v3.js",
+        "src/chart/overnight_v3.js",
+        "src/chart/pattern_v3.js",
+        "src/chart/spread_v3.js",
+        "src/chart/volume_profile_v3.js",
+        "src/core/app_kernel_v5.js",
+        "src/core/chart_registry_v3.js",
+        "src/core/colors_v3.js",
+        "src/core/decision_data_v5.js",
+        "src/core/epistemic_badges_v5.js",
+        "src/core/etf_flow_tip_v3.js",
+        "src/core/etf_v3.js",
+        "src/core/feature_flags_v5.js",
+        "src/core/fields_v3.js",
+        "src/core/indicator_cache_v3.js",
+        "src/core/indices_v3.js",
+        "src/core/info_v2.js",
+        "src/core/intraday_volume_v3.js",
+        "src/core/live_v2.js",
+        "src/core/liverefresh_v3.js",
+        "src/core/market_data_v5.js",
+        "src/core/market_freshness_v5.js",
+        "src/core/market_intel_v5.js",
+        "src/core/market_v3.js",
+        "src/core/namesearch_v3.js",
+        "src/core/position_v2.js",
+        "src/core/pro_v2.js",
+        "src/core/realtime_v3.js",
+        "src/core/table_sort_v5.js",
+        "src/core/watch_v2.js",
+        "src/core/wl_live_v3.js",
+        "src/core/估值承接核心.js",
+        "src/core/投組資料契約_v5.js",
+        "src/core/更新工作_v5.js",
+        "src/core/研究任務.js",
+        "src/core/研究工作流.js",
+        "src/fundamental/chainmom_v3.js",
+        "src/fundamental/chip_v3.js",
+        "src/fundamental/fundamental_v3.js",
+        "src/fundamental/supplychain_v3.js",
+        "src/fundamental/valuation_v3.js",
+        "src/screener/backtest_v3.js",
+        "src/screener/strategy_builder_v3.js",
+        "src/screener/strategy_script_v3.js",
+        "src/screener/wizard_v3.js",
+        "src/screener/策略版本.js",
+        "src/ui/K線事件研究.js",
+        "src/ui/afterhours_v5.js",
+        "src/ui/ai_v5.js",
+        "src/ui/book_v5.js",
+        "src/ui/breadth_v5.js",
+        "src/ui/bridge_v5.js",
+        "src/ui/chart_visual_v5.js",
+        "src/ui/conditional_expectation_v5.js",
+        "src/ui/consensus_attention_v5.js",
+        "src/ui/daily_cache_v3.js",
+        "src/ui/datasources_v3.js",
+        "src/ui/decision_v5.js",
+        "src/ui/dragwin_v3.js",
+        "src/ui/enhance_v3.js",
+        "src/ui/heat_v5.js",
+        "src/ui/hub_v5.js",
+        "src/ui/mobile_v2.css",
+        "src/ui/news_v5.js",
+        "src/ui/peak_observation_100d_v5.js",
+        "src/ui/peak_observation_v5.js",
+        "src/ui/polish_v3.js",
+        "src/ui/postmarket_v5.js",
+        "src/ui/pulse_v5.js",
+        "src/ui/scan_v5.js",
+        "src/ui/share_v3.js",
+        "src/ui/shell_v5.js",
+        "src/ui/stock_health_v5.js",
+        "src/ui/toolbar_v3.js",
+        "src/ui/touxin_5d_v5.js",
+        "src/ui/txf_intraday_v3.js",
+        "src/ui/visual_system_v5.js",
+        "src/ui/viz_v5.js",
+        "src/ui/wavedeck_bridge_v5.js",
+        "src/ui/估值承接研究.js",
+        "src/ui/更新工作中心.js",
+        "src/ui/研究任務面板.js",
+        "src/ui/研究工作台.js",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/test_bundle_fresh.py"
+      ],
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "UI同條件對照工具自我驗證",
+      "reason": "合成資料加入前一交易日漲跌後，同一版本對自己仍全部相同",
+      "kind": "node",
       "targets": [
         "tests/ui_baseline_compare_selftest.cjs"
       ],
       "changes": [
-        "package.json",
-        "tests/ui_baseline_compare.cjs",
-        "tests/ui_baseline_compare_selftest.cjs",
         "tests/fixtures/ui_baseline/synthetic.cjs"
       ],
       "inputs": [
@@ -150,7 +483,11 @@
         "tests/ui_baseline_compare.cjs",
         "tests/ui_baseline_compare_selftest.cjs"
       ],
-      "timeoutSeconds": 300
+      "timeoutSeconds": 300,
+      "prepare": [
+        "node",
+        "browser"
+      ]
     }
   ]
 }

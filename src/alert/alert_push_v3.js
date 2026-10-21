@@ -94,6 +94,33 @@
     render();
   }
 
+  // 價位規則與盤中條件（漲跌幅相對前一日收盤；預估量為線性估算，開盤 15 分鐘後才判斷）。
+  const RULE_INPUT = {
+    cross_up: { field: 'price', placeholder: '價位', min: 1e-9, max: Infinity, error: '請填代號與價位' },
+    cross_down: { field: 'price', placeholder: '價位', min: 1e-9, max: Infinity, error: '請填代號與價位' },
+    pct_up: { field: 'threshold', placeholder: '漲幅 %（0.1–50）', min: 0.1, max: 50, error: '請填代號與 0.1 到 50 的漲幅 %' },
+    pct_down: { field: 'threshold', placeholder: '跌幅 %（0.1–50）', min: 0.1, max: 50, error: '請填代號與 0.1 到 50 的跌幅 %' },
+    volume_ratio: { field: 'threshold', placeholder: '倍數（1–20）', min: 1, max: 20, error: '請填代號與 1 到 20 的倍數' },
+  };
+  const RULE_HINT = {
+    cross_up: '價格由下往上穿越價位時提醒；跌回價位 1% 以下才會再次提醒。',
+    cross_down: '價格由上往下穿越價位時提醒；漲回價位 1% 以上才會再次提醒。',
+    pct_up: '相對前一日收盤的漲幅達門檻時提醒；回落到門檻以下才會再次提醒。台股使用證交所即時成交。',
+    pct_down: '相對前一日收盤的跌幅達門檻時提醒；回升到門檻以內才會再次提醒。台股使用證交所即時成交。',
+    volume_ratio: '預估全日量 ÷ 前一交易日量；以已交易時間線性換算，早盤偏高，開盤 15 分鐘內不判斷。',
+  };
+  function ruleTypeLabel(r) {
+    const label = { cross_down: '破支撐↓', cross_up: '過壓力↑', pct_up: '漲幅達↑', pct_down: '跌幅達↓',
+      volume_ratio: '預估量比' }[r.type] || '過壓力↑';
+    const once = r.once ? (r._last_once_done ? '（只提醒一次・已提醒）' : '（只提醒一次）') : '';
+    return label + once;
+  }
+  function ruleTarget(r) {
+    if (r.type === 'pct_up' || r.type === 'pct_down') return r.threshold + '%';
+    if (r.type === 'volume_ratio') return r.threshold + ' 倍昨量';
+    return r.price;
+  }
+
   function render() {
     const box = document.getElementById('ap-body');
     if (!box) return;
@@ -153,18 +180,24 @@
     </section>
     <section>
       <b>價格警報規則</b>
-      <table><thead><tr><th>代號</th><th>市場</th><th>類型</th><th>價位</th><th>備註</th><th></th></tr></thead>
+      <table><thead><tr><th>代號</th><th>市場</th><th>類型</th><th>價位／門檻</th><th>備註</th><th></th></tr></thead>
       <tbody id="ap-rules">${rules.map((r, i) => r.type === 'composite' ? '' : `<tr>
         <td>${r.sym || ''}</td><td>${r.market || 'TW'}</td>
-        <td>${r.type === 'cross_down' ? '破支撐↓' : '過壓力↑'}</td>
-        <td>${r.price}</td><td>${r.note || ''}</td>
+        <td>${ruleTypeLabel(r)}</td>
+        <td>${ruleTarget(r)}</td><td>${r.note || ''}</td>
         <td><button class="sec" data-del="${i}" style="padding:2px 6px">✕</button></td></tr>`).join('')}</tbody></table>
       <div class="row" style="margin-top:6px">
         <div><input id="ap-r-sym" placeholder="代號 2330"></div>
         <div><select id="ap-r-mkt"><option>TW</option><option>US</option></select></div>
-        <div><select id="ap-r-type"><option value="cross_up">過壓力↑</option><option value="cross_down">破支撐↓</option></select></div>
-        <div><input id="ap-r-price" type="number" placeholder="價位"></div>
+        <div><select id="ap-r-type"><option value="cross_up">過壓力↑</option><option value="cross_down">破支撐↓</option>
+          <option value="pct_up">漲幅達 %</option><option value="pct_down">跌幅達 %</option>
+          <option value="volume_ratio">預估量達昨量倍數</option></select></div>
+        <div><input id="ap-r-price" type="number" step="any" placeholder="價位"></div>
         <div><button id="ap-r-add">＋加規則</button></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-top:4px;font-size:10px">
+        <label style="white-space:nowrap;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" id="ap-r-once" style="width:auto;margin:0">只提醒一次</label>
+        <span id="ap-r-hint" style="color:#64748b">${RULE_HINT.cross_up}</span>
       </div>
     </section>
     <div class="row">
@@ -178,6 +211,12 @@
       pushRules(rules.filter((_, index) => index !== +b.dataset.del));
     });
     box.querySelector('#ap-r-add').onclick = addRule;
+    const typeSelect = box.querySelector('#ap-r-type');
+    typeSelect.onchange = () => {
+      const meta = RULE_INPUT[typeSelect.value] || RULE_INPUT.cross_up;
+      box.querySelector('#ap-r-price').placeholder = meta.placeholder;
+      box.querySelector('#ap-r-hint').textContent = RULE_HINT[typeSelect.value] || '';
+    };
     const cAdd = box.querySelector('#ap-c-add'); if (cAdd) cAdd.onclick = addComposite;
     box.querySelector('#ap-save').onclick = saveCfg;
     box.querySelector('#ap-test').onclick = testPush;
@@ -207,13 +246,14 @@
 
   function addRule() {
     const sym = document.getElementById('ap-r-sym').value.trim();
-    const price = parseFloat(document.getElementById('ap-r-price').value);
-    if (!sym || !(price > 0)) { alert('請填代號與價位'); return; }
-    const candidate = [...rules, {
-      id: Date.now(), sym, market: document.getElementById('ap-r-mkt').value,
-      type: document.getElementById('ap-r-type').value, price, note: '', enabled: true,
-    }];
-    pushRules(candidate);
+    const type = document.getElementById('ap-r-type').value;
+    const value = parseFloat(document.getElementById('ap-r-price').value);
+    const meta = RULE_INPUT[type] || RULE_INPUT.cross_up;
+    if (!sym || !(value >= meta.min && value <= meta.max)) { alert(meta.error); return; }
+    const rule = { id: Date.now(), sym, market: document.getElementById('ap-r-mkt').value, type, note: '', enabled: true };
+    if (meta.field === 'price') rule.price = value; else rule.threshold = value;
+    if (document.getElementById('ap-r-once').checked) rule.once = true;
+    pushRules([...rules, rule]);
   }
 
   async function saveCfg() {

@@ -1,3 +1,38 @@
+## 2026-10-21 警報新增漲跌幅／預估量比／只提醒一次，類股熱力圖加名次升降（借鏡 EquiLens，PR B）
+
+- 基底：`bd59a81282e8f2fa1ea4d5a5dc6e5ec424213214`（PR A 分支 `claude/ui-baseline-and-api-docs-check`）；分支 `claude/alert-conditions-and-sector-rank`。PR A 合併後須合併 `origin/main` 並更新驗證計畫基底；實作與合併 SHA 待 PR 合併後補記。
+- 原因（Sam 2026-10-21「給我規劃 然後轉到 AI_Stock 專案下執行」，四項之二）：
+  - 警報只有價位穿越與日線複合條件，盤中看不到「今天漲跌幅」與「今天爆量」；
+  - 類股熱力圖只有當日漲跌，看不出相對前一交易日的輪動。
+- 修正後行為：
+  - **警報**（`server/alert_daemon.py`、`src/alert/alert_push_v3.js`）：
+    - 新類型 `pct_up`／`pct_down`（相對前一日收盤的漲跌幅達門檻）與 `volume_ratio`（預估全日量 ÷ 前一交易日量；以已交易時間線性換算，開盤 15 分鐘內不判斷，畫面與推播都標示「線性估算，早盤偏高」）；門檻存在 `threshold`，`save_rules` 驗證範圍（漲跌幅 0.1–50、倍數 1–20），超出回 400；
+    - 台股報價由 `server.py` 注入既有的 `_twse_mis_stock_quotes`（證交所 MIS，已過 `guard_tw_quote`），沒有可用成交才退到 Yahoo；美股用 Yahoo `currentTradingPeriod` 的正規盤起訖；昨量沿用 `load_alert_bars` 日線，取盤中日期之前最後一根；
+    - 條件由不成立變成立才觸發，首次觀察只初始化，沿用 5 分鐘冷卻與 #241 待送匣；資料不足不觸發並以 `log_once` 記錄；
+    - 選填 `once`（適用所有規則類型）：觸發後以狀態欄位 `_last_once_done` 停止提醒，不改使用者的 `enabled`；編輯或重新啟用規則時狀態自然清除；
+    - `fetch_price` 改用共用的 `_yahoo_chart_meta`，盤前盤後價格選擇不變；失敗改為記錄，`alert_daemon.py` 靜默寬鬆例外 4 → 3（基準同步降低）；
+    - 表單：輸入列與原本相同，類型選單加入三個新條件、門檻欄提示隨類型變化；「只提醒一次」與說明放在下一列；表頭「價位」改為「價位／門檻」。
+  - **類股熱力圖**（`server/sector_flow.py`、`server/server.py`、`src/ui/heat_v5.js`）：
+    - `/sectors` 台股回應以同一來源（TWSE MI_INDEX IND、同一解析）附前一交易日官方漲跌 `prevChangePct` 與 `prevSession`；官方回覆無資料才視為非交易日往前找，抓取或解析失敗就停止，不往前猜；結果依資料日記住，失敗或查無 10 分鐘後才重試；
+    - 未採用 `sector_history.db` 推算：其回補是 4 秒預算的平行抓取，日期可能有缺口，前兩個日期不一定是相鄰交易日；
+    - 前端在畫面同一組類股內各自排序算名次，於漲跌幅旁顯示精簡標記（如「#1▲6」），完整說明在 title／aria-label；無前一日資料不顯示；頁尾註明對照日期。曾把名次放在第三行，實測造成格子變高、版面下推，改為不增加行數。
+- 既有能力保全（規則 0009）：
+  - 以 PR A 的工具在相同合成資料下對照 PR A 與本分支：總覽、決策、圖表兩種視窗共 6 組相同；類股熱力圖 2 組有差異，人工確認只有名次標記與頁尾說明，格子尺寸、欄位與排序不變；
+  - 警報視窗另以相同 fixture 截圖比對：第一版把勾選框放進輸入列，桌機文字被截、手機輸入框被擠，已改為下一列，修正後輸入列與原本一致；
+  - 既有價位規則、遲滯、冷卻、複合規則、待送匣、日線來源與 Owner 寫入行為由下列既有測試覆蓋並通過。
+- 驗證（本機）：
+  - `tests.test_alert_conditions`（11）、`tests.test_警報日線來源`、`tests.test_完整審查警報權限`、`tests.test_alert_delivery_outbox`、`tests.test_no_new_silent_exceptions`：共 47 案例通過；
+  - `tests.test_sector_rank_change`（11）、`tests.test_sector_flow`、`tests.test_sector_history`：通過；
+  - `node tests/heat_rank_selftest.js`、`node tests/類股成員與更新入口_selftest.js`、`node tests/shell_v5_selftest.js`、`node tests/review_market_state_selftest.js`：通過；
+  - `node tests/alert_rule_form_browser.cjs`（完整建置頁面、離線）：通過；
+  - `tests.test_bundle_fresh`：通過；
+  - 新增測試未在舊程式上逐一執行確認失敗（新條件類型與欄位在舊程式不存在）。
+- 已知限制：預估量為線性估算，開盤後一段時間偏高；類股名次只涵蓋上市類股指數；美股 SPDR 無前一日名次。
+- 順帶發現（未在本次處理）：`sector_history.return20_by_sector` 取「最近 21 個已存日期」，回補缺口時實際區間可能超過 20 個交易日。
+- 發布狀態：未推送、未合併、未部署。
+
+---
+
 ## 2026-10-21 新增 UI 同條件對照工具與 README API 表一致性測試（借鏡 EquiLens，PR A）
 
 - 基底：`d42daea3e0a410d534905dbf2e6d041d7fc78f89`（origin/main）；分支 `claude/ui-baseline-and-api-docs-check`。實作與合併 SHA 待 PR 合併後補記。

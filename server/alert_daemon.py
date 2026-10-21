@@ -14,7 +14,7 @@ import copy
 import hashlib
 import uuid
 from email.mime.text import MIMEText
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 try:
     from .atomic_store import StoreCorruptError, atomic_write_json, load_json
@@ -203,6 +203,8 @@ def rules_snapshot():
 def save_rules(rules, *, expected_revision=None):
     if not isinstance(rules, list) or any(not isinstance(rule, dict) for rule in rules):
         raise ValueError('警報規則必須是物件陣列。')
+    for rule in rules:
+        _validate_rule(rule)
     with _rules_lock:
         current = load_rules(strict=True)
         if expected_revision is not None and expected_revision != rules_revision(current):
@@ -246,25 +248,139 @@ def _yf_symbol(sym, market):
     return sym + '.TW'  # 台股預設；上櫃由前端送 .TWO 亦可
 
 
-def fetch_price(sym, market):
-    """回傳當前有效價。美股盤後/盤前時改用延伸交易價，讓盤後突破/跌破也能觸發。"""
-    yf = _yf_symbol(sym, market)
+def _yahoo_chart_meta(yf):
+    """Yahoo v8 chart（1 日、1 分、含盤前盤後）的 meta；兩個 host 都失敗時記錄並回 None。"""
+    last_error = None
     for host in ('query1', 'query2'):
         try:
             url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(yf)}?range=1d&interval=1m&includePrePost=true'
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=8) as r:
                 d = json.loads(r.read())
-            meta = d['chart']['result'][0]['meta']
-            st = meta.get('marketState')
-            if st in ('POST', 'POSTPOST') and meta.get('postMarketPrice') is not None:
-                return meta.get('postMarketPrice')
-            if st == 'PRE' and meta.get('preMarketPrice') is not None:
-                return meta.get('preMarketPrice')
-            return meta.get('regularMarketPrice')
-        except Exception:
-            continue
+            return d['chart']['result'][0]['meta']
+        except Exception as exc:  # 含不完整回應等非 OSError；換下一個 host，最後統一記錄
+            last_error = exc
+    from log_once import log_once
+    log_once(f'警報Yahoo報價-{yf}', f'[alert] Yahoo 報價取得失敗：{yf}', exc=last_error)
     return None
+
+
+def fetch_price(sym, market):
+    """回傳當前有效價。美股盤後/盤前時改用延伸交易價，讓盤後突破/跌破也能觸發。"""
+    meta = _yahoo_chart_meta(_yf_symbol(sym, market))
+    if meta is None:
+        return None
+    st = meta.get('marketState')
+    if st in ('POST', 'POSTPOST') and meta.get('postMarketPrice') is not None:
+        return meta.get('postMarketPrice')
+    if st == 'PRE' and meta.get('preMarketPrice') is not None:
+        return meta.get('preMarketPrice')
+    return meta.get('regularMarketPrice')
+
+
+# ---- 盤中條件（漲跌幅、預估量比）------------------------------
+METRIC_TYPES = ('pct_up', 'pct_down', 'volume_ratio')
+_THRESHOLD_RANGE = {'pct_up': (0.1, 50.0), 'pct_down': (0.1, 50.0), 'volume_ratio': (1.0, 20.0)}
+_VOLUME_WARMUP_SECONDS = 15 * 60          # 開盤 15 分鐘內不判斷預估量
+_TW_SESSION = ((9, 0), (13, 30))          # 台股一般交易時段（台北時間）
+_TAIPEI = timezone(timedelta(hours=8))
+_TW_QUOTE = None                          # server.py 注入：code -> 官方 MIS 報價 dict（已過 guard_tw_quote）
+
+
+def configure(*, tw_quote=None):
+    """由 server.py 注入既有的台股官方報價入口，不在警報模組另建抓取。"""
+    global _TW_QUOTE
+    _TW_QUOTE = tw_quote
+
+
+def _positive(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 and number == number and number != float('inf') else None
+
+
+def intraday_quote(sym, market):
+    """盤中條件用的報價：價格、前一日收盤、累計成交股數、時間與正規盤起訖（epoch 秒）。
+
+    台股先用注入的證交所 MIS 官方報價（與 /twquote 同一入口與順序），沒有可用成交才退到 Yahoo；
+    美股用 Yahoo（currentTradingPeriod 提供正規盤起訖）。缺任何必要欄位回 None。"""
+    code = str(sym).strip().upper().removesuffix('.TWO').removesuffix('.TW')
+    if market == 'TW' and _TW_QUOTE is not None:
+        q = _TW_QUOTE(code) or {}
+        price, prev, ts_ms = _positive(q.get('price')), _positive(q.get('prevClose')), _positive(q.get('timestampMs'))
+        if q.get('ok') and price and prev and ts_ms:
+            day = datetime.fromtimestamp(ts_ms / 1000, _TAIPEI)
+            (h0, m0), (h1, m1) = _TW_SESSION
+            start = day.replace(hour=h0, minute=m0, second=0, microsecond=0).timestamp()
+            end = day.replace(hour=h1, minute=m1, second=0, microsecond=0).timestamp()
+            return {'price': price, 'prevClose': prev, 'volumeShares': _positive(q.get('volumeShares')),
+                    'time': ts_ms / 1000, 'sessionStart': start, 'sessionEnd': end,
+                    'sessionDate': day.date().isoformat(), 'source': 'twse-mis'}
+    meta = _yahoo_chart_meta(_yf_symbol(sym, market))
+    if not meta:
+        return None
+    price = _positive(meta.get('regularMarketPrice'))
+    prev = _positive(meta.get('chartPreviousClose') or meta.get('previousClose'))
+    ts = _positive(meta.get('regularMarketTime'))
+    regular = ((meta.get('currentTradingPeriod') or {}).get('regular') or {})
+    start, end = _positive(regular.get('start')), _positive(regular.get('end'))
+    if not (price and prev and ts):
+        return None
+    from stock_signals import bar_date
+    return {'price': price, 'prevClose': prev, 'volumeShares': _positive(meta.get('regularMarketVolume')),
+            'time': ts, 'sessionStart': start, 'sessionEnd': end,
+            'sessionDate': bar_date(ts, 'US' if market == 'US' else 'TW'), 'source': 'yahoo-v8-chart'}
+
+
+def _prev_session_volume(sym, market, session_date):
+    """前一個交易日的日成交量（股），取自警報既有的日線來源；找不到回 None。"""
+    from stock_signals import bar_date
+    for bar in reversed(_fetch_daily_candles(sym, market) or []):
+        day = bar_date(bar.get('time', bar.get('ts', bar.get('date'))), market)
+        if day and session_date and day < session_date:
+            return _positive(bar.get('volume'))
+    return None
+
+
+def metric_value(rule, quote, prev_volume=None):
+    """回傳 (數值, 說明)；資料不足時數值為 None。漲跌幅單位為 %，量比為倍數。"""
+    typ = rule.get('type')
+    if typ in ('pct_up', 'pct_down'):
+        pct = (quote['price'] - quote['prevClose']) / quote['prevClose'] * 100.0
+        return pct, f"漲跌幅 {pct:+.2f}%（現價 {quote['price']:g}／前收 {quote['prevClose']:g}）"
+    if typ == 'volume_ratio':
+        start, end, now, cum = quote.get('sessionStart'), quote.get('sessionEnd'), quote.get('time'), quote.get('volumeShares')
+        if any(v is None for v in (start, end, now)) or not cum or not prev_volume or end <= start:
+            return None, '資料不足（缺正規盤時間、累計量或昨量）'
+        elapsed = min(now, end) - start
+        if elapsed < _VOLUME_WARMUP_SECONDS:
+            return None, '開盤 15 分鐘內不判斷'
+        projected = cum / (elapsed / (end - start))
+        ratio = projected / prev_volume
+        return ratio, (f"預估量 {ratio:.1f} 倍昨量（線性估算，早盤偏高；已交易 {int(elapsed // 60)} 分，"
+                       f"累計 {cum:,.0f} 股、昨量 {prev_volume:,.0f} 股）")
+    return None, '不支援的條件類型'
+
+
+def _metric_condition(rule, value):
+    threshold = float(rule.get('threshold'))
+    return value <= -threshold if rule.get('type') == 'pct_down' else value >= threshold
+
+
+def _validate_rule(rule):
+    """新增條件類型的門檻必須是範圍內的數字；舊規則格式不受影響。"""
+    typ = rule.get('type')
+    if typ not in METRIC_TYPES:
+        return
+    low, high = _THRESHOLD_RANGE[typ]
+    try:
+        threshold = float(rule.get('threshold'))
+    except (TypeError, ValueError):
+        raise ValueError(f'{typ} 規則缺少數字門檻')
+    if not (low <= threshold <= high):
+        raise ValueError(f'{typ} 門檻需在 {low:g} 到 {high:g} 之間')
 
 
 # ---- 推播 --------------------------------------------------
@@ -584,6 +700,48 @@ def _check_composite(r, cfg):
         sent = deliver(cfg, text, source='composite', now=now)
         _state['fired'].append({'t': now, 'text': text, 'delivery': sent['status'], 'deliveryId': sent['id']})
         _state['fired'] = _state['fired'][-100:]
+        if r.get('once'):
+            r['_last_once_done'] = True
+    return True
+
+
+def _check_metric(r, cfg):
+    """評估漲跌幅／預估量比規則；回傳是否需存檔。條件由不成立變成立才觸發，首次觀察只初始化。"""
+    market = r.get('market', 'TW')
+    quote = intraday_quote(r.get('sym'), market)
+    if quote is None:
+        from log_once import log_once
+        log_once(f'警報盤中報價-{market}-{r.get("sym")}', f'[alert] {r.get("sym")} 盤中報價不可用，暫不評估 {r.get("type")}')
+        return False
+    with _lock:
+        _state['last_quotes'][r.get('sym')] = quote['price']
+    prev_volume = None
+    if r.get('type') == 'volume_ratio':
+        prev_volume = _prev_session_volume(r.get('sym'), market, quote.get('sessionDate'))
+    value, detail = metric_value(r, quote, prev_volume)
+    if value is None:
+        if r.get('type') == 'volume_ratio' and prev_volume is None:
+            from log_once import log_once
+            log_once(f'警報昨量-{market}-{r.get("sym")}', f'[alert] {r.get("sym")} 找不到前一交易日成交量，暫不評估預估量')
+        return False  # 未知：保留舊狀態，不觸發
+    satisfied = _metric_condition(r, value)
+    prev = r.get('_last_cond')
+    r['_last_cond'] = satisfied
+    if prev is None or not satisfied or prev:
+        return prev != satisfied
+    now = time.time()
+    if now - r.get('_last_fired_time', 0) < 300:  # 與既有規則相同的 5 分鐘冷卻
+        return True
+    r['_last_fired_time'] = now
+    label = {'pct_up': f"漲幅達 {float(r['threshold']):g}%", 'pct_down': f"跌幅達 {float(r['threshold']):g}%",
+             'volume_ratio': f"預估量達 {float(r['threshold']):g} 倍昨量"}[r['type']]
+    icon = {'pct_up': '📈', 'pct_down': '📉', 'volume_ratio': '🔥'}[r['type']]
+    text = f"{icon} {r.get('sym')} {label}：{detail}  {r.get('note', '')}".strip()
+    sent = deliver(cfg, text, source='metric', now=now)
+    _state['fired'].append({'t': now, 'text': text, 'delivery': sent['status'], 'deliveryId': sent['id']})
+    _state['fired'] = _state['fired'][-100:]
+    if r.get('once'):
+        r['_last_once_done'] = True
     return True
 
 
@@ -597,6 +755,15 @@ def _check_once():
     changed = False
     for r in rules:
         if not r.get('enabled', True):
+            continue
+        if r.get('once') and r.get('_last_once_done'):
+            continue  # 只提醒一次且已提醒；使用者編輯或重新啟用規則後狀態自然清除
+        if r.get('type') in METRIC_TYPES:
+            try:
+                if _check_metric(r, cfg):
+                    changed = True
+            except Exception as e:
+                _log('metric check error: ' + str(e))
             continue
         if r.get('type') == 'composite':
             try:
@@ -653,6 +820,9 @@ def _check_once():
             sent = deliver(cfg, text, source='price', now=now)
             _state['fired'].append({'t': now, 'text': text, 'delivery': sent['status'], 'deliveryId': sent['id']})
             _state['fired'] = _state['fired'][-100:]
+            if r.get('once'):
+                r['_last_once_done'] = True
+                changed = True
     if changed:
         _merge_rule_state(original_rules, rules)
 
