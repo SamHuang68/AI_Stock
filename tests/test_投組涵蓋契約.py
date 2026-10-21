@@ -1,24 +1,40 @@
+import inspect
 import math
 import sys
-from datetime import datetime, timedelta, timezone
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import portfolio
+from tests.已核對資料 import 價格資料, 交易日
+from 台股日線 import stamp
+
+
+def load_tests(loader, tests, pattern):
+    # 裸函式須包成 FunctionTestCase，unittest 與驗證計畫才會收集（審查 TQ-02）。
+    suite = unittest.TestSuite()
+    module = sys.modules[__name__]
+    for name, fn in inspect.getmembers(module, inspect.isfunction):
+        if name.startswith('test_'):
+            suite.addTest(unittest.FunctionTestCase(fn, description=name))
+    return suite
 
 
 def bars(returns, start=0, price=100):
+    # 以合成日曆的交易日（週一至週五）排列；start 是交易日位移。
     values = [price]
     for value in returns:
         values.append(values[-1] * (1 + value))
-    begin = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(days=start)
-    return [(int((begin + timedelta(days=i)).timestamp()), x, x, x, x, 1000)
-            for i, x in enumerate(values)]
+    days = 交易日('2026-01-05', start + len(values))[start:]
+    return [(stamp(day), x, x, x, x, 1000) for day, x in zip(days, values)]
 
 
 def compute(holdings, data):
-    with patch.object(portfolio.datastore, 'get_bars_bulk', return_value=data):
+    # 2026-10-13 起 compute 必須以資料庫核對交易日曆與價格品質（b3bdcf7）；
+    # 舊版只 patch get_bars_bulk、沒有日曆，結果一律為空。改用共用的已核對資料夾具，斷言不變。
+    with 價格資料(data):
         return portfolio.compute(holdings, sectors_map={'2330': '半導體', '6488': '半導體'})
 
 

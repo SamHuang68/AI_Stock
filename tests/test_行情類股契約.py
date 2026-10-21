@@ -1,9 +1,14 @@
 import math
 import ast
+import inspect
 import io
 import json
 import re
+import socket
 import sys
+import tempfile
+import time
+import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +16,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
+import http_client
 import market_routes as routes
 import pulse_extras
 import sector_flow
@@ -18,6 +24,16 @@ import sector_history
 import tdcc_holders
 from market_contract import tw_symbol_code, quote_contract
 from 類股成員 import build_tw_members
+
+
+def load_tests(loader, tests, pattern):
+    # 裸函式須包成 FunctionTestCase，unittest 與驗證計畫才會收集（審查 TQ-02）。
+    suite = unittest.TestSuite()
+    module = sys.modules[__name__]
+    for name, fn in inspect.getmembers(module, inspect.isfunction):
+        if name.startswith('test_'):
+            suite.addTest(unittest.FunctionTestCase(fn, description=name))
+    return suite
 
 TZ = timezone(timedelta(hours=8))
 NOW = datetime(2026, 10, 2, 10, 30, tzinfo=TZ)
@@ -100,7 +116,11 @@ def test_incomplete_classification_prevents_full_flow_claim():
     assert '存託憑證' in result['turnoverScopeLabel']
 
 
-def test_sector_historical_cutoff_does_not_read_future_cache(tmp_path):
+def test_sector_historical_cutoff_does_not_read_future_cache(tmp_path=None):
+    # pytest 會提供 tmp_path；經 load_tests 由 unittest 執行時自建暫存目錄（審查 TQ-02）。
+    if tmp_path is None:
+        with tempfile.TemporaryDirectory() as folder:
+            return test_sector_historical_cutoff_does_not_read_future_cache(Path(folder))
     path = str(tmp_path / 'sectors.db')
     for day in range(1, 23):
         sector_history.store_snapshot(f'202601{day:02}', [{'name': '半導體', 'close': 99 + day}], path)
@@ -135,13 +155,21 @@ def test_day_movers_denominator_keeps_unclassified_and_no_trade_members():
         def __init__(self, target, **kwargs): self.target = target
         def start(self): self.target()
         def join(self, *args): pass
+        def is_alive(self): return False   # 同步執行完畢；正式程式以 is_alive 判斷是否逾時
     def fetch(url, **kwargs):
         return io.BytesIO(json.dumps(raw if 'STOCK_DAY_ALL' in url else []).encode())
-    ns = {'math': math, 'json': json, '_CODE4': re.compile(r'^[1-9]\d{3}$'),
-          '_get_tw_sectors': lambda: {'2330': '半導體業', '1101': '水泥工業'},
+    # 正式 server.py 頂層有 import time（_fetch_day_movers 已用到）；命名空間比照正式模組，不補正式模組沒有的名稱。
+    ns = {'math': math, 'json': json, 'time': time, '_CODE4': re.compile(r'^[1-9]\d{3}$'),
+          # 與正式 _get_tw_sectors(deadline=...) 同簽名；舊替身不收參數，呼叫即 TypeError 而被當成無分類（審查 TQ-02）。
+          '_get_tw_sectors': lambda deadline=None: {'2330': '半導體業', '1101': '水泥工業'},
           'threading': SimpleNamespace(Thread=Thread),
           'urllib': SimpleNamespace(request=SimpleNamespace(Request=lambda url, **kwargs: url, urlopen=fetch))}
-    result = load_server_function('_fetch_day_movers', ns)(include_rows=True)
+    # 正式程式改由 http_client.fetch_json 取 TWSE／TPEx（函式內 import）；舊替身只換 urllib，
+    # 實際會連到真實網路。改替換 fetch_json，並以 socket 防線確保不連網（審查 TQ-02）。
+    def fetch_json(url, **kwargs):
+        return json.loads(fetch(url).read().decode())
+    with patch.object(http_client, 'fetch_json', side_effect=fetch_json),             patch.object(socket.socket, 'connect', side_effect=AssertionError('測試不得連網')):
+        result = load_server_function('_fetch_day_movers', ns)(include_rows=True)
     assert len(result['rows']) == 3
     assert result['industryTurnoverTotalYi'] == 100
     assert result['industryTurnoverYi']['半導體'] == 60
