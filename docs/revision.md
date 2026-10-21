@@ -1,3 +1,24 @@
+## 2026-10-21 發布狀態補記（4de979bd）
+
+- 基底：`4de979bdaf282835e102e43353e7ea62896c235d`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。
+
+| 版本 | 內容 | 發布時間（本機時間） | 狀態 |
+| --- | --- | --- | --- |
+| `4de979bdaf282835e102e43353e7ea62896c235d` | #240 CM-04、#241 AL-01、#242 FE-03、#243 CH-02、#244、#245、#246 CAL-02、#247 TQ-02（以及先前已部署到 WaveDeck 的 #237、#238） | 2026-10-21 13:43（正式）、13:46（本機） | 本機與正式後端已發布 |
+
+- 依據：本機 18432 `/health`、正式後端 18435 `/health` 與 `/health/live` 的 `runtimeCommit` 實測皆為目標 SHA；閘道 `ok`、`isolated-host`。
+- 流程：
+  - stage 為 `tests=passed`，main push CI 對目標為 success；
+  - 停止前正式後端有一筆 `pulse` 更新工作執行中，等到閒置後才停止；
+  - 停止後完整備份 14 個 SQLite，完整性 ok；promote rc 0，保留 `data/`；
+  - 兩端 `market.db` 的 `quick_check` ok。
+- 生效核對：兩端 `/alert/status` 已出現 `pending_deliveries`（0）與 `recent_deliveries`（AL-01）。
+- CAL-02：程式已發布；2027 年官方日曆要等每日日線工作在 2027 年第一次執行時寫入資料庫，在那之前 2027 日期仍為 `unknown`。
+- WaveDeck：自 `474c509` 之後 `wavedeck/` 沒有變更，不需重新部署；實測仍為 `474c509`、`releaseVerified` true。
+- 未驗證：閘道／Tailscale 端版本（需 Owner token）、實機畫面。
+
+---
+
 ## 2026-10-21 兩個從未執行的契約測試檔納入 unittest 並修正過期夾具（TQ-02）
 
 - 基底：`020745108e1ac1a0fb4cc6e2656181c33e2e8ca8`（origin/main）；分支 `claude/collect-stale-contract-tests`。實作與合併 SHA 待 PR 合併後補記。
