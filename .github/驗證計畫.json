@@ -1,79 +1,88 @@
 {
+  "project": "SamHuang68/AI_Stock",
+  "schemaVersion": 1,
+  "scope": "targeted",
+  "baseCommit": "1a4d014bf32979c725b27d0f2d7ca421fc8a9989",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "WaveDeck紙上模擬權益",
+      "id": "類股快取只沿用完整回應",
+      "reason": "/sectors 台股與前一交易日查詢只沿用同資料日、官方來源、帶前一交易日欄位的完整回應；Pulse 精簡版改為重新計算；完整快取照舊不連網",
       "kind": "unittest",
-      "timeoutSeconds": 300,
-      "reason": "paper 模擬成交帳本、權益與每日回撤鎖（WD-07）",
       "targets": [
-        "wavedeck.tests.test_paper_sim_equity",
-        "wavedeck.tests.test_dd_reference_account",
-        "wavedeck.tests.test_完整審查執行",
-        "wavedeck.tests.test_策略訊號整合",
-        "wavedeck.tests.test_reduce_and_paper_isolation",
-        "wavedeck.tests.test_smoke",
-        "wavedeck.tests.test_成交確認",
-        "wavedeck.tests.test_不留倉",
-        "wavedeck.tests.test_策略HTTP",
-        "wavedeck.tests.test_exec_md",
-        "wavedeck.tests.test_request_guard"
+        "tests.test_sector_rank_change",
+        "tests.test_sector_flow",
+        "tests.test_sector_history"
       ],
       "changes": [
-        "wavedeck/server/paper_account.py",
-        "wavedeck/server/broker.py",
-        "wavedeck/server/config.py",
-        "wavedeck/server/engine.py",
-        "wavedeck/server/risk.py",
-        "wavedeck/tests/test_paper_sim_equity.py",
-        "wavedeck/tests/test_dd_reference_account.py",
-        "wavedeck/tests/test_完整審查執行.py"
+        "server/server.py",
+        "tests/test_sector_rank_change.py"
       ],
       "inputs": [
-        ".gitignore",
-        "wavedeck/server/broker.py",
-        "wavedeck/server/config.py",
-        "wavedeck/server/engine.py",
-        "wavedeck/server/paper_account.py",
-        "wavedeck/server/risk.py",
-        "wavedeck/server/st_link.py",
-        "wavedeck/server/state.py",
-        "wavedeck/server/策略契約.py",
-        "wavedeck/tests/test_dd_reference_account.py",
-        "wavedeck/tests/test_exec_md.py",
-        "wavedeck/tests/test_paper_sim_equity.py",
-        "wavedeck/tests/test_reduce_and_paper_isolation.py",
-        "wavedeck/tests/test_request_guard.py",
-        "wavedeck/tests/test_smoke.py",
-        "wavedeck/tests/test_不留倉.py",
-        "wavedeck/tests/test_完整審查執行.py",
-        "wavedeck/tests/test_成交確認.py",
-        "wavedeck/tests/test_策略HTTP.py",
-        "wavedeck/tests/test_策略訊號整合.py"
-      ]
+        "server/industry_revenue.py",
+        "server/log_once.py",
+        "server/lru_cache.py",
+        "server/market_routes.py",
+        "server/sector_flow.py",
+        "server/sector_history.py",
+        "server/server.py",
+        "tests/test_decision_http.py",
+        "tests/test_sector_flow.py",
+        "tests/test_sector_history.py",
+        "tests/test_sector_rank_change.py"
+      ],
+      "timeoutSeconds": 300
     },
     {
-      "id": "WaveDeck前端單頁",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "deck.js 紙上權益說明、未知回撤文字與未知金額顯示「—」後單頁檢查不退化",
+      "id": "Pulse 類股快取鍵分離",
+      "reason": "Pulse 先讀 /sectors 的完整回應，自己的精簡列只寫 sectors:pulse:{ymd}；完整回應存在時不寫入；既有 Pulse 回補與夜盤案例不變",
+      "kind": "unittest",
       "targets": [
-        "tests/wavedeck_onepage_selftest.js"
+        "tests.test_pulse_extraction",
+        "tests.test_完整審查資料"
       ],
       "changes": [
-        "wavedeck/web/js/deck.js"
+        "server/pulse_orchestration.py",
+        "tests/test_pulse_extraction.py"
       ],
       "inputs": [
-        ".gitignore",
-        "tests/wavedeck_onepage_selftest.js",
-        "wavedeck/web/js/deck.js"
-      ]
+        "server/breadth_build.py",
+        "server/datastore.py",
+        "server/deadline.py",
+        "server/exchange_source_dates.py",
+        "server/industry_revenue.py",
+        "server/market_routes.py",
+        "server/pulse_extras.py",
+        "server/pulse_intel.py",
+        "server/pulse_layout.py",
+        "server/pulse_orchestration.py",
+        "server/trend_quant.py",
+        "server/turnover_quant.py",
+        "tests/test_pulse_extraction.py",
+        "tests/test_完整審查資料.py"
+      ],
+      "timeoutSeconds": 300
+    },
+    {
+      "id": "靜默例外棘輪",
+      "reason": "server.py 與 pulse_orchestration.py 修改後沒有新增靜默寬鬆例外",
+      "kind": "unittest",
+      "targets": [
+        "tests.test_no_new_silent_exceptions"
+      ],
+      "changes": [
+        "server/pulse_orchestration.py",
+        "server/server.py"
+      ],
+      "inputs": [
+        "server/pulse_orchestration.py",
+        "server/server.py",
+        "tests/silent_except_baseline.json",
+        "tests/test_no_new_silent_exceptions.py"
+      ],
+      "timeoutSeconds": 300
     }
-  ],
-  "baseCommit": "cffe196bad2c61ea1bf0503f493b389febe97e00",
-  "schemaVersion": 1,
-  "scope": "targeted",
-  "project": "SamHuang68/AI_Stock"
+  ]
 }

@@ -1684,6 +1684,15 @@ _cache = LRUCache(LRU_MAX, ttl_seconds=60)
 # （過去交易日的官方數字不會再變）；失敗或查無時 10 分鐘後才重試，避免每分鐘多打證交所。
 _SECTORS_PREV_SESSION: dict = {}
 _SECTORS_PREV_RETRY_SECONDS = 600
+
+
+def _tw_sectors_body_complete(obj, day):
+    """sectors:{資料日} 快取能直接沿用的條件：同一資料日、官方來源、帶前一交易日欄位的完整 /sectors 回應。
+
+    Pulse 曾把只有類股列的精簡版寫進同一個鍵（沒有資料日、前一交易日、資金流向、產業營收），
+    /sectors 照單回傳，這些欄位就從畫面消失；不完整的內容一律當作未命中、重新計算。"""
+    return (isinstance(obj, dict) and bool(obj.get('sectors')) and obj.get('date') == day
+            and obj.get('source') == 'TWSE MI_INDEX IND' and 'prevSession' in obj)
 _pool  = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix='yf')
 # Pulse bounded executors live in pulse_runtime.py (imported as _pulse_*_pool).
 _fundamental_pool = BoundedExecutor(5, 10, prefix='fundamental')
@@ -5022,7 +5031,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             cached = _cache.get(f'sectors:{day}')
             if cached is not None:
                 obj = json.loads(cached)
-                if obj.get('sectors') and obj.get('source') == 'TWSE MI_INDEX IND':
+                if _tw_sectors_body_complete(obj, day):
                     return obj['sectors']
             last_error = None
             for tmpl in url_templates:
@@ -5144,7 +5153,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 if cached is not None:
                     try:
                         obj = json.loads(cached)
-                        if obj.get('sectors'):
+                        if _tw_sectors_body_complete(obj, date_str):
                             self._ok(cached); return
                     except Exception:
                         pass

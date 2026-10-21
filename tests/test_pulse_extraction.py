@@ -88,6 +88,74 @@ class BreadthCacheKeyContractTests(unittest.TestCase):
             self.assertNotIn('breadth:v1', text, name)
 
 
+class SectorsCacheKeyContractTests(unittest.TestCase):
+    """sectors:{ymd} 是 /sectors 的完整回應；Pulse 只讀它，自己的精簡列寫進 sectors:pulse:{ymd}。"""
+
+    ROWS = [{'name': '水泥', 'close': 150.5, 'change': None, 'changePct': 0.8}]
+
+    def build(self, cached):
+        import json
+        import industry_revenue
+        import pulse_intel
+        import trend_quant
+        import turnover_quant
+        store = dict(cached)
+        cache = MagicMock()
+        cache.get.side_effect = store.get
+        deps = po.PulseDeps(
+            cache=cache, pulse_extras_pool=MagicMock(), pulse_side_pool=MagicMock(),
+            build_tw_market_fundamental=lambda *a, **k: {},
+            build_breadth_payload=lambda **k: {'ok': True, 'date': '2026-10-21', 'indices': {}},
+            twse_mis_index=lambda *a, **k: {},
+            fmtqik_turnover=lambda **k: [], fmtqik_index_closes=lambda *a, **k: [],
+            tw_index_closes=lambda *a, **k: [], macro_latest=lambda *a, **k: None,
+            turnover_quant=turnover_quant.turnover_quant, price_series_quant=trend_quant.price_series_quant,
+            fetch_one=MagicMock(return_value=(None, None, None)),
+        )
+        light = {'ok': True, 'date': '20261021', 'sectors': self.ROWS, 'source': 'TWSE MI_INDEX IND'}
+
+        def collect(jobs, **kwargs):
+            if 'extras' in jobs:
+                return {'extras': {'sectors': light}}, {'extras': 'ok'}
+            return {}, {}
+
+        handler = MagicMock()
+        handler._txf_mis_session.return_value = None
+        import datastore
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for p in (patch.object(po, '_deps', deps),
+                      patch.object(po, 'taipei_today', return_value=datetime(2026, 10, 21).date()),
+                      patch.object(po, 'collect_named', side_effect=collect),
+                      patch.object(industry_revenue, 'get_aggregate', return_value={'ok': False}),
+                      patch.object(industry_revenue, 'market_flash_item', return_value=None),
+                      patch.object(pulse_intel, 'build_pulse_intel', return_value={'ok': False}),
+                      patch.object(datastore, 'get_conn', side_effect=AssertionError('案例禁止存取執行中資料庫')),
+                      patch.object(datastore, 'get_bars', side_effect=RuntimeError('案例不執行決策發布')),
+                      patch('urllib.request.urlopen', side_effect=AssertionError('案例禁止外網')),
+                      patch('socket.socket.connect', side_effect=AssertionError('案例禁止外網'))):
+                stack.enter_context(p)
+            out = json.loads(po.build_pulse_payload(handler, '/pulse?refresh=1'))
+        reads = [c.args[0] for c in cache.get.call_args_list if str(c.args[0]).startswith('sectors:')]
+        writes = [c.args[0] for c in cache.set.call_args_list if str(c.args[0]).startswith('sectors:')]
+        return out, reads, writes
+
+    def test_light_rows_go_to_the_pulse_key_not_the_sectors_endpoint_key(self):
+        out, reads, writes = self.build({})
+        self.assertEqual(reads[:2], ['sectors:20261021', 'sectors:pulse:20261021'], '先讀 /sectors 的完整回應')
+        self.assertEqual(writes, ['sectors:pulse:20261021'])
+        self.assertEqual(out['sectors'], self.ROWS)
+
+    def test_full_sectors_body_is_reused_without_writing(self):
+        import json
+        full = {'date': '20261021', 'source': 'TWSE MI_INDEX IND', 'prevSession': {'status': 'found'},
+                'sectors': [{'name': '航運', 'changePct': -0.5, 'prevChangePct': 1.0}]}
+        out, reads, writes = self.build({'sectors:20261021': json.dumps(full, ensure_ascii=False).encode()})
+        self.assertEqual(reads[:1], ['sectors:20261021'])
+        self.assertEqual(writes, [])
+        self.assertEqual(out['sectors'], full['sectors'])
+
+
 class TxfSnapshotSelectionTests(unittest.TestCase):
     """決策中心用的 __TXF__ 報價：夜盤區塊與日盤主報價中，已核實時間較新的那一筆。"""
 
