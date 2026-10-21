@@ -1877,17 +1877,27 @@ def _yf_prevclose(meta, allow_chart_prev=True):
 
 def _anom_quote(price, prev, chg, kind='stock'):
     """報價值合理性驗證 — 攔 ^TWOII 419/+56% 這類假數字。
-       回 (suspect:bool, reason:str|None)。kind='index' 對 price/prev 比值較寬鬆。"""
+       回 (suspect:bool, reason:str|None)。kind='index' 對 price/prev 比值較寬鬆。
+       kind='foreign'（非台股：美股、加密、商品、外匯、海外指數）不套台股漲跌停門檻，
+       只保留價格與昨收比值的資料合理性檢查（審查 QB-05）。"""
     if price is None or price <= 0:
         return True, 'price<=0/None'
     if prev is not None and prev > 0:
         ratio = price / prev
         if ratio > 1.5 or ratio < 0.5:
             return True, f'price/prev={ratio:.2f} 離譜'
+    if kind == 'foreign':
+        return False, None
     lim = 12.0 if kind == 'index' else 11.0   # 台股個股漲跌停±10%;指數日內極少>12%
     if chg is not None and abs(chg) > lim:
         return True, f'changePct={chg:.1f}% 超出 ±{lim:g}%'
     return False, None
+
+
+def _anom_quote_kind(sym):
+    """Yahoo 路徑的異常門檻種類：只有台股指數（^TWII、^TWOII）適用台股門檻；
+       台股個股代號在 _handle_quote 開頭已轉 /twquote，不會走到這裡。"""
+    return 'index' if str(sym or '').upper() in _BAD_YF else 'foreign'
 
 
 # Yahoo 不可信標的 → 改走 TWSE MIS。 sym -> (ex_ch, code, kind)
@@ -2479,6 +2489,10 @@ def _run_selftests():
     ck('anom:price<=0', _anom_quote(0, 100, 0, 'stock')[0], True)
     ck('anom:個股+10%正常', _anom_quote(110, 100, 10, 'stock')[0], False)
     ck('anom:個股+30%超漲停', _anom_quote(130, 100, 30, 'stock')[0], True)
+    ck('anom:海外+30%正常', _anom_quote(130, 100, 30, 'foreign')[0], False)
+    ck('anom:海外比值離譜仍攔', _anom_quote(300, 100, 200, 'foreign')[0], True)
+    ck('anom:種類台指', _anom_quote_kind('^TWII'), 'index')
+    ck('anom:種類VIX', _anom_quote_kind('^VIX'), 'foreign')
 
     # _src 熔斷狀態機(用 __test__ 源,測完清掉不污染真源)
     try:
@@ -3720,8 +3734,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                         'lastBarTime':  ts[last_idx] if last_idx is not None else None,
                         'source':       'yahoo-v8-chart',
                     }
-                    _susp, _why = _anom_quote(last_close, prev_close, change_pct,
-                                              'index' if sym.startswith('^') else 'stock')
+                    _susp, _why = _anom_quote(last_close, prev_close, change_pct, _anom_quote_kind(sym))
                     out['suspect'] = _susp
                     if _susp:
                         out['suspectReason'] = _why
