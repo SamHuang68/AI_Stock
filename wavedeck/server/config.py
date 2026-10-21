@@ -26,6 +26,8 @@ _DEFAULT = {
         "model": "gpt-4o-mini",
         "timeout_sec": 45,
     },
+    # 紙上模擬權益（審查 WD-07）：起始資金與台指期大台每點價值；未計手續費與期交稅。
+    "paper_account": {"starting_equity": 1_000_000, "point_value": 200},
     "broker": {
         "kind": "paper",  # paper | txt_master
         "txt_dir": "data/master",

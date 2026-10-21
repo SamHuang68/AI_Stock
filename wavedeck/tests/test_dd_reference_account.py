@@ -18,6 +18,7 @@ class 回撤參考帳戶測試(unittest.TestCase):
     tearDown = _base.tearDown
     clear_modules = _base.clear_modules
     signal = _base.signal
+    txt = _base.txt
 
     def risk(self):
         return importlib.import_module(self.package + ".risk")
@@ -37,8 +38,9 @@ class 回撤參考帳戶測試(unittest.TestCase):
         self.assertFalse(risk.evaluate_gate(real, {"action": "ENTER_LONG", "confidence": 0.9, "process": {"chase_risk": "low"}})["allow"])
 
     def test_示範帳戶不鎖定也不全平_既有急停不解除(self):
+        # 2026-10-21 WD-07（Sam 核准）：paper 改用紙上模擬權益，示範參考帳戶只出現在非 paper 券商。
         self.engine.system_control("start")
-        self.engine.handle_signal(self.signal())
+        self.txt(account=2)
         held = self.runtime.snapshot()["positions"]["account"]
         self.assertNotEqual(held, 0)
         self.runtime.patch(account=dict(DEMO))
@@ -56,15 +58,25 @@ class 回撤參考帳戶測試(unittest.TestCase):
         self.assertTrue(self.runtime.snapshot()["kill_switch"])
 
     def test_實盤帳戶回撤超限仍鎖定並全平(self):
+        # 2026-10-21 WD-07：paper 的「實際」權益是紙上模擬帳本；以真實的模擬虧損觸發鎖定，不再注入帳戶數字。
         self.engine.system_control("start")
+        self.engine.refresh_account()          # 開盤前先記下當日起始權益（正式環境由每輪監控完成）
         self.engine.handle_signal(self.signal())
-        self.runtime.patch(account=dict(DEMO, reference=False, source="broker"))
+        st = self.runtime.snapshot()
+        lots = st["positions"]["account"]
+        fill = st["paper_ledger"]["avgPrice"]
+        self.assertNotEqual(lots, 0)
+        self.runtime.patch(exec={"price": fill - 300})   # 每口 300 點 × 200 元
         self.assertTrue(self.engine.enforce_daily_drawdown(True, False))
         st = self.runtime.snapshot()
         self.assertTrue(st["kill_switch"])
         self.assertEqual(st["positions"]["account"], 0)
         self.assertEqual(st["account"]["daily_dd_status"], "measured")
+        self.assertEqual(st["account"]["source"], "paper_sim")
+        self.assertAlmostEqual(st["paper_ledger"]["realized"], -300 * lots * 200)
 
+
+del _base
 
 if __name__ == "__main__":
     unittest.main()
