@@ -4,39 +4,24 @@
   ],
   "cases": [
     {
-      "id": "投組涵蓋與行情類股契約測試納入收集",
+      "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
-      "timeoutSeconds": 300,
-      "reason": "從未執行的契約測試納入 unittest（TQ-02）",
+      "timeoutSeconds": 600,
+      "reason": "發布狀態只改文件；分享封存掃描",
       "targets": [
-        "tests.test_投組涵蓋契約",
-        "tests.test_行情類股契約"
+        "tests.test_dist_scrub"
       ],
       "changes": [
-        "tests/test_投組涵蓋契約.py",
-        "tests/test_行情類股契約.py"
+        "docs/revision.md"
       ],
       "inputs": [
         ".gitignore",
-        "server/datastore.py",
-        "server/http_client.py",
-        "server/market_contract.py",
-        "server/market_routes.py",
-        "server/portfolio.py",
-        "server/pulse_extras.py",
-        "server/sector_flow.py",
-        "server/sector_history.py",
-        "server/server.py",
-        "server/tdcc_holders.py",
-        "server/台股日線.py",
-        "server/類股成員.py",
-        "tests/test_投組涵蓋契約.py",
-        "tests/test_行情類股契約.py",
-        "tests/已核對資料.py"
+        "docs/revision.md",
+        "tests/test_dist_scrub.py"
       ]
     }
   ],
-  "baseCommit": "84b3aeaf912158c5c2b0d324239530cf97bf77cd",
+  "baseCommit": "4de979bdaf282835e102e43353e7ea62896c235d",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
