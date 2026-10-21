@@ -1,3 +1,31 @@
+## 2026-10-21 兩個從未執行的契約測試檔納入 unittest 並修正過期夾具（TQ-02）
+
+- 基底：`020745108e1ac1a0fb4cc6e2656181c33e2e8ca8`（origin/main）；分支 `claude/collect-stale-contract-tests`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查補齊 TQ-02）：
+  - `tests/test_投組涵蓋契約.py`（9 例）與 `tests/test_行情類股契約.py`（10 例）以裸函式寫成且沒有 `load_tests`，unittest 收集 0 例；驗證計畫只支援 unittest，所以 CI 與 stage 從未執行它們。
+  - 以 pytest 實跑時 7 例失敗，全部是測試夾具過期，不是產品缺陷：
+    - 投組 6 例：`b3bdcf7`（2026-10-13）起 `portfolio.compute` 必須以資料庫核對交易日曆與價格品質；舊夾具只替換 `get_bars_bulk`、沒有日曆，結果一律為空。它驗證的持股涵蓋率、`betaCoveragePct`、`skipped`、零權重排除、代號後綴合併、常數價格相關係數未定義等契約，在其他測試中沒有對應斷言。
+    - 類股 1 例，三處過期：
+      - 正式程式改由 `http_client.fetch_json` 取 TWSE／TPEx，舊替身只換 `urllib`，**實際會連到真實網路**（實跑取得 1,087 筆真實個股）；
+      - `_get_tw_sectors` 改為 `deadline` 參數，舊替身不收參數，呼叫即 TypeError 而被當成無分類；
+      - 假 Thread 缺 `is_alive`，AST 取出的命名空間缺正式模組已有的 `time`。
+- 修正（Sam 2026-10-21「TQ-02 照建議修」）：
+  - 兩檔補 `load_tests`，以 `FunctionTestCase` 包裝，與 `test_pulse_intel` 等既有寫法相同；
+  - 投組：`bars()` 改用合成日曆的交易日，`compute()` 改用共用夾具 `tests/已核對資料.py` 的 `價格資料`（暫存資料庫、合成日曆與還原快照），不再只替換 `get_bars_bulk`；
+  - 類股：
+    - 改替換 `http_client.fetch_json`，並以 socket 防線確保不連網；
+    - `_get_tw_sectors` 替身改為與正式同簽名；假 Thread 補 `is_alive`；命名空間補 `time`（正式 `server.py` 頂層已 import，不補正式模組沒有的名稱）；
+    - pytest 的 `tmp_path` 案例改為缺省時自建暫存目錄。
+  - **斷言完全不變**：投組檔從第一個測試函式起逐字相同；類股檔 47 行 `assert` 逐行相同。
+- 驗證：兩檔以 unittest 19 例通過、以 pytest 19 例通過。
+- **更正先前記載**（不覆寫原段落）：
+  - 「2026-10-19 台指期主力契約切換日」段寫「`tests/test_pulse_extras.py` 以 pytest 7 案例通過（該檔為裸函式，unittest 不會收集）」；
+  - 「2026-10-20 個股融資融券增減」段寫「`tests/test_chip_api.py`（裸函式，unittest 不收集）以 pytest 6 案例通過」。
+  - 兩檔其實都有 `load_tests`，unittest 會收集（各 7、6 例）；結果仍是通過，但「unittest 不收集」的說法錯誤。
+- 發布狀態：只改測試，無產品程式變更。
+
+---
+
 ## 2026-10-21 台股交易日曆跨年後改讀資料庫官方日曆（CAL-02）
 
 - 基底：`1190f97719fdff71c6164428c440c075ecf03257`（origin/main）；分支 `claude/tw-calendar-db-fallback`。實作與合併 SHA 待 PR 合併後補記。
