@@ -226,6 +226,16 @@ def test_filter_sectors_skips_benchmarks():
     assert [r['name'] for r in rows] == ['半導體']
 
 
+def test_filter_sectors_drops_rows_marked_non_industry():
+    rows = pi.filter_sectors([
+        {'name': '臺指日報酬兩倍', 'changePct': 2.57, 'industry': False},
+        {'name': '臺灣50', 'changePct': 1.08, 'industry': False},
+        {'name': '塑膠', 'changePct': 6.52, 'industry': True},
+        {'name': '航運', 'changePct': -0.24},  # 沒有標記（Yahoo 代理籃）照舊保留
+    ])
+    assert [r['name'] for r in rows] == ['塑膠', '航運']
+
+
 def test_status_label_clearly_strong():
     assert pi._label_total(85) == '明顯偏強'
     assert pi._label_total(72) == '偏強'
@@ -324,6 +334,7 @@ if __name__ == '__main__':
     test_nhnl_risk_and_neutral_zero_score()
     test_tx_oi_short_covering_and_unwind()
     test_filter_sectors_skips_benchmarks()
+    test_filter_sectors_drops_rows_marked_non_industry()
     test_status_label_clearly_strong()
     test_all_extras_raise_completeness()
     test_ai_tech_spillover_risk_from_sox()

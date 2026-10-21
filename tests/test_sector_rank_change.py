@@ -216,6 +216,15 @@ class SectorsHandlerCacheTest(unittest.TestCase):
         self.assertEqual((cement['changePct'], cement['prevChangePct']), (0.8, -2.0))
         self.assertEqual(json.loads(self.store[f'sectors:{self.today}'])['date'], self.today, '完整回應寫回同一鍵')
 
+    def test_rows_are_marked_and_participation_counts_only_single_industries(self):
+        body, _ = self.handle(official_rows=[
+            ('發行量加權股價指數', '46887.77', '590', '1.28'), ('電子工業類指數', '2928.19', '31', '1.08'),
+            ('水泥類指數', '150.5', '1.2', '0.80'), ('航運類指數', '120.0', '-0.6', '-0.50'),
+            ('臺指日報酬兩倍指數', '229142.90', '5700', '2.57')])
+        self.assertEqual([(r['name'], r['industry']) for r in body['sectors']], [
+            ('發行量加權股價', False), ('電子工業', False), ('水泥', True), ('航運', True), ('臺指日報酬兩倍', False)])
+        self.assertEqual(body['sectorFlow']['participationPct'], 50.0, '只算水泥（漲）與航運（跌）')
+
     def test_complete_cached_body_is_served_without_network(self):
         complete = json.dumps({'date': self.today, 'source': 'TWSE MI_INDEX IND', 'sectorFlow': None,
                                'sectors': [{'name': '水泥', 'changePct': 0.8, 'prevChangePct': -2.0}],

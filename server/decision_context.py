@@ -550,6 +550,9 @@ def _global_tech_change(pulse: dict) -> float | None:
 def _tw_tech_change(pulse: dict) -> float | None:
     vals = []
     for row in pulse.get('sectors') or []:
+        # 解析時標記的非產業列（電子工業合併類、電子類兩倍槓桿／反向、未含電子等）不算台股科技。
+        if (row or {}).get('industry') is False:
+            continue
         name = str((row or {}).get('name') or (row or {}).get('sector') or '')
         if any(k in name for k in ('半導', '電子', '電腦')):
             val = _number((row or {}).get('changePct'))

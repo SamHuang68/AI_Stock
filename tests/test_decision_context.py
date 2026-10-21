@@ -406,6 +406,17 @@ class DecisionContextTest(unittest.TestCase):
         self.assertFalse(multipliers['stateVolatilityApplied'])
         self.assertEqual(multipliers['stateVolatility'], 1.0)
 
+    def test_tw_tech_change_ignores_rows_marked_non_industry(self):
+        sectors = [
+            {'name': '半導體', 'changePct': -0.6, 'industry': True},
+            {'name': '電子零組件', 'changePct': -0.2, 'industry': True},
+            {'name': '電子工業', 'changePct': -0.5, 'industry': False},
+            {'name': '電子類反向', 'changePct': 0.5, 'industry': False},
+            {'name': '未含電子', 'changePct': 0.8, 'industry': False},
+            {'name': '電腦及週邊設備', 'changePct': -0.4},  # 沒有標記（Yahoo 代理籃）照舊計入
+        ]
+        self.assertAlmostEqual(dc._tw_tech_change({'sectors': sectors}), -0.4)
+
 
 if __name__ == '__main__':
     unittest.main()

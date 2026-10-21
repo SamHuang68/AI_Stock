@@ -65,6 +65,25 @@ def parse_twse_daily_stock_table(payload: dict[str, Any] | None) -> list[dict[st
     return []
 
 
+# 證交所的合併類指數是其他產業的合計（如電子工業類＝8 個電子次產業），與成分產業並列會重複計算。
+TWSE_COMPOSITE_SECTORS = frozenset({'水泥窯製', '塑膠化工', '機電', '化學生技醫療', '電子工業'})
+
+
+def is_twse_industry_index(raw_name: Any) -> bool:
+    """證交所 MI_INDEX 的原始指數名稱是否為單一產業類股（上市產業分類）。
+
+    單一產業的官方名稱都是「X類指數」；大盤、主題、槓桿與反向指數（如「電子類兩倍槓桿指數」）
+    不以「類指數」結尾，合併類另外排除。名稱正規化後就無法分辨，所以要在解析時判定。"""
+    name = re.sub(r'\s+', '', str(raw_name or ''))
+    short = name[:-len('類指數')] if name.endswith('類指數') else ''
+    return bool(short) and short not in TWSE_COMPOSITE_SECTORS
+
+
+def industry_rows(rows: Iterable[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """只留單一產業類股；沒有 industry 標記的列（Yahoo 代理籃、舊快取）照舊保留。"""
+    return [r for r in rows or [] if isinstance(r, dict) and r.get('industry') is not False]
+
+
 def normalize_sector_name(value: Any) -> str:
     """Normalize TWSE index labels and issuer industry labels to one join key."""
     text = re.sub(r'\s+', '', str(value or ''))
@@ -198,8 +217,10 @@ def build_sector_flow(
     """Enrich sector rows without labelling price participation as fund flow."""
     raw = [dict(x) for x in (sectors or []) if isinstance(x, dict)]
     total_turnover_yi = _number(total_turnover_yi)
-    valid_change = [x for x in raw if _number(x.get('changePct')) is not None]
-    eligible_rows = [x for x in raw if x.get('turnoverEligible') is not False]
+    # 參與率與成交覆蓋只算單一產業；大盤、主題與合併類指數仍留在 rows（類股歷史的 RS20 基準要用）。
+    industries = industry_rows(raw)
+    valid_change = [x for x in industries if _number(x.get('changePct')) is not None]
+    eligible_rows = [x for x in industries if x.get('turnoverEligible') is not False]
     turnover_rows = [x for x in eligible_rows if _number(x.get('turnoverYi', x.get('turnover'))) is not None]
     turnover_coverage = len(turnover_rows) / len(eligible_rows) if eligible_rows else 0.0
     classification_coverage_pct = _number(classification_coverage_pct)
@@ -216,7 +237,8 @@ def build_sector_flow(
         if rs20 is None and return20 is not None and benchmark_return20_pct is not None:
             rs20 = return20 - float(benchmark_return20_pct)
         share = None
-        if turnover is not None and total_turnover_yi not in (None, 0) and total_turnover_yi > 0:
+        if (turnover is not None and total_turnover_yi not in (None, 0) and total_turnover_yi > 0
+                and row.get('industry') is not False):
             share = max(0.0, turnover / total_turnover_yi * 100.0)
             shares.append(share)
         enriched = dict(row)
