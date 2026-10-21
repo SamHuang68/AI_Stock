@@ -4,24 +4,31 @@
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "WaveDeck未讀本體的錯誤回應不重設連線",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "timeoutSeconds": 300,
+      "reason": "過大或長度無效的 JSON 與超量本體的防護拒絕，回應後丟棄殘留本體再關閉",
       "targets": [
-        "tests.test_dist_scrub"
+        "wavedeck.tests.test_request_guard",
+        "wavedeck.tests.test_策略HTTP",
+        "wavedeck.tests.test_smoke"
       ],
       "changes": [
-        "docs/revision.md"
+        "wavedeck/server/server.py",
+        "wavedeck/tests/test_request_guard.py"
       ],
       "inputs": [
         ".gitignore",
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "wavedeck/server/request_guard.py",
+        "wavedeck/server/server.py",
+        "wavedeck/tests/test_request_guard.py",
+        "wavedeck/tests/test_smoke.py",
+        "wavedeck/tests/test_策略HTTP.py",
+        "wavedeck/tests/test_策略訊號整合.py"
       ]
     }
   ],
-  "baseCommit": "dd3e3eaabda88bb0e350ebb3c451698a174030ed",
+  "baseCommit": "6caa8b96f4fcec5b3675eb10430ccbc846c8db53",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

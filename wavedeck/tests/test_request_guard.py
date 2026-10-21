@@ -163,6 +163,49 @@ class RequestGuardHttpTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def raw_post(self, path, payload, declared_length, headers=None):
+        """自訂 Content-Length 的 POST：宣告長度可與實際送出的位元組數不同。"""
+        conn = http.client.HTTPConnection("127.0.0.1", self.allowed_port, timeout=3)
+        try:
+            conn.putrequest("POST", path)
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", declared_length)
+            for key, value in (headers or {}).items():
+                conn.putheader(key, value)
+            conn.endheaders()
+            conn.send(payload)
+            response = conn.getresponse()
+            return response.status, json.loads(response.read().decode("utf-8"))
+        finally:
+            conn.close()
+
+    def unread_body_failures(self, path, cases, expected_status, headers=None):
+        # 任何一次連線被中止或回應不符都記為失敗；本體越大越容易重現，因此每種情形重複 25 次。
+        failures = []
+        for name, payload, declared in cases:
+            for attempt in range(25):
+                try:
+                    status, parsed = self.raw_post(path, payload, declared, headers)
+                except OSError as exc:
+                    failures.append((name, attempt, type(exc).__name__, getattr(exc, "winerror", None)))
+                    continue
+                if status != expected_status or parsed.get("ok") is not False:
+                    failures.append((name, attempt, status, parsed))
+        return failures
+
+    def test_unread_json_body_still_returns_400_instead_of_resetting_the_connection(self):
+        # 超過 256 KiB 上限或長度無效時不讀本體就回 400；若直接關閉連線，Windows 會對仍有未讀資料的
+        # 連線送出 RST，客戶端可能讀不到 400（test_策略HTTP 的過大 JSON 案例偶發 WinError 10053）。
+        cases = (("宣告超量只送少量", b"{}", "262145"),
+                 ("實際送出超量本體", b"x" * 262145, "262145"),
+                 ("長度無效", b"x" * 65536, "abc"))
+        self.assertEqual(self.unread_body_failures("/api/strategy/mode", cases, 400), [])
+
+    def test_rejected_post_with_an_oversized_body_still_returns_403(self):
+        # 防護拒絕時超量本體同樣不讀取；回應後仍不可讓連線被重設。
+        cases = (("實際送出超量本體", b"x" * 262145, "262145"),)
+        self.assertEqual(self.unread_body_failures("/api/style", cases, 403, {"Origin": FOREIGN}), [])
+
     def state(self):
         snap = self.runtime.snapshot()
         return {key: snap.get(key) for key in ("mode", "kill_switch", "style", "positions", "fsm", "lights")}
