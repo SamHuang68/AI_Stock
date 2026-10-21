@@ -506,6 +506,22 @@ Linux／macOS 將 `py -3` 改成 `python3`。
 - 靜態檔案維持 allow-list。
 - 分享包不含敏感檔、個人快照或常見密鑰格式。
 - Stock Terminal ↔ WaveDeck bridge 可完成 HTTP smoke test。
+- 本節「主要 API」表的每個端點都對應 `server.py` 實際存在的路由與方法（`tests/test_readme_api_routes.py`）。
+
+### 畫面同條件對照
+
+改版前後要確認既有畫面沒有退步時，用同一套合成資料、固定時鐘與相同視窗比較兩個版本：
+
+```powershell
+npm run test:ui-baseline                                   # origin/main 對工作樹
+node tests/ui_baseline_compare.cjs --base <rev> --head <rev|WORKTREE> --routes heat,pulse
+```
+
+- 兩個版本各自從 Git 取出後執行 `build_v2.py`，不改動工作樹；路由支援 `pulse`、`decision`、`heat`、`chart`，預設視窗 1440×900 與 390×844。
+- 所有對外請求一律攔下，本機 API 只回 `tests/fixtures/ui_baseline/synthetic.cjs` 的示意資料；沒有 fixture 的端點回空物件並列入報告。
+- 每個版本截兩次：同一版本兩次不同時標為「版本內不穩定」（頁面本身有競態），不拿來判讀。其餘分為「相同」與「有差異」，有差異附像素數與範圍，是否屬於可接受的改善由人判讀。
+- 輸出在 `scratch/ui-baseline/<執行時間>/`：`report.html` 並排截圖、`receipt.json` 收據（版本 SHA、輸入雜湊、攔截與未覆蓋端點）。
+- 工具本身的驗證：`node tests/ui_baseline_compare_selftest.cjs`（同一版本對自己）。
 
 ## 專案結構
 

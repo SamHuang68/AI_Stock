@@ -19,6 +19,29 @@
 
 ---
 
+## 2026-10-21 新增 UI 同條件對照工具與 README API 表一致性測試（借鏡 EquiLens，PR A）
+
+- 基底：`d42daea3e0a410d534905dbf2e6d041d7fc78f89`（origin/main）；分支 `claude/ui-baseline-and-api-docs-check`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（Sam 2026-10-21「給我規劃 然後轉到 AI_Stock 專案下執行」；比較 `wakin61043/tw-trading-dashboard` 後選出的四項之二）：
+  - 規則 0009「既有能力保全」第 4 條要求 UI 改版用相同視窗、資料與狀態做前後對照，專案原本只有個別功能的瀏覽器驗收，沒有通用工具；
+  - README「主要 API」表沒有檢查機制，端點改名或移除後文件可能失真。
+- 新增（不改任何產品行為）：
+  - `tests/ui_baseline_compare.cjs`：兩個版本各自從 Git 取出並執行 `build_v2.py`（不改工作樹），在 `tests/fixtures/ui_baseline/synthetic.cjs` 的示意資料、固定時鐘、固定亂數、停用動畫與相同視窗下截圖；所有對外請求一律攔下；每個版本截兩次，同版不一致標為「版本內不穩定」不判讀；其餘判為相同或有差異（附差異像素與範圍），輸出並排報告與收據；
+  - `tests/ui_baseline_compare_selftest.cjs`：同一版本對自己，必須全部就緒、無頁面錯誤、沒有被判為有差異的組；
+  - `tests/test_readme_api_routes.py`：以 AST 讀 `do_GET`／`do_POST` 中與路徑 `p` 比較的常數，核對 README API 表的方法與路徑；
+  - `package.json` 新增 `test:ui-baseline`、`test:ui-baseline-selftest`；README「開發與測試」補使用說明。
+- 開發中觀察到的工具問題與處置：Chromium 預設 GPU 光柵化造成同版截圖 2–51 像素雜訊，改用固定渲染參數後同版逐位元組相同；曾考慮 0.1% 雜訊門檻，實測一行標題改字只有約 0.03% 像素會被誤放過，因此不設門檻。
+- 2026-10-21 CI 修正（#244 首次 CI 的 `test (windows-latest)` 失敗）：工具原以 `git archive` + `tar` 取出版本；CI 在 PowerShell 下呼叫 Windows 內建 `tar.exe`（bsdtar），解壓時把中文檔名弄壞（`Invalid empty pathname`），`build_v2.py` 找不到 `src/core/投組資料契約_v5.js`。本機在 Git Bash 下用的是 GNU tar，Ubuntu 也通過，所以開發時沒暴露。已在本機 PowerShell 重現，改用 git 暫時索引（`GIT_INDEX_FILE` + `read-tree` + `checkout-index`）取出檔案，不再依賴外部 tar，也不動倉庫索引；修正後在 PowerShell 下自我驗證 4 組全部相同。
+- 順帶發現（未在本次處理）：圖表頁右側價格軸的「今／昨」小標籤在部分載入時序下不會畫出（`renderCloseReadout` 呼叫時 `priceToCoordinate` 尚無座標，之後不重畫）；工具把該組判為版本內不穩定。
+- 驗證：
+  - `python -m unittest tests.test_readme_api_routes`：4 案例通過（含刻意不存在的路徑與錯誤方法會被抓出）；
+  - `node tests/ui_baseline_compare_selftest.cjs`：pulse、heat 各兩種視窗 4 組全部相同（約 56 秒）；
+  - 工具全路由自我對照兩次各 8 組全部相同；刻意修改產業頁標題後，該頁兩種視窗都判為有差異（434 像素），還原後無殘留；
+  - `origin/main` 對工作樹：7 組相同、圖表桌機 1 組版本內不穩定（上述競態）。
+- 發布狀態：未推送、未合併、未部署。
+
+---
+
 ## 2026-10-20 持倉風險面板與持倉清單共用同一份彙總，未載價不以成本當市值（FE-03）
 
 - 基底：`d1ec70c4e79f32788bd72344b1588542dcb138d5`（origin/main）；分支 `claude/portfolio-risk-known-cost`。實作與合併 SHA 待 PR 合併後補記。
