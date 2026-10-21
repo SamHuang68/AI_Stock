@@ -15,7 +15,7 @@ from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
 from .providers import infer_with_fallback
 from .risk import evaluate_gate, daily_dd_known, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
-from .state import RUNTIME, TZ8, now_iso
+from .state import RUNTIME, TZ8, _default_state, now_iso
 from . import 策略契約 as contracts
 from .不留倉 import deadline_status
 from .st_link import touch_overlay
@@ -51,12 +51,27 @@ def panic() -> dict:
 
 
 @_serialized
+def refresh_account(now: datetime | None = None) -> dict:
+    """paper 券商以模擬帳本計算權益；切到其他券商時撤下模擬數字，改回參考帳戶（回撤未知）。"""
+    from . import paper_account
+    st = RUNTIME.snapshot()
+    if get_broker().name == "paper":
+        return RUNTIME.patch(**paper_account.refresh(st, load_config(), now or datetime.now(TZ8)))
+    if (st.get("account") or {}).get("source") == paper_account.SOURCE:
+        return RUNTIME.patch(account=dict(_default_state()["account"]))
+    return st
+
+
+@_serialized
 def enforce_daily_drawdown(flatten: bool, already_locked: bool) -> bool:
     """回撤偵測、急停與平倉共用送單鎖，避免舊進場覆蓋平倉。"""
-    st = RUNTIME.snapshot()
+    st = refresh_account()
     if not daily_dd_known(st):
-        # 示範參考帳戶：回撤未知，不鎖定也不平倉；不解除既有急停。
-        RUNTIME.patch(account={"daily_dd_pct": None, "daily_dd_status": "unknown_reference",
+        # 示範參考帳戶或紙上權益未知：回撤未知，不鎖定也不平倉；不解除既有急停。
+        account = st.get("account") or {}
+        status = ("unknown_" + str(account.get("equity_status"))
+                  if account.get("source") == "paper_sim" else "unknown_reference")
+        RUNTIME.patch(account={"daily_dd_pct": None, "daily_dd_status": status,
                                "daily_dd_limit_pct": round(MAX_DAILY_DD * 100, 2)},
                       lights={"risk_watchdog": "warn"})
         return already_locked and bool(st.get("kill_switch"))
@@ -120,7 +135,7 @@ def _confirmed_fsm(state: dict, applied: dict) -> str:
 
 
 def _apply_patch(state: dict, applied: dict) -> dict:
-    patch = {key: applied[key] for key in ("positions", "execution", "lights", "account") if key in applied}
+    patch = {key: applied[key] for key in ("positions", "execution", "lights", "account", "paper_ledger") if key in applied}
     patch["fsm"] = _confirmed_fsm(state, applied)
     if all(state.get(key) == value for key, value in patch.items()):
         return state
@@ -367,7 +382,8 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
 
 def _finish_decision(st, decision, err, preferred, event, source, body):
     decision.setdefault("process", {})
-    gate = evaluate_gate(RUNTIME.snapshot(), decision)
+    # 先以本次訊號價格更新紙上權益，回撤門檻才不會沿用上一輪監控的舊權益（審查 WD-07）。
+    gate = evaluate_gate(refresh_account(), decision)
     if decision.get("requested_lots") is not None:
         gate["lots_effective"] = min(gate["lots_effective"], decision["requested_lots"])
     if deadline_status(RUNTIME.snapshot())["due"] and decision.get("action") == "HOLD":

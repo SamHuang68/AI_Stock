@@ -36,6 +36,8 @@
   }
 
   function money(n) {
+    /* 未知權益（null）顯示「—」，不以 0 冒充實際數字 */
+    if (n === null || n === undefined || n === '') return '—';
     var v = Number(n);
     if (!isFinite(v)) return '—';
     return v.toLocaleString('en-US');
@@ -377,12 +379,16 @@
     var src = String(a.source || a.ref || 'wave_ai_ref');
     var isRef = src === 'wave_ai_ref' || src === 'reference' || src === 'demo' || a.reference === true;
     /* 參考帳戶的回撤不是實盤數字，後端不以它鎖定；畫面也不重算成真實回撤 */
-    var ddUnknown = a.daily_dd_status === 'unknown_reference';
+    var ddUnknown = String(a.daily_dd_status || '').indexOf('unknown') === 0;
+    var ddUnknownText = a.daily_dd_status === 'unknown_reference' ? '未知（參考帳戶）'
+      : a.daily_dd_status === 'unknown_ledger_mismatch' ? '未知（帳本與部位不一致）' : '未知（缺價格）';
+    var isPaperSim = src === 'paper_sim';
     var ddCls = ddUnknown ? '' : (ddPct >= ddLim ? 'down' : (ddPct >= ddLim * 0.6 ? 'down' : ''));
     var noteEl = $('acctNote');
     if (noteEl) {
       noteEl.textContent = isRef
         ? 'Wave AI 參考 · 攻能驗證 · 非實盤'
+        : isPaperSim ? ('紙上模擬權益 · 起始 ' + money(a.starting_equity) + ' · 每點 ' + (a.point_value || 200) + ' 元 · 未計費稅')
         : ('帳戶來源：' + src);
       noteEl.title = isRef
         ? '數值來自參考 Wave AI，僅供攻能驗證，非本機實盤持倉／權益。'
@@ -393,9 +399,9 @@
     $('acct').innerHTML =
       '<div class="a"><div class="k">昨日餘額' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.yesterday_balance) + '</div></div>' +
       '<div class="a"><div class="k">當前權益' + (isRef ? '（參考）' : '') + '</div><div class="v">' + money(a.equity) + '</div></div>' +
-      '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(chg) + '</div></div>' +
+      '<div class="a"><div class="k">權益變動</div><div class="v ' + (chg < 0 ? 'down' : 'up') + '">' + money(a.equity_change) + '</div></div>' +
       '<div class="a"><div class="k">單日回撤</div><div class="v ' + ddCls + '">' +
-        (ddUnknown ? ('未知（參考帳戶）/ ' + ddLim + '%') : ddPct ? (ddPct.toFixed(2) + '% / ' + ddLim + '%') : ('0% / ' + ddLim + '%')) + '</div></div>' +
+        (ddUnknown ? (ddUnknownText + ' / ' + ddLim + '%') : ddPct ? (ddPct.toFixed(2) + '% / ' + ddLim + '%') : ('0% / ' + ddLim + '%')) + '</div></div>' +
       '<div class="a"><div class="k">券商連線</div><div class="v">' + (a.broker_api || '—') + '</div></div>' +
       '<div class="a"><div class="k">Email 監控</div><div class="v">' +
         (((s.lights || {}).email_monitor === 'ok') ? '正常' : lightLabel((s.lights || {}).email_monitor || '—')) +

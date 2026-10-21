@@ -133,6 +133,7 @@ def panic_flatten(state: dict[str, Any]) -> dict[str, Any]:
         },
         "lights": dict(applied.get("lights") or {}),
         "account": dict(applied.get("account") or {}),
+        **({"paper_ledger": applied["paper_ledger"]} if "paper_ledger" in applied else {}),
     }
 
 
@@ -189,12 +190,17 @@ class PaperBroker:
         target = _target(decision.get("action"), lots, current, decision.get("requested_lots"))
         if target is None:
             return self.sync_positions(state)
+        from . import paper_account
+        # 以當下訊號價格模擬成交並記入帳本，供紙上權益與每日回撤使用（審查 WD-07）。
+        ledger = paper_account.fill_fields(paper_account.apply_fill(
+            state.get("paper_ledger"), target, (state.get("exec") or {}).get("price"),
+            paper_account.settings(load_config())["point_value"]))
         pos = dict(state.get("positions") or {})
         execution = _receipt(state, decision, target)
         execution.update(status="filled", evidence_kind="simulated", position_confirmed=True,
                          confirmed_account=target, confirmed_at=now_line())
         pos.update(ai_suggested=target, txt_target=target, strategy=target, account=target)
-        return {"positions": pos, "execution": execution, "order_action": "紙上模擬成交"}
+        return {"positions": pos, "execution": execution, "order_action": "紙上模擬成交", "paper_ledger": ledger}
 
 
 class TxtMasterBroker:

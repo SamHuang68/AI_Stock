@@ -23,8 +23,12 @@ def daily_dd_known(state: dict[str, Any]) -> bool:
     """示範／參考帳戶的權益不是使用者實盤，不能拿來觸發回撤鎖（審查 WD-04）。"""
     acct = state.get("account") or {}
     if "reference" in acct:  # 明確旗標優先；沒有旗標時才看來源
-        return acct.get("reference") is not True
-    return acct.get("source") not in REFERENCE_ACCOUNT_SOURCES
+        if acct.get("reference") is True:
+            return False
+    elif acct.get("source") in REFERENCE_ACCOUNT_SOURCES:
+        return False
+    # 紙上模擬權益在缺價格或帳本不一致時回報 None；未知權益不能當成 0 回撤（審查 WD-07）。
+    return acct.get("equity") is not None and acct.get("yesterday_balance") is not None
 
 
 def daily_dd_ratio(state: dict[str, Any]) -> float:
