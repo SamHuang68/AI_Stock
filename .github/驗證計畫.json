@@ -4,45 +4,76 @@
   ],
   "cases": [
     {
-      "id": "主圖突破型態當日量口徑",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "突破量能與 WATCH、個股訊號同口徑（CH-02）",
-      "targets": [
-        "tests/pattern_breakout_day_volume_selftest.js"
-      ],
-      "changes": [
-        "src/chart/pattern_v3.js",
-        "tests/pattern_breakout_day_volume_selftest.js"
-      ],
-      "inputs": [
-        ".gitignore",
-        "src/chart/pattern_v3.js",
-        "tests/pattern_breakout_day_volume_selftest.js"
-      ]
-    },
-    {
-      "id": "追蹤中的前端產物與原始碼一致",
+      "id": "台股日曆跨年改讀資料庫官方日曆",
       "kind": "unittest",
-      "timeoutSeconds": 120,
-      "reason": "src 變更後重建產物",
+      "timeoutSeconds": 600,
+      "reason": "JSON 之後年度改讀 TWSE 官方日曆（CAL-02）",
       "targets": [
-        "tests.test_bundle_fresh"
+        "tests.test_tw_calendar_db_fallback",
+        "tests.test_tw_calendar_closed_days",
+        "tests.test_stock_signals_revision_metadata",
+        "tests.test_三項限制解方",
+        "tests.test_全檢資料邊界",
+        "tests.test_台股日線",
+        "tests.test_完整審查資料",
+        "tests.test_投組價格契約",
+        "tests.test_研究缺口補完",
+        "tests.test_警報日線來源",
+        "tests.test_ETF更新防再發",
+        "tests.test_conditional_expectation",
+        "tests.test_stock_signals",
+        "tests.test_postmarket_report",
+        "tests.test_no_new_silent_exceptions",
+        "tests.test_options_exposure",
+        "tests.test_options_schedule",
+        "tests.test_etf_paths",
+        "tests.test_etf_api",
+        "tests.test_etf_delta_tracker",
+        "tests.test_etf_snapshot_health",
+        "tests.test_marketflow_txf_source_date_safety"
       ],
       "changes": [
-        "src/chart/pattern_v3.js",
-        "stock_terminal_v2.html"
+        "server/台股交易參考.py",
+        "server/etf_paths.py",
+        "tests/test_tw_calendar_db_fallback.py"
       ],
       "inputs": [
         ".gitignore",
-        "build_v2.py",
-        "src/chart/pattern_v3.js",
-        "stock_terminal_v2.html",
-        "tests/test_bundle_fresh.py"
+        "server/datastore.py",
+        "server/etf_paths.py",
+        "server/log_once.py",
+        "server/options_exposure.py",
+        "server/options_schedule.py",
+        "server/台股交易參考.json",
+        "server/台股交易參考.py",
+        "server/台股日線.py",
+        "tests/silent_except_baseline.json",
+        "tests/test_ETF更新防再發.py",
+        "tests/test_conditional_expectation.py",
+        "tests/test_etf_api.py",
+        "tests/test_etf_delta_tracker.py",
+        "tests/test_etf_paths.py",
+        "tests/test_etf_snapshot_health.py",
+        "tests/test_marketflow_txf_source_date_safety.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/test_options_exposure.py",
+        "tests/test_options_schedule.py",
+        "tests/test_postmarket_report.py",
+        "tests/test_stock_signals.py",
+        "tests/test_stock_signals_revision_metadata.py",
+        "tests/test_tw_calendar_closed_days.py",
+        "tests/test_tw_calendar_db_fallback.py",
+        "tests/test_三項限制解方.py",
+        "tests/test_全檢資料邊界.py",
+        "tests/test_台股日線.py",
+        "tests/test_完整審查資料.py",
+        "tests/test_投組價格契約.py",
+        "tests/test_研究缺口補完.py",
+        "tests/test_警報日線來源.py"
       ]
     }
   ],
-  "baseCommit": "d3ca662271436971a4e6f30a99b9a86d5b43d494",
+  "baseCommit": "1190f97719fdff71c6164428c440c075ecf03257",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"
