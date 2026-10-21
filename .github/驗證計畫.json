@@ -4,24 +4,53 @@
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "Yahoo報價異常門檻區分台股與海外",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "timeoutSeconds": 300,
+      "reason": "海外標的不套台股漲跌停門檻（QB-05）",
       "targets": [
-        "tests.test_dist_scrub"
+        "tests.test_quote_anomaly_non_tw",
+        "tests.test_taiex_quote_official_base",
+        "tests.test_fallback_observability",
+        "tests.test_no_new_silent_exceptions"
       ],
       "changes": [
-        "docs/revision.md"
+        "server/server.py",
+        "tests/test_quote_anomaly_non_tw.py"
       ],
       "inputs": [
         ".gitignore",
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "server/log_once.py",
+        "server/server.py",
+        "tests/fixtures/大盤昨收分歧.json",
+        "tests/silent_except_baseline.json",
+        "tests/test_fallback_observability.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/test_quote_anomaly_non_tw.py",
+        "tests/test_taiex_quote_official_base.py"
+      ]
+    },
+    {
+      "id": "大盤日漲跌前端同一昨收",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "AGENTS.md 2026-10-14 指引：/quote 的大盤路徑相關修改須核對主圖與小框同一昨收",
+      "targets": [
+        "tests/tw_index_day_change_selftest.js"
+      ],
+      "changes": [
+        "server/server.py"
+      ],
+      "inputs": [
+        "server/server.py",
+        "src/core/market_data_v5.js",
+        "src/ui/polish_v3.js",
+        "tests/fixtures/大盤昨收分歧.json",
+        "tests/tw_index_day_change_selftest.js"
       ]
     }
   ],
-  "baseCommit": "4de979bdaf282835e102e43353e7ea62896c235d",
+  "baseCommit": "85b1dc868b8a061f2a0fcbe8291e0497eca7168c",
   "schemaVersion": 1,
   "scope": "targeted",
   "project": "SamHuang68/AI_Stock"

@@ -1,3 +1,24 @@
+## 2026-10-21 Yahoo 報價的異常門檻不再對海外標的套用台股漲跌停（QB-05）
+
+- 基底：`85b1dc868b8a061f2a0fcbe8291e0497eca7168c`（origin/main）；分支 `claude/quote-anomaly-non-tw`。實作與合併 SHA 待 PR 合併後補記。
+- 原因（全專案審查 QB-05）：
+  - `server.py` `_anom_quote` 以 ±11%（`stock`）／±12%（`index`）判定報價可疑，那是台股漲跌停門檻；
+  - 台股代號在 `_handle_quote` 開頭已轉 `/twquote`，所以 Yahoo 路徑的 `stock` 實際只有美股、加密、商品與外匯，`^` 開頭的海外指數（如 `^VIX`）套 12%；
+  - 這些標的的正常大波動會被回 `suspect: true`。
+- 嚴重度更正：審查補齊時寫「美股、加密在 Pulse 消失，建議升為 medium」。2026-10-21 複查不成立：前端唯一丟棄 `suspect` 報價的 `pulse_v5.js` `stockHealthQuote` 只處理 `/twquote` 的台股與台股大盤基準，美股走 `/quote-batch`、不經 `_anom_quote`。實際影響限於單檔 `/quote` 的 API 回應，畫面目前不受影響，維持 low。
+- 修正後行為（Sam 2026-10-21「QB-05 照建議修」）：
+  - 新增 `_anom_quote_kind(sym)`：只有台股指數（`^TWII`、`^TWOII`）用 `index` 門檻，其餘 Yahoo 標的為 `foreign`；
+  - `foreign` 不套漲跌幅門檻，仍保留價格 ≤ 0 與價格／昨收比值超出 0.5～1.5 的資料合理性檢查；
+  - 台股門檻與既有內建自測不變。
+- 驗證：
+  - 新增 `tests/test_quote_anomaly_non_tw.py`（海外 ±15～30% 不標可疑、資料合理性檢查保留、台股規則不變、依代號判定種類），在舊程式上 3 案例失敗、1 案例錯誤；
+  - `server._run_selftests()` 21 項全數通過（新增 4 項）；
+  - `tests.test_taiex_quote_official_base`、`test_fallback_observability`、`test_no_new_silent_exceptions` 通過。
+  - 依 AGENTS.md 2026-10-14 指引，`tests/tw_index_day_change_selftest.js` 通過（`^TWII` 仍為 `index` 門檻，行為不變）。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-21 發布狀態補記（4de979bd）
 
 - 基底：`4de979bdaf282835e102e43353e7ea62896c235d`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。
