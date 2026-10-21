@@ -67,11 +67,13 @@ function prepareVersion(rev, workDir) {
       fs.copyFileSync(src, path.join(dir, rel));
     }
   } else {
-    // 相對路徑解壓：GNU tar 會把「C:\…」當成遠端主機，Windows bsdtar 與 GNU tar 都接受相對檔名。
-    const tarName = '.ui-baseline-src.tar';
-    execFileSync('git', ['archive', '--format=tar', '-o', path.join(dir, tarName), sha], { cwd: ROOT });
-    execFileSync('tar', ['-xf', tarName], { cwd: dir });
-    fs.rmSync(path.join(dir, tarName), { force: true });
+    // 用 git 自己取出檔案（暫時索引 + checkout-index），不經外部 tar：
+    // Windows 內建 bsdtar 解 git archive 時會弄壞中文檔名（Invalid empty pathname），GNU tar 又把「C:\…」當遠端主機。
+    // GIT_INDEX_FILE 指向暫時檔，不動本倉庫的索引。
+    const env = { ...process.env, GIT_INDEX_FILE: path.join(workDir, 'index-' + sha.slice(0, 12)) };
+    execFileSync('git', ['read-tree', sha], { cwd: ROOT, env });
+    execFileSync('git', ['--work-tree', dir, 'checkout-index', '--all', '--force'], { cwd: ROOT, env });
+    fs.rmSync(env.GIT_INDEX_FILE, { force: true });
   }
   execFileSync(process.env.PYTHON || 'python', ['build_v2.py'], { cwd: dir, stdio: 'pipe' });
   const html = fs.readFileSync(path.join(dir, 'stock_terminal_v2.html'), 'utf8');
