@@ -1,6 +1,6 @@
 ## 2026-10-21 發布狀態補記（dba64e3b）
 
-- 基底：`dba64e3b3bd010481dbb17fd1230e1177e1959f2`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。本段補充下方 `/sectors` 台股快取段落（#251）的「未推送、未合併、未發布」。
+- 基底：`dba64e3b3bd010481dbb17fd1230e1177e1959f2`（main）。只補記發布狀態，不改程式；歷史段落不覆寫。本段補充下方「合併紀錄補記（#245、#251）」中 #251 的「未發布」，以及 `/sectors` 台股快取段落的「未推送、未合併、未發布」。
 
 | 版本 | 內容 | 發布時間（本機時間） | 狀態 |
 | --- | --- | --- | --- |
@@ -10,6 +10,7 @@
   - 本機 18432 `/health`、正式後端 18435 `/health` 與 `/health/live` 的 `runtimeCommit` 實測皆為目標 SHA；閘道 `ok`、`isolated-host`；本機 `/selftest` 21／21 通過。
   - #251：兩端 `/sectors?mkt=TW` 都回完整契約（`date`、`prevSession`、56 列皆有 `prevChangePct` 與 `change`，並有 `sectorFlow`、`industryRevenue`，來源 `TWSE MI_INDEX IND`）。
   - 20:33:03 與 20:35:02 各查一次，結果相同。第二次已超過完整回應的 60 秒快取期限，期間兩端 Pulse 各執行 4、5 次，沒有再以精簡版覆寫。
+  - #245 的類股名次升降依賴的 `prevChangePct` 已出現在兩端回應中；畫面上是否顯示未驗證。
 - 流程：
   - stage 為 `tests=passed`，main push CI 對目標為 success；
   - 停止前兩端無執行中工作；停止後完整備份 14 個 SQLite，完整性 ok；
