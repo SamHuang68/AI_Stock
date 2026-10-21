@@ -111,15 +111,16 @@
       ]
     },
     {
-      "id": "類股成員與更新入口既有行為",
+      "id": "類股成員、電子合併入口與更新入口",
       "kind": "node",
       "timeoutSeconds": 60,
-      "reason": "heat_v5.js 修改後，類股成員、缺值、延遲回應、純讀焦點與更新入口行為不變",
+      "reason": "heat_v5.js 修改後，類股成員、缺值、延遲回應、純讀焦點與更新入口行為不變；說明列「電子相關產業合併成員」按鈕送出與原電子工業格子相同的成員查詢，美股不顯示",
       "targets": [
         "tests/類股成員與更新入口_selftest.js"
       ],
       "changes": [
-        "src/ui/heat_v5.js"
+        "src/ui/heat_v5.js",
+        "tests/類股成員與更新入口_selftest.js"
       ],
       "inputs": [
         "src/ui/heat_v5.js",

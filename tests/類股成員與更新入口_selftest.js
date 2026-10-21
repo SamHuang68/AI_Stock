@@ -19,7 +19,7 @@ const scope={console,Date,Promise,AbortController,location:{},localStorage:{getI
 scope.window=scope;
 const heat=fs.readFileSync(path.join(root,'src/ui/heat_v5.js'),'utf8');
 vm.runInNewContext(heat.replace('  window.HeatV5 = {',`window.fixture={renderMembers:renderMembers,loadMembers:loadMembers,loadFocus:loadFocus,
-  injectCSS:injectCSS,state:state}; window.HeatV5 = {`),scope);
+  injectCSS:injectCSS,state:state,memberGroupHtml:memberGroupHtml,bindMemberGroup:bindMemberGroup}; window.HeatV5 = {`),scope);
 const T=scope.fixture;
 nodes.set('ht-members',node()); nodes.set('ht-focus',node()); nodes.set('ht-focus-title',node());
 const members={ok:true,market:'TW',sector:'半導體',date:'2026-09-25',source:'官方來源',
@@ -49,6 +49,18 @@ function reply(request,data){request.resolve({ok:true,status:200,json:async()=>d
   reply(old,members); await first;
   assert.match(nodes.get('ht-members').innerHTML,/2881/); assert.doesNotMatch(nodes.get('ht-members').innerHTML,/2330/);
   const count=requests.length; await T.loadMembers('金融','TW'); assert.equal(requests.length,count,'短期重繪沿用同類股快取');
+  // 電子工業格子拿掉後，說明列按鈕仍以同一個類股名稱開啟 8 個電子次產業的合併成員清單；美股不顯示。
+  assert.match(T.memberGroupHtml('TW'),/<button type="button" class="ht-link" data-member-group="電子工業">電子相關產業合併成員<\/button>/);
+  assert.equal(T.memberGroupHtml('US'),'');
+  const groupButton={getAttribute(){return '電子工業';}};
+  T.state.mkt='TW';
+  T.bindMemberGroup({querySelector:selector=>selector==='[data-member-group]'?groupButton:null,querySelectorAll:()=>[]});
+  groupButton.onclick();
+  assert.equal(T.state.sector,'電子工業');
+  assert.equal(requests.at(-1).url,'/sector-members?market=TW&sector='+encodeURIComponent('電子工業'));
+  reply(requests.at(-1),{...members,sector:'電子',scopeLabel:'上市電子相關產業個股',rows:[{code:'2330',name:'台積電',price:1000,changePct:1}]}); await flush();
+  assert.match(nodes.get('ht-members').innerHTML,/電子工業 · 類股成員[\s\S]*上市電子相關產業個股[\s\S]*2330/);
+  T.bindMemberGroup({querySelector:()=>null}); T.bindMemberGroup(null);  // 美股或尚未掛載：不出錯
   T.loadFocus(false); assert.match(requests.at(-1).url,/cacheOnly=1/);
   reply(requests.at(-1),{ok:true,mkt:'TW',available:false,reason:'尚無有效的已完成掃描'}); await flush();
   assert.match(nodes.get('ht-focus').innerHTML,/才會明確要求掃描/);
