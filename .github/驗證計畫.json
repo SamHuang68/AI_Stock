@@ -11,8 +11,9 @@
       "id": "產業類股判定與參與率",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "證交所原始名稱判定 32 個單一產業；/sectors 每列標記 industry 並保留非產業列；參與率與成交集中度只算單一產業；既有類股歷史、產業營收、行情類股契約與決策資料品質不變",
+      "reason": "證交所原始名稱判定 32 個單一產業；/sectors 每列標記 industry 並保留非產業列；參與率與成交集中度只算單一產業；既有類股歷史、產業營收、行情類股契約與決策資料品質不變；決策中心台股科技漲跌排除標記的非產業列",
       "targets": [
+        "tests.test_decision_context",
         "tests.test_sector_flow",
         "tests.test_sector_rank_change",
         "tests.test_sector_history",
@@ -24,7 +25,9 @@
         "server/sector_flow.py",
         "server/server.py",
         "tests/test_sector_flow.py",
-        "tests/test_sector_rank_change.py"
+        "tests/test_sector_rank_change.py",
+        "server/decision_context.py",
+        "tests/test_decision_context.py"
       ],
       "inputs": [
         "server/decision_context.py",
@@ -276,11 +279,12 @@
       "id": "靜默例外棘輪",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "server.py、sector_flow.py 與 Pulse 三個模組修改後沒有新增靜默寬鬆例外",
+      "reason": "server.py、sector_flow.py、decision_context.py 與 Pulse 三個模組修改後沒有新增靜默寬鬆例外",
       "targets": [
         "tests.test_no_new_silent_exceptions"
       ],
       "changes": [
+        "server/decision_context.py",
         "server/pulse_extras.py",
         "server/pulse_intel.py",
         "server/pulse_orchestration.py",
@@ -288,6 +292,7 @@
         "server/server.py"
       ],
       "inputs": [
+        "server/decision_context.py",
         "server/pulse_extras.py",
         "server/pulse_intel.py",
         "server/pulse_orchestration.py",
