@@ -2,49 +2,73 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "0dc6ad88112bc0656690ce2f74c32a85bcfe65b7",
+  "baseCommit": "7fa4119eb44da76ffe9ab45d9f17c98c27688df6",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "型態在正式頁面讀取詞法 S",
+      "id": "統計卡片與分頁互動",
       "kind": "node",
       "timeoutSeconds": 60,
-      "reason": "pattern_v3.js 在沒有 window.S 的正式頁面也要偵測並疊圖（TQ-01）",
+      "reason": "波峰、波峰 100 日、投信 5 日、條件期望卡片在正式頁面（詞法 S）依分頁掛載，面板重畫後回來（TQ-01）",
       "targets": [
-        "tests/pattern_prod_state_selftest.js"
+        "tests/stats_cards_tab_selftest.js"
       ],
       "changes": [
-        "src/chart/pattern_v3.js",
-        "tests/pattern_prod_state_selftest.js"
+        "src/ui/peak_observation_v5.js",
+        "src/ui/peak_observation_100d_v5.js",
+        "src/ui/touxin_5d_v5.js",
+        "src/ui/conditional_expectation_v5.js",
+        "stock_terminal.html",
+        "tests/stats_cards_tab_selftest.js"
       ],
       "inputs": [
-        "src/chart/pattern_v3.js",
-        "tests/pattern_prod_state_selftest.js"
+        "src/ui/conditional_expectation_v5.js",
+        "src/ui/peak_observation_100d_v5.js",
+        "src/ui/peak_observation_v5.js",
+        "src/ui/touxin_5d_v5.js",
+        "stock_terminal.html",
+        "tests/stats_cards_tab_selftest.js"
       ]
     },
     {
-      "id": "型態突破量既有契約",
+      "id": "條件期望既有契約",
       "kind": "node",
       "timeoutSeconds": 60,
-      "reason": "pattern_v3.js 修改後既有型態自測不退化",
+      "reason": "conditional_expectation_v5.js 修改後既有自測不退化",
       "targets": [
-        "tests/pattern_breakout_day_volume_selftest.js"
+        "tests/conditional_expectation_v5_selftest.js"
       ],
       "changes": [
-        "src/chart/pattern_v3.js"
+        "src/ui/conditional_expectation_v5.js"
       ],
       "inputs": [
-        "src/chart/pattern_v3.js",
-        "tests/pattern_breakout_day_volume_selftest.js"
+        "src/ui/conditional_expectation_v5.js",
+        "tests/conditional_expectation_v5_selftest.js"
+      ]
+    },
+    {
+      "id": "行情標頭與右側面板既有契約",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "stock_terminal.html 的 renderRpanel 修改後標頭自測不退化",
+      "targets": [
+        "tests/tw_index_day_change_selftest.js"
+      ],
+      "changes": [
+        "stock_terminal.html"
+      ],
+      "inputs": [
+        "stock_terminal.html",
+        "tests/tw_index_day_change_selftest.js"
       ]
     },
     {
       "id": "打包產物與原始碼一致",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "src 變更後重建 stock_terminal_v2.html",
+      "reason": "src 與 stock_terminal.html 變更後重建 stock_terminal_v2.html",
       "targets": [
         "tests.test_bundle_fresh",
         "tests.test_build_reproducibility"

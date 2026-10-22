@@ -188,6 +188,7 @@
       return Promise.resolve(null);
     }
     container.hidden = false;
+    if (container.dataset) container.dataset.sym = String(symbol || '').trim().toUpperCase();
     container.innerHTML = '<div class="st-ce-loading">載入條件期望…</div>';
     var done = function (resolved) {
       if (!resolved) {
@@ -199,6 +200,13 @@
     };
     if (card) return Promise.resolve(done(card));
     return fetchCard(symbol).then(done);
+  }
+
+  /* 正式頁面的 S 是 stock_terminal.html 頂層的 `let S`，不會成為 window.S；優先用詞法 S，沒有時才退回 window.S。
+     過去用 `typeof window.S !== 'undefined'` 守衛，在正式頁面永遠是 undefined：卡片在任何分頁都會被掛進共用的
+     #rpanel（體檢分頁出現統計卡片），而切回統計分頁時面板被整塊重畫，卡片消失直到下次換股（審查 TQ-01）。 */
+  function pageState() {
+    return (typeof S !== 'undefined' && S) ? S : (window.S || null);
   }
 
   function statsPanelHost() {
@@ -223,14 +231,15 @@
       return;
     }
     detail = detail || {};
-    var sym = String(detail.sym || (window.S && S.sym) || '').trim().toUpperCase();
-    var mkt = String(detail.mkt || (window.S && S.mkt) || 'TW').toUpperCase();
+    var state = pageState();
+    var sym = String(detail.sym || (state && state.sym) || '').trim().toUpperCase();
+    var mkt = String(detail.mkt || (state && state.mkt) || 'TW').toUpperCase();
     if (!sym || mkt !== 'TW') {
       var hidden = document.getElementById('st-ce-sect');
       if (hidden) hidden.remove();
       return;
     }
-    if (typeof window.S !== 'undefined' && S.tab && S.tab !== 'stats') return;
+    if (state && state.tab && state.tab !== 'stats') return;
     mountInto(ensureStatsSection(), sym);
   }
 
@@ -246,12 +255,21 @@
   window.addEventListener('symLoaded', function (event) {
     refreshStatsPanel((event && event.detail) || {});
   });
+  /* 統計面板被重畫後卡片已不在 DOM 裡，重新掛上（同一檔股票已掛著就不重複載入） */
+  window.addEventListener('statsPanelRendered', function (event) {
+    var detail = (event && event.detail) || {};
+    var sect = document.getElementById('st-ce-sect');
+    var sym = String(detail.sym || '').trim().toUpperCase();
+    if (sect && sect.isConnected !== false && sect.dataset && sect.dataset.sym === sym) return;
+    refreshStatsPanel(detail);
+  });
   window.addEventListener('featureFlags', function () {
     if (!isEnabled()) {
       var sect = document.getElementById('st-ce-sect');
       if (sect) sect.remove();
     } else {
-      refreshStatsPanel({ sym: window.S && S.sym, mkt: window.S && S.mkt });
+      var state = pageState();
+      refreshStatsPanel({ sym: state && state.sym, mkt: state && state.mkt });
     }
   });
 }());
