@@ -1680,6 +1680,7 @@ def _chip_streak(clean_code):
 # 短 TTL（60s）對效能影響可忽略：同一張線型 60s 內被反覆點仍走 cache；
 # 而每分鐘整批數十 symbol 的 Screener 也只多抓一次。
 _cache = LRUCache(LRU_MAX, ttl_seconds=60)
+_TXF_MIS_LOCKS = {'0': threading.Lock(), '1': threading.Lock()}
 # 類股熱力圖「前一交易日」官方漲跌：{資料日: (取得時刻, 結果)}。找到後該資料日不再重抓
 # （過去交易日的官方數字不會再變）；失敗或查無時 10 分鐘後才重試，避免每分鐘多打證交所。
 _SECTORS_PREV_SESSION: dict = {}
@@ -6143,6 +6144,61 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         except Exception:
             return False
 
+    def _txf_now(self):
+        from datetime import datetime, timezone, timedelta
+        return datetime.now(timezone(timedelta(hours=8)))
+
+    def _txf_mis_cached(self, market_type):
+        """_txf_mis_session 的短暫快取（成功 15 秒、失敗 5 秒），供 /market/snapshot 使用。
+
+        snapshot 每次請求都連線 TAIFEX MIS 兩次且沒有熔斷；/txf 有 20 秒快取、/twindex 有 15 秒快取（審查 QB-08）。
+        失敗也快取，來源異常時才不會每次請求都等滿 10 秒逾時。"""
+        key = f'txfmis:{market_type}'
+
+        def cached():
+            hit = _cache.get(key)
+            if hit is None:
+                return False, None
+            error, value = hit
+            if error:
+                raise RuntimeError(error)
+            return True, value
+
+        found, value = cached()
+        if found:
+            return value
+        # 同一場次同時未命中時只讓一個請求連線，其餘等它的結果（成功或失敗）；否則冷啟動或快取到期時
+        # 每個請求都各連一次，來源逾時時每個請求都等滿 10 秒。
+        with _TXF_MIS_LOCKS[str(market_type)]:
+            found, value = cached()
+            if found:
+                return value
+            try:
+                value = self._txf_mis_session(market_type)
+            except Exception as exc:
+                _cache.set(key, (str(exc) or type(exc).__name__, None), ttl=5)
+                raise
+            _cache.set(key, (None, value), ttl=15)
+            return value
+
+    @staticmethod
+    def _txf_fill_from_yahoo(primary, yahoo):
+        """MIS 缺欄時以 Yahoo 補開高低與振幅；昨收也缺時補昨收，並用 MIS 價格重算漲跌。
+
+        Yahoo 的漲跌是它自己的價格減昨收，與 MIS 價格不同步；不能直接搬進以 MIS 價格為主的報價（審查 QB-04）。"""
+        if not yahoo:
+            return
+        for k in ('open', 'high', 'low', 'ampRate'):
+            if primary.get(k) is None and yahoo.get(k) is not None:
+                primary[k] = yahoo[k]
+        if primary.get('prevClose') is None and yahoo.get('prevClose'):
+            primary['prevClose'] = yahoo['prevClose']
+            if primary.get('price') is not None:
+                primary['change'] = primary['price'] - primary['prevClose']
+                primary['changePct'] = round(primary['change'] / primary['prevClose'] * 100.0, 4)
+        if primary.get('source') and yahoo.get('source'):
+            primary['source'] = yahoo['source'] + '+' + primary['source']
+
     def _handle_txf(self):
         """台指期近一(含夜盤波動) — Yahoo TW + TAIFEX MIS 日/夜盤。
            回 {ok, price, prevClose, change, changePct, open, high, low, ampRate,
@@ -6173,28 +6229,19 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         except Exception as e:
             debug['taifex_day_error'] = str(e)
 
-        # 主報價：夜盤時段或 Yahoo≈夜盤價 → 夜盤；否則日盤；再退 Yahoo
+        # 主報價：與 /market/snapshot 同一個場次選擇（依已核實的時間戳取較新者；時間無法比較時夜盤時段用夜盤）。
+        # 過去以「Yahoo 價≈夜盤收盤 ±0.05%」判定夜盤，日盤開盤附近會選到過期夜盤（審查 D-02）。
+        night_ok = bool(night and night.get('price') is not None)
+        day_ok = bool(day and day.get('price') is not None)
+        chosen = _pulse_orchestration.txf_for_snapshot(
+            {'ok': True, **day} if day_ok else None, night if night_ok else None, self._txf_now())
         primary = None
-        if night and night.get('price') is not None and (
-            self._txf_is_night_hours()
-            or (yahoo and yahoo.get('price') is not None
-                and abs(yahoo['price'] - night['price']) <= max(2.0, night['price'] * 0.0005))
-            or (not day or day.get('price') is None)
-        ):
+        if night_ok and (not day_ok or chosen is night):
             primary = dict(night)
-            # Yahoo 同期 OHLC 可補 MIS 缺欄
-            if yahoo:
-                for k in ('open', 'high', 'low', 'ampRate', 'prevClose', 'changePct', 'change'):
-                    if primary.get(k) is None and yahoo.get(k) is not None:
-                        primary[k] = yahoo[k]
-                if primary.get('source') and yahoo.get('source'):
-                    primary['source'] = yahoo['source'] + '+' + primary['source']
-        elif day and day.get('price') is not None:
+            self._txf_fill_from_yahoo(primary, yahoo)
+        elif day_ok:
             primary = dict(day)
-            if yahoo:
-                for k in ('open', 'high', 'low', 'ampRate', 'prevClose', 'changePct', 'change'):
-                    if primary.get(k) is None and yahoo.get(k) is not None:
-                        primary[k] = yahoo[k]
+            self._txf_fill_from_yahoo(primary, yahoo)
         elif yahoo and yahoo.get('price') is not None:
             primary = dict(yahoo)
             primary['session'] = 'night' if self._txf_is_night_hours() else 'day'
@@ -6357,10 +6404,19 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             indices = _twse_mis_index('tse_t00.tw|otc_o00.tw')
         except Exception:
             indices = {}
+        night = day = None
         try:
-            txf = self._txf_mis_session(1) or self._txf_mis_session(0)
-        except Exception:
-            txf = None
+            night = self._txf_mis_cached(1)
+        except Exception as exc:
+            log_once('market-snapshot-txf-night', '台指期夜盤查詢失敗：', exc=exc)
+        try:
+            day = self._txf_mis_cached(0)
+        except Exception as exc:
+            log_once('market-snapshot-txf-day', '台指期日盤查詢失敗：', exc=exc)
+        # 與 /txf、Pulse 同一個場次選擇。過去夜盤清單有值就不查日盤，日盤時段 08:45–13:45 會給出前一晚的夜盤收盤。
+        txf = _pulse_orchestration.txf_for_snapshot(
+            {'ok': True, **day} if day and day.get('price') is not None else None,
+            night if night and night.get('price') is not None else None, self._txf_now())
         out = market_snapshot(indices, txf)
         self._ok(json.dumps(out, ensure_ascii=False).encode())
 
