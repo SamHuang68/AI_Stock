@@ -1680,6 +1680,7 @@ def _chip_streak(clean_code):
 # 短 TTL（60s）對效能影響可忽略：同一張線型 60s 內被反覆點仍走 cache；
 # 而每分鐘整批數十 symbol 的 Screener 也只多抓一次。
 _cache = LRUCache(LRU_MAX, ttl_seconds=60)
+_TXF_MIS_LOCKS = {'0': threading.Lock(), '1': threading.Lock()}
 # 類股熱力圖「前一交易日」官方漲跌：{資料日: (取得時刻, 結果)}。找到後該資料日不再重抓
 # （過去交易日的官方數字不會再變）；失敗或查無時 10 分鐘後才重試，避免每分鐘多打證交所。
 _SECTORS_PREV_SESSION: dict = {}
@@ -6153,19 +6154,32 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         snapshot 每次請求都連線 TAIFEX MIS 兩次且沒有熔斷；/txf 有 20 秒快取、/twindex 有 15 秒快取（審查 QB-08）。
         失敗也快取，來源異常時才不會每次請求都等滿 10 秒逾時。"""
         key = f'txfmis:{market_type}'
-        hit = _cache.get(key)
-        if hit is not None:
+
+        def cached():
+            hit = _cache.get(key)
+            if hit is None:
+                return False, None
             error, value = hit
             if error:
                 raise RuntimeError(error)
+            return True, value
+
+        found, value = cached()
+        if found:
             return value
-        try:
-            value = self._txf_mis_session(market_type)
-        except Exception as exc:
-            _cache.set(key, (str(exc) or type(exc).__name__, None), ttl=5)
-            raise
-        _cache.set(key, (None, value), ttl=15)
-        return value
+        # 同一場次同時未命中時只讓一個請求連線，其餘等它的結果（成功或失敗）；否則冷啟動或快取到期時
+        # 每個請求都各連一次，來源逾時時每個請求都等滿 10 秒。
+        with _TXF_MIS_LOCKS[str(market_type)]:
+            found, value = cached()
+            if found:
+                return value
+            try:
+                value = self._txf_mis_session(market_type)
+            except Exception as exc:
+                _cache.set(key, (str(exc) or type(exc).__name__, None), ttl=5)
+                raise
+            _cache.set(key, (None, value), ttl=15)
+            return value
 
     @staticmethod
     def _txf_fill_from_yahoo(primary, yahoo):

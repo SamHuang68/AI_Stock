@@ -154,6 +154,85 @@ class HandlerSelection(unittest.TestCase):
             self.run_with(at('2026-10-22T10:30:00'), RuntimeError('x'), RuntimeError('y'), keep_cache=True)
         self.assertEqual(sorted(self.calls), ['0', '1'], '失敗結果也要短暫快取，避免來源異常時每次請求都連線')
 
+    def test_QB08_同時未命中只查一次_等待者共用成功或失敗結果(self):
+        for outcome in ('成功', '失敗'):
+            self.st._cache._d.clear()
+            started, release, calls, results = threading.Event(), threading.Event(), [], []
+
+            def slow_session(handler, market_type):
+                calls.append(str(market_type))
+                started.set()
+                release.wait(3)
+                if outcome == '失敗':
+                    raise RuntimeError('逾時')
+                return dict(DAY_LIVE)
+            handler = mock.Mock(spec=self.st.Handler)
+            handler._txf_mis_session = lambda mt: slow_session(handler, mt)
+
+            def call():
+                try:
+                    results.append(('ok', self.st.Handler._txf_mis_cached(handler, 0)))
+                except RuntimeError as exc:
+                    results.append(('err', str(exc)))
+            threads = [threading.Thread(target=call) for _ in range(6)]
+            for t in threads:
+                t.start()
+            self.assertTrue(started.wait(3))
+            release.set()
+            for t in threads:
+                t.join(5)
+            self.assertEqual(calls, ['0'], outcome + '：六個同時請求只應連線一次')
+            self.assertEqual(len(results), 6)
+            self.assertEqual({r[0] for r in results}, {'ok' if outcome == '成功' else 'err'})
+
+    def test_QB08_快取到期後重新查詢(self):
+        base = 1_000_000.0
+        with mock.patch('time.time', return_value=base):
+            self.run_with(at('2026-10-22T10:30:00'), DAY_LIVE, NIGHT_OLD, keep_cache=False)
+            self.assertEqual(len(self.calls), 2)
+            self.run_with(at('2026-10-22T10:30:05'), DAY_LIVE, NIGHT_OLD, keep_cache=True)
+            self.assertEqual(len(self.calls), 2, '15 秒內不重查')
+        with mock.patch('time.time', return_value=base + 16):
+            self.run_with(at('2026-10-22T10:30:16'), DAY_LIVE, NIGHT_OLD, keep_cache=True)
+            self.assertEqual(len(self.calls), 4, '超過 15 秒要重查')
+
+    def test_QB01_只有一個場次失敗時用另一個場次(self):
+        out = self.run_with(at('2026-10-22T10:30:00'), DAY_LIVE, RuntimeError('夜盤查詢逾時'))
+        self.assertEqual(out['quotes']['__TXF__']['session'], 'day')
+        out = self.run_with(at('2026-10-22T06:00:00'), RuntimeError('日盤查詢逾時'), NIGHT_OLD)
+        self.assertEqual(out['quotes']['__TXF__']['session'], 'night')
+
+    def test_QB01_切盤邊界_快取內仍是TTL內最後已知場次_過期後切到夜盤(self):
+        # 14:59:59 暖快取，15:00:01 夜盤已有新成交：快取有效期間（≤15 秒）仍回日盤收盤，這與 /txf 既有 20 秒快取同類；
+        # 快取到期後必須切到較新的夜盤。
+        day_close = quote('day', 45200.0, '2026-10-22T13:44:59+08:00')
+        new_night = quote('night', 45250.0, '2026-10-22T15:00:01+08:00')
+        base = 2_000_000.0
+        with mock.patch('time.time', return_value=base):
+            out = self.run_with(at('2026-10-22T14:59:59'), day_close, NIGHT_OLD)
+            self.assertEqual(out['quotes']['__TXF__']['session'], 'day')
+            out = self.run_with(at('2026-10-22T15:00:01'), day_close, new_night, keep_cache=True)
+            self.assertEqual(out['quotes']['__TXF__']['session'], 'day', '快取有效期間內沿用上一輪的場次資料')
+        with mock.patch('time.time', return_value=base + 16):
+            out = self.run_with(at('2026-10-22T15:00:16'), day_close, new_night, keep_cache=True)
+            self.assertEqual((out['quotes']['__TXF__']['session'], out['quotes']['__TXF__']['price']), ('night', 45250.0))
+
+    def test_D02_asOf_未核實時_日盤時段仍有確定的行為(self):
+        # 兩筆時間都無法核實：維持既有函式的行為（夜盤區塊），並且不拋例外
+        day_unverified = quote('day', 45200.0, '2026-10-22T10:29:55+08:00', asOf=None, timeUnverified=True)
+        night_unverified = quote('night', 45000.0, '2026-10-22T04:59:50+08:00', asOf=None, timeUnverified=True)
+        out = self.run_with(at('2026-10-22T10:30:00'), day_unverified, night_unverified, path='/txf')
+        self.assertTrue(out['ok'])
+        self.assertIn(out['session'], ('day', 'night'))
+
+    def test_QB04_Yahoo只補MIS缺的欄位_不覆蓋MIS已有的欄位(self):
+        day_partial = quote('day', 45200.0, '2026-10-22T10:29:55+08:00', open=None, high=None, low=None, ampRate=None)
+        yahoo = {'price': 45500.0, 'open': 45100.0, 'high': 45300.0, 'low': 44900.0, 'ampRate': 0.9,
+                 'prevClose': 40000.0, 'change': 5500.0, 'changePct': 13.7, 'source': 'yahoo'}
+        out = self.run_with(at('2026-10-22T10:30:00'), day_partial, NIGHT_OLD, yahoo=yahoo, path='/txf')
+        self.assertEqual((out['open'], out['high'], out['low'], out['ampRate']), (45100.0, 45300.0, 44900.0, 0.9))
+        self.assertEqual((out['price'], out['prevClose'], out['change']), (45200.0, 44800.0, 400.0))
+
     # --- D-02 --------------------------------------------------------------
     def test_D02_txf_日盤開盤附近Yahoo價接近夜盤收盤也不選過期夜盤(self):
         # 日盤剛開，價格與夜盤收盤只差 10 點（落在舊的 ±22 點容許內），舊判定會把過期夜盤當主報價

@@ -2,25 +2,61 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "61091d6dff0c0925431eaeeff647f76320192653",
+  "baseCommit": "f235a664db1e7b9830fe5ed8011134e041b03d0b",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "台指期日盤夜盤場次選擇",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "reason": "/market/snapshot、/txf、Pulse 頂列共用場次選擇，snapshot 加快取，Yahoo 補欄位規則（QB-01、D-01、D-02、D-09、QB-08、QB-04）",
       "targets": [
-        "tests.test_dist_scrub"
+        "tests.test_txf_session_selection",
+        "tests.test_pulse_extraction",
+        "tests.test_market_contract",
+        "tests.test_marketflow_txf_source_date_safety",
+        "tests.test_taiex_quote_official_base",
+        "tests.test_txf_session_quality",
+        "tests.test_txf_intraday",
+        "tests.test_完整審查資料",
+        "tests.test_decision_context",
+        "tests.test_決策資料品質",
+        "tests.test_tw_index_charts_rows",
+        "tests.test_pulse_intel",
+        "tests.test_no_new_silent_exceptions",
+        "tests.test_no_undefined_names"
       ],
       "changes": [
-        "docs/revision.md"
+        "server/server.py",
+        "server/pulse_orchestration.py",
+        "tests/test_txf_session_selection.py"
       ],
       "inputs": [
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "server/exchange_source_dates.py",
+        "server/log_once.py",
+        "server/lru_cache.py",
+        "server/market_contract.py",
+        "server/market_routes.py",
+        "server/pulse_orchestration.py",
+        "server/server.py",
+        "tests/fixtures/大盤昨收分歧.json",
+        "tests/silent_except_baseline.json",
+        "tests/test_decision_context.py",
+        "tests/test_market_contract.py",
+        "tests/test_marketflow_txf_source_date_safety.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/test_no_undefined_names.py",
+        "tests/test_pulse_extraction.py",
+        "tests/test_pulse_intel.py",
+        "tests/test_taiex_quote_official_base.py",
+        "tests/test_tw_index_charts_rows.py",
+        "tests/test_txf_intraday.py",
+        "tests/test_txf_session_quality.py",
+        "tests/test_txf_session_selection.py",
+        "tests/test_完整審查資料.py",
+        "tests/test_決策資料品質.py"
       ]
     }
   ]
