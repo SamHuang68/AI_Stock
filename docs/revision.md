@@ -14,6 +14,31 @@
 
 ---
 
+## 2026-10-21 WaveDeck 過大或長度無效的 JSON 回 400 時不再重設連線（`test_策略HTTP` 偶發失敗）
+
+- 基底：`6caa8b96f4fcec5b3675eb10430ccbc846c8db53`（origin/main）；分支 `claude/wd-http-oversize-flake`。實作與合併 SHA 待 PR 合併後補記。
+- 問題：`wavedeck/tests/test_策略HTTP.py` 的 `test_錯誤及過大JSON回傳400且不觸發AI` 在 Windows 偶發 `ConnectionAbortedError: [WinError 10053]`。失敗的永遠是「本體 `{}`、宣告長度 262145」的子案例，端點不固定。2026-10-21 在乾淨的 origin/main 上曾 5 次失敗 2 次；同日稍晚重跑 20 次全數通過。是否重現取決於系統負載。
+- 根因（與 2026-10-14「被拒請求先讀完本體」同一類）：
+  - `_read_json` 遇到宣告長度超過 256 KiB，或 `Content-Length` 無法解析時，不讀本體就拋出例外，`do_POST` 隨即回 400 並關閉連線。
+  - 客戶端送出的本體仍留在伺服器未讀。Windows 對仍有未讀資料的連線關閉時會送出 RST，並丟棄客戶端尚未讀取的資料，客戶端因此可能讀不到 400。
+  - 同類漏洞：`_drain_request_body` 遇到超量本體時同樣直接關閉，所以防護拒絕（403）與 webhook 密鑰錯誤（401）在本體超量時也會發生。
+- 修正後行為：
+  - 新增 `_UnreadBody`（`ValueError` 子類別），代表本體未讀取：宣告超量與長度無效都改拋這個例外，錯誤訊息不變。
+  - 新增 `_discard_after_response`（lingering close）：回應送出後先關閉寫入端，讓客戶端讀到完整回應，再丟棄殘留本體，最多 1 MiB、1 秒；讀到 EOF、逾時或達上限就停止，之後照常關閉。由 `Handler.finish` 依 `_linger_close` 旗標執行。
+  - 400（未讀本體）與 `_drain_request_body` 的超量分支都會設定這個旗標。超量本體仍不在回應前讀取，回應碼與內容不變。
+  - 代價：一個超量請求最多占用處理緒 1 秒、讀 1 MiB；WaveDeck 只綁本機回環位址，並有 Host 與 Origin 防護。
+- 測試：
+  - `test_request_guard` 新增兩個案例，每種情形重複 25 次，任何一次連線中止都算失敗：
+    - 400：宣告超量但只送少量、實際送出超量本體、長度無效；
+    - 403：防護拒絕時送出超量本體。
+  - 修正前兩案例 3 次全部失敗（WinError 10053／10054）；修正後連跑 10 次全部通過。
+  - 修正後 `test_策略HTTP` 整檔連跑 20 次、`test_request_guard` 整檔連跑 10 次皆 0 失敗；WaveDeck 全部 129 案例通過。
+  - 原本不穩定的案例本身沒有改動。
+- 不變：WaveDeck 不隨私有站發布，本修正不影響正式站與本機受管安裝；要讓執行中的 WaveDeck 套用，須另行授權重新部署。
+- 發布狀態：未合併、未部署。
+
+---
+
 ## 2026-10-21 類股熱力圖與 Pulse 只用 32 個單一產業類股
 
 - 基底：`f219007905479a2f92e3e60e2db4e90afe1a71ea`（origin/main）；分支 `claude/heat-industry-sectors-only`。實作與合併 SHA 待 PR 合併後補記。

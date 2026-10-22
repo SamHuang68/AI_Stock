@@ -7,7 +7,9 @@ import hmac
 import json
 import mimetypes
 import os
+import socket
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -111,12 +113,19 @@ def _json(handler: BaseHTTPRequestHandler, code: int, obj: Any) -> None:
     handler.wfile.write(raw)
 
 
+class _UnreadBody(ValueError):
+    """長度超過上限或無效、本體未讀取；回應後須丟棄殘留本體再關閉（見 _discard_after_response）。"""
+
+
 def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    n = int(handler.headers.get("Content-Length") or 0)
+    try:
+        n = int(handler.headers.get("Content-Length") or 0)
+    except ValueError as exc:
+        raise _UnreadBody(str(exc)) from None
     if n <= 0:
         return {}
     if n > 262144:
-        raise ValueError("JSON 請求超過 256 KiB 上限")
+        raise _UnreadBody("JSON 請求超過 256 KiB 上限")
     try:
         return json.loads(handler.rfile.read(n).decode("utf-8"))
     except (ValueError, UnicodeError):
@@ -138,6 +147,7 @@ def _drain_request_body(handler: BaseHTTPRequestHandler, limit: int = 262144) ->
         return
     if length > limit:
         handler.close_connection = True
+        handler._linger_close = True  # 超量本體不在回應前讀取，回應後再丟棄
         return
     previous = handler.connection.gettimeout()
     handler.connection.settimeout(2.0)
@@ -157,6 +167,34 @@ def _drain_request_body(handler: BaseHTTPRequestHandler, limit: int = 262144) ->
             pass
 
 
+def _discard_after_response(handler: BaseHTTPRequestHandler, limit: int = 1048576, timeout: float = 1.0) -> None:
+    """回應送出後、關閉連線前，丟棄客戶端仍在送的本體（lingering close）。
+
+    超量或長度無效的請求不在回應前讀取本體，以免被大本體拖住；但直接關閉時，Windows 會對仍有未讀資料的
+    連線送出 RST，客戶端可能還沒讀到回應就收到 WinError 10053／10054。先關閉寫入端，讓客戶端讀到完整回應，
+    再於期限內丟棄最多 limit 位元組；讀到 EOF、逾時或達上限即停止，之後照常關閉。
+    """
+    try:
+        handler.wfile.flush()
+        handler.connection.shutdown(socket.SHUT_WR)
+    except OSError:
+        return
+    deadline = time.monotonic() + timeout
+    discarded = 0
+    try:
+        while discarded < limit:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            handler.connection.settimeout(remaining)
+            chunk = handler.connection.recv(65536)
+            if not chunk:
+                break
+            discarded += len(chunk)
+    except OSError:
+        pass
+
+
 def _check_secret(handler: BaseHTTPRequestHandler) -> bool:
     if not SECRET:
         return True
@@ -169,6 +207,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[wavedeck] " + (fmt % args) + "\n")
+
+    def finish(self) -> None:
+        if getattr(self, "_linger_close", False):
+            _discard_after_response(self)
+        super().finish()
 
     def _guard(self, method: str) -> bool:
         """Host 白名單與 Origin 判定；回 True 代表已拒絕並回應 403。"""
@@ -303,6 +346,10 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             body = _read_json(self)
+        except _UnreadBody as exc:
+            self.close_connection = True
+            self._linger_close = True
+            return _json(self, 400, {"ok": False, "error": str(exc)})
         except ValueError as exc:
             return _json(self, 400, {"ok": False, "error": str(exc)})
 
