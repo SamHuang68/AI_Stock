@@ -2,55 +2,86 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "7fa4119eb44da76ffe9ab45d9f17c98c27688df6",
+  "baseCommit": "2c7ae269b69dad1b74ef13064e56dcf7cc6210c7",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "台指期參考價標示與大盤備援昨收",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "台指期 referenceType 標示結算價（QB-02）；^TWII／^TWOII 在 MIS 無成交價時備援報價採官方昨收（QB-12）",
+      "id": "統計卡片與分頁互動",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "波峰、波峰 100 日、投信 5 日、條件期望卡片在正式頁面（詞法 S）依分頁掛載，面板重畫後回來（TQ-01）",
       "targets": [
-        "tests.test_txf_session_selection",
-        "tests.test_taiex_quote_official_base",
-        "tests.test_market_contract",
-        "tests.test_pulse_extraction",
-        "tests.test_decision_context",
-        "tests.test_decision_http",
-        "tests.test_early_warning",
-        "tests.test_no_new_silent_exceptions",
-        "tests.test_no_undefined_names",
-        "tests.test_完整審查資料",
-        "tests.test_決策資料品質",
-        "tests.test_txf_session_quality"
+        "tests/stats_cards_tab_selftest.js"
       ],
       "changes": [
-        "server/server.py",
-        "server/market_routes.py",
-        "tests/test_txf_session_selection.py",
-        "tests/test_taiex_quote_official_base.py"
+        "src/ui/peak_observation_v5.js",
+        "src/ui/peak_observation_100d_v5.js",
+        "src/ui/touxin_5d_v5.js",
+        "src/ui/conditional_expectation_v5.js",
+        "stock_terminal.html",
+        "tests/stats_cards_tab_selftest.js"
       ],
       "inputs": [
-        "server/log_once.py",
-        "server/market_contract.py",
-        "server/market_routes.py",
-        "server/server.py",
-        "tests/fixtures/大盤昨收分歧.json",
-        "tests/silent_except_baseline.json",
-        "tests/test_decision_context.py",
-        "tests/test_decision_http.py",
-        "tests/test_early_warning.py",
-        "tests/test_market_contract.py",
-        "tests/test_no_new_silent_exceptions.py",
-        "tests/test_no_undefined_names.py",
-        "tests/test_pulse_extraction.py",
-        "tests/test_taiex_quote_official_base.py",
-        "tests/test_txf_session_quality.py",
-        "tests/test_txf_session_selection.py",
-        "tests/test_完整審查資料.py",
-        "tests/test_決策資料品質.py"
+        "src/ui/conditional_expectation_v5.js",
+        "src/ui/peak_observation_100d_v5.js",
+        "src/ui/peak_observation_v5.js",
+        "src/ui/touxin_5d_v5.js",
+        "stock_terminal.html",
+        "tests/stats_cards_tab_selftest.js"
+      ]
+    },
+    {
+      "id": "條件期望既有契約",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "conditional_expectation_v5.js 修改後既有自測不退化",
+      "targets": [
+        "tests/conditional_expectation_v5_selftest.js"
+      ],
+      "changes": [
+        "src/ui/conditional_expectation_v5.js"
+      ],
+      "inputs": [
+        "src/ui/conditional_expectation_v5.js",
+        "tests/conditional_expectation_v5_selftest.js"
+      ]
+    },
+    {
+      "id": "行情標頭與右側面板既有契約",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "stock_terminal.html 的 renderRpanel 修改後標頭自測不退化",
+      "targets": [
+        "tests/tw_index_day_change_selftest.js"
+      ],
+      "changes": [
+        "stock_terminal.html"
+      ],
+      "inputs": [
+        "stock_terminal.html",
+        "tests/tw_index_day_change_selftest.js"
+      ]
+    },
+    {
+      "id": "打包產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "src 與 stock_terminal.html 變更後重建 stock_terminal_v2.html",
+      "targets": [
+        "tests.test_bundle_fresh",
+        "tests.test_build_reproducibility"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_v2.py",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/test_build_reproducibility.py",
+        "tests/test_bundle_fresh.py"
       ]
     }
   ]

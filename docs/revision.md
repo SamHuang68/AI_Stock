@@ -1,3 +1,27 @@
+## 2026-10-23 統計卡片依分頁掛載，切回統計分頁時重新掛上（TQ-01、window.S 守衛第三組）
+
+- 基底：`7fa4119eb44da76ffe9ab45d9f17c98c27688df6`（origin/main）；分支 `claude/stats-cards-tab`。實作與合併 SHA 待 PR 合併後補記。
+- 背景：2026-10-22 的 K 線型態修正（#260）已說明正式頁面的 `S` 是頂層 `let S`、不是 `window.S`，並把 touxin／peak／conditional 四個模組的 16 處守衛列為「目前等於沒作用，補全域別名可能翻轉行為，另行確認」。Sam 2026-10-23 指示「補完三項」，本次確認並修正。
+- 實測（本機 18432 正式頁面，內建瀏覽器，2026-10-23）：
+  - 初始在統計分頁、載入 2330 後，波峰（`st-pk-sect`）、波峰 100 日（`st-pk100-sect`）、投信 5 日（`st-tx-sect`）三張卡片在面板內（條件期望的旗標在本機是關閉的）。
+  - 切到「體檢」分頁再載入 2317：三張統計卡片被掛進體檢面板，面板文字混進 `st-peak-v0.1` 等內容。
+  - 切回「統計」分頁：三張卡片全部消失，直到下一次換股才會回來。
+- 根因：
+  - 四個模組把卡片 append 到共用的 `#rpanel`（所有分頁共用同一個容器），靠 `typeof window.S !== 'undefined' && S.tab !== 'stats'` 判斷是否在統計分頁；正式頁面的 `window.S` 是 undefined，守衛永遠不成立，所以任何分頁都會掛。
+  - `setTab` 與許多更新路徑（持倉變動、換股）都呼叫 `renderRpanel()`，統計分頁每次整塊 `innerHTML` 重畫，掛在裡面的卡片一起被清掉；原本沒有任何通知讓卡片回來。
+- 修正後行為：
+  - 四個模組新增 `pageState()`：優先用詞法 `S`，沒有時才退回 `window.S`；分頁守衛與 `sym`／`mkt` 的備援改用它。非統計分頁換股不再掛卡片，也不為看不到的卡片發請求。
+  - `stock_terminal.html` 的 `renderRpanel` 在統計分頁畫完後發出 `statsPanelRendered` 事件（含目前代號與市場）；四個模組監聽它，把卡片重新掛上。同一檔股票的卡片已掛著就不重複載入，所以換股時 `renderRpanel` 加 `symLoaded` 兩次通知只會載入一次。
+  - `stock_terminal_v2.html` 已重建（`?v=` 版本碼隨整體資產雜湊更新，故多行變動）。
+- 有意不做：沒有全域補 `window.S = S`。其餘 `window.S` 守衛（`market_chart_v3.js` 29 處、`market_score_bar_v3.js` 16 處、`polish_v3.js` 2 處）只在 `MarketChart` 註冊標的（`__MARGIN_RATIO__` 等 6 個）才會走到，且 `MarketChart.load()` 會先建出 `window.S`，目前有效，不在本次範圍。
+- 驗證：
+  - 新增 `tests/stats_cards_tab_selftest.js`：Node `vm`，先宣告頂層 `let S`（斷言 `window.S` 為 undefined），載入四個**未修改**的正式模組，DOM 會在「面板重畫」時真的移除舊節點。四個模組各 7 項共 28 項；舊程式 16 項失敗（體檢分頁出現卡片、重畫後不回來、切回後缺卡片等），修正後全過。
+  - 既有的 `conditional_expectation_v5_selftest.js`、`tw_index_day_change_selftest.js`、`etf_flow_v3_selftest.js`、`mobile_workspace_pager_selftest.js`、`完整審查前端_selftest.js`、`test_bundle_fresh`、`test_build_reproducibility` 通過。
+  - **未在實機驗證新版**：本機尚未部署；上列三個實測步驟需在部署後重做一次。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-23 台指期參考價標示為結算價、大盤備援報價採官方昨收（QB-02 標示部分、QB-12）
 
 - 基底：`7fa4119eb44da76ffe9ab45d9f17c98c27688df6`（origin/main）；分支 `claude/ref-labels-quote-prev`。實作與合併 SHA 待 PR 合併後補記。
