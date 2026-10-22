@@ -2456,6 +2456,25 @@ def _trusted_quote_override(sym):
         return None
 
 
+def _trusted_prev_close(sym):
+    """Yahoo 不可信標的（^TWII、^TWOII）的官方昨收；MIS 抓取失敗或沒有昨收時回 None。
+
+    MIS 在盤前沒有成交價與開盤價時，`_trusted_quote_override` 回 None，報價改走 Yahoo；但 MIS 仍帶官方昨收 `y`。
+    Yahoo 的 chartPreviousClose 曾與官方差 1%（2026-10-14：49302 對 48341.31），用 Yahoo 價配官方昨收才不會重現（審查 QB-12）。"""
+    spec = _BAD_YF.get(sym)
+    if not spec:
+        return None
+    ex_ch, code, _kind = spec
+    try:
+        prev = (_twse_mis_index(ex_ch).get(code) or {}).get('prevClose')
+    except Exception as exc:
+        log_once('trusted-prev-close', f'{sym} 官方昨收無法取得，沿用 Yahoo 昨收：', exc=exc)
+        return None
+    if isinstance(prev, (int, float)) and not isinstance(prev, bool) and math.isfinite(prev) and prev > 0:
+        return float(prev)
+    return None
+
+
 def _run_selftests():
     """資料完整性核心函式單元測試(瀏覽器 /selftest 觸發,真函式真執行)。
        涵蓋:昨收口徑優先序、報價異常驗證、源熔斷狀態機。回 {passed,total,allPass,cases}。
@@ -3628,11 +3647,12 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                     if cur is None:
                         cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
                         continue  # 缺成交價時不以未對齊的日線代替
-                    prev = _yf_prevclose(m)
+                    official_prev = _trusted_prev_close(sym)
+                    prev = official_prev or _yf_prevclose(m)
                     if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 0 for v in (cur, prev)):
                         continue
                     result = {'ok': True, 'price': cur, 'prevClose': prev, 'changePct': (cur - prev) / prev * 100,
-                              'source': 'yahoo-v8-chart', 'priceRealtime': False,
+                              'source': 'yahoo-v8-chart+twse-mis-prev' if official_prev else 'yahoo-v8-chart', 'priceRealtime': False,
                               **quote_observation(float(m.get('regularMarketTime') or 0) * 1000)}
                     # 台股盤中日期防線不能套用到不同交易時區的美股。
                     return sym, guard_tw_quote(result) if sym.endswith(('.TW', '.TWO')) else {**result, 'stale': False}
@@ -3712,7 +3732,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                         day_high = max([h for h in highs if h is not None] or [None])
                     if day_low is None and lows:
                         day_low = min([l for l in lows if l is not None] or [None])
-                    prev_close = _yf_prevclose(meta)
+                    official_prev = _trusted_prev_close(sym)
+                    prev_close = official_prev or _yf_prevclose(meta)
                     change = (last_close - prev_close) if (last_close is not None and prev_close) else None
                     change_pct = (change / prev_close * 100) if (change is not None and prev_close) else None
                     # cumulative volume from meta or sum of intraday
@@ -3742,7 +3763,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                         'currency':     meta.get('currency'),
                         'serverTime':   int(time.time()),
                         'lastBarTime':  ts[last_idx] if last_idx is not None else None,
-                        'source':       'yahoo-v8-chart',
+                        'source':       'yahoo-v8-chart+twse-mis-prev' if official_prev else 'yahoo-v8-chart',
                     }
                     _susp, _why = _anom_quote(last_close, prev_close, change_pct, _anom_quote_kind(sym))
                     out['suspect'] = _susp
@@ -6193,6 +6214,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 primary[k] = yahoo[k]
         if primary.get('prevClose') is None and yahoo.get('prevClose'):
             primary['prevClose'] = yahoo['prevClose']
+            primary['referenceSource'] = 'yahoo'   # 昨收不是 MIS 的結算價，標示要跟著改（審查 QB-02）
             if primary.get('price') is not None:
                 primary['change'] = primary['price'] - primary['prevClose']
                 primary['changePct'] = round(primary['change'] / primary['prevClose'] * 100.0, 4)
@@ -6302,9 +6324,11 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             'source': primary.get('source') or 'unknown',
             'night': night_block,
         }
+        # MIS 的參考價是結算價；昨收若由 Yahoo 補入或主報價只來自 Yahoo，就不是結算價（審查 QB-02）。
+        from_mis = 'taifex-mis' in str(out.get('source') or '') and primary.get('referenceSource') != 'yahoo'
         out = attach_quote_contract(
             out, symbol='__TXF__', market='TW', session=out.get('session'),
-            source=out.get('source'))
+            source=out.get('source'), reference_type='settlement' if from_mis else 'previous_close')
         body = json.dumps(out, ensure_ascii=False).encode()
         _cache.set(key, body)
         self._ok(body)

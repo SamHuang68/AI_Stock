@@ -233,6 +233,23 @@ class HandlerSelection(unittest.TestCase):
         self.assertEqual((out['open'], out['high'], out['low'], out['ampRate']), (45100.0, 45300.0, 44900.0, 0.9))
         self.assertEqual((out['price'], out['prevClose'], out['change']), (45200.0, 44800.0, 400.0))
 
+    # --- QB-02 -------------------------------------------------------------
+    def test_QB02_MIS參考價是結算價_snapshot與txf都標settlement(self):
+        out = self.run_with(at('2026-10-22T10:30:00'), DAY_LIVE, NIGHT_OLD)
+        self.assertEqual(out['quotes']['__TXF__']['market']['referenceType'], 'settlement')
+        self.assertEqual(out['quotes']['__TXF__']['referenceType'], 'settlement')
+        out = self.run_with(at('2026-10-22T10:30:00'), DAY_LIVE, NIGHT_OLD, path='/txf')
+        self.assertEqual(out['market']['referenceType'], 'settlement')
+
+    def test_QB02_昨收由Yahoo補入或只有Yahoo時不標settlement(self):
+        day_no_prev = quote('day', 45200.0, '2026-10-22T10:29:55+08:00', prev=None, change=None, changePct=None)
+        yahoo = {'price': 45500.0, 'prevClose': 44800.0, 'source': 'yahoo'}
+        out = self.run_with(at('2026-10-22T10:30:00'), day_no_prev, NIGHT_OLD, yahoo=yahoo, path='/txf')
+        self.assertEqual(out['prevClose'], 44800.0)
+        self.assertEqual(out['market']['referenceType'], 'previous_close', 'Yahoo 昨收不是結算價')
+        out = self.run_with(at('2026-10-22T10:30:00'), None, None, yahoo=yahoo, path='/txf')
+        self.assertEqual(out['market']['referenceType'], 'previous_close')
+
     # --- D-02 --------------------------------------------------------------
     def test_D02_txf_日盤開盤附近Yahoo價接近夜盤收盤也不選過期夜盤(self):
         # 日盤剛開，價格與夜盤收盤只差 10 點（落在舊的 ±22 點容許內），舊判定會把過期夜盤當主報價

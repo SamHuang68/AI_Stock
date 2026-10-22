@@ -199,6 +199,56 @@ class TaiexQuoteOfficialBaseTests(unittest.TestCase):
         with mock.patch.object(self.st, '_twse_mis_index', side_effect=RuntimeError('MIS down')):
             self.assertIsNone(self.st._trusted_quote_override('^TWII'))
 
+    def _盤前_MIS_只有官方昨收(self):
+        return dict(OFFICIAL_T00, price=None, change=None, changePct=None, open=None, high=None, low=None)
+
+    def _錯誤的_Yahoo(self):
+        wrong = {'chart': {'result': [{
+            'meta': {'regularMarketPrice': 48625.83, 'chartPreviousClose': 案例資料['yahoo']['prevClose'],
+                     'previousClose': 案例資料['yahoo']['prevClose'], 'symbol': '^TWII'},
+            'timestamp': [1760419800], 'indicators': {'quote': [{'close': [48625.83]}]}}]}}
+        return json.dumps(wrong).encode('utf-8')
+
+    def test_QB12_盤前MIS只有官方昨收時_備援報價仍採官方昨收_批次與單檔一致(self):
+        """MIS 沒有成交價與開盤價時走 Yahoo，但 Yahoo 的昨收曾與官方差 1%；Yahoo 價必須配官方昨收。"""
+        with mock.patch.object(self.st, '_twse_mis_index', return_value={'t00': self._盤前_MIS_只有官方昨收()}),              mock.patch.object(self.st, 'fetch_one', return_value=('^TWII', self._錯誤的_Yahoo(), False)),              mock.patch.object(self.st.urllib.request, 'urlopen', side_effect=self._yahoo_chart_urlopen):
+            批次 = self.get_json('/quote-batch?syms=%5ETWII')['^TWII']
+            單檔 = self.get_json('/quote/%5ETWII')
+        for 名稱, 報價 in (('批次', 批次), ('單檔', 單檔)):
+            with self.subTest(端點=名稱):
+                self.assertAlmostEqual(報價['prevClose'], OFFICIAL_T00['prevClose'], places=9)
+                self.assertNotEqual(報價['prevClose'], 案例資料['yahoo']['prevClose'])
+                self.assertGreater(報價['changePct'], 0)
+                self.assertAlmostEqual(報價['changePct'], (48625.83 - OFFICIAL_T00['prevClose']) / OFFICIAL_T00['prevClose'] * 100, places=6)
+                self.assertIn('twse-mis-prev', 報價['source'])
+
+    def _yahoo_chart_urlopen(self, request, *args, **kwargs):
+        """/quote 單檔的 Yahoo 分支直接用 urlopen；只攔 Yahoo，其他（測試伺服器）放行。"""
+        url = request if isinstance(request, str) else request.full_url
+        if 'yahoo' in url:
+            class _回應:
+                def __enter__(self_inner): return self_inner
+                def __exit__(self_inner, *a): return False
+                def read(self_inner): return self._錯誤的_Yahoo()
+            return _回應()
+        return _REAL_URLOPEN(request, *args, **kwargs)
+
+    def test_QB12_MIS完全失敗時維持原本行為_沿用Yahoo昨收(self):
+        with mock.patch.object(self.st, '_twse_mis_index', side_effect=RuntimeError('MIS down')),              mock.patch.object(self.st, 'fetch_one', return_value=('^TWII', self._錯誤的_Yahoo(), False)):
+            批次 = self.get_json('/quote-batch?syms=%5ETWII')['^TWII']
+        self.assertEqual(批次['prevClose'], 案例資料['yahoo']['prevClose'])
+        self.assertEqual(批次['source'], 'yahoo-v8-chart')
+
+    def test_QB12_官方昨收只用於Yahoo不可信的指數(self):
+        with mock.patch.object(self.st, '_twse_mis_index') as mis:
+            self.assertIsNone(self.st._trusted_prev_close('^GSPC'))
+            self.assertIsNone(self.st._trusted_prev_close('2330.TW'))
+        mis.assert_not_called()
+        with mock.patch.object(self.st, '_twse_mis_index', return_value={'t00': dict(OFFICIAL_T00, prevClose=0)}):
+            self.assertIsNone(self.st._trusted_prev_close('^TWII'), '昨收為 0 不可採用')
+        with mock.patch.object(self.st, '_twse_mis_index', return_value={'t00': OFFICIAL_T00}):
+            self.assertEqual(self.st._trusted_prev_close('^TWII'), OFFICIAL_T00['prevClose'])
+
     def test_other_symbols_are_unaffected(self):
         with mock.patch.object(self.st, '_twse_mis_index') as mis:
             self.assertIsNone(self.st._trusted_quote_override('^GSPC'))
