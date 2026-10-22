@@ -2,25 +2,62 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "61091d6dff0c0925431eaeeff647f76320192653",
+  "baseCommit": "f235a664db1e7b9830fe5ed8011134e041b03d0b",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "id": "型態在正式頁面讀取詞法 S",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "pattern_v3.js 在沒有 window.S 的正式頁面也要偵測並疊圖（TQ-01）",
       "targets": [
-        "tests.test_dist_scrub"
+        "tests/pattern_prod_state_selftest.js"
       ],
       "changes": [
-        "docs/revision.md"
+        "src/chart/pattern_v3.js",
+        "tests/pattern_prod_state_selftest.js"
       ],
       "inputs": [
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "src/chart/pattern_v3.js",
+        "tests/pattern_prod_state_selftest.js"
+      ]
+    },
+    {
+      "id": "型態突破量既有契約",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "pattern_v3.js 修改後既有型態自測不退化",
+      "targets": [
+        "tests/pattern_breakout_day_volume_selftest.js"
+      ],
+      "changes": [
+        "src/chart/pattern_v3.js"
+      ],
+      "inputs": [
+        "src/chart/pattern_v3.js",
+        "tests/pattern_breakout_day_volume_selftest.js"
+      ]
+    },
+    {
+      "id": "打包產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "src 變更後重建 stock_terminal_v2.html",
+      "targets": [
+        "tests.test_bundle_fresh",
+        "tests.test_build_reproducibility"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_v2.py",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/test_build_reproducibility.py",
+        "tests/test_bundle_fresh.py"
       ]
     }
   ]

@@ -1272,8 +1272,16 @@ function detectCycle(candles) {
 // ============================================================
 // MAIN DETECTOR
 // ============================================================
+// 正式頁面的 S 是 stock_terminal.html 頂層的 `let S`，不會成為 window.S；過去用 `window.S &&` 守衛，
+// 型態偵測不帶參數時永遠回 0 個、疊圖直接 return（審查 TQ-01）。優先用詞法 S，沒有時才退回 window.S。
+function patternStateV3() {
+  if (typeof S !== 'undefined' && S) return S;
+  return (typeof window !== 'undefined' && window.S) || null;
+}
+
 function detectPatternsV3(candlesOverride) {
-  const candles = candlesOverride || (window.S && window.S.data && window.S.data.candles);
+  const state = patternStateV3();
+  const candles = candlesOverride || (state && state.data && state.data.candles);
   if (!candles || !candles.length || candles.length < 30) return [];
   const pivots = findPivots(candles, 5);
   const zz = buildZigZag(candles, pivots);
@@ -1342,7 +1350,8 @@ async function loadPatternCandlesV3(sym, mkt, options = {}) {
 // v3 新增 polylines 支援：用 LightweightCharts addLineSeries 動態畫斜線
 // ============================================================
 function drawPatternsOnChartV3(patterns) {
-  if (!window.S || !S.chart || !S.chartSeries) return;
+  const state = patternStateV3();
+  if (!state || !state.chart || !state.chartSeries) return;
   // 清掉舊 price lines
   for (const pl of (S.patternLines || [])) try { S.chartSeries.removePriceLine(pl); } catch {}
   S.patternLines = [];
@@ -1406,7 +1415,8 @@ function escP(s) {
 function renderPatternsPanelV3(candlesOverride) {
   const patterns = detectPatternsV3(candlesOverride);
   if (patterns.length === 0) {
-    const n = (candlesOverride || (window.S && S.data && S.data.candles))?.length || 0;
+    const state = patternStateV3();
+    const n = (candlesOverride || (state && state.data && state.data.candles))?.length || 0;
     return `<div style="padding:14px;font-family:monospace;font-size:10px;color:var(--tlo);text-align:center">目前未偵測到明顯形態<br><span style="font-size:9px;color:var(--tf)">分析了 ${n} 個日 K 線，無觸發任何形態規則</span></div>`;
   }
   const sevColor = { bullish:'var(--green)', bearish:'var(--red)', caution:'var(--orange)', neutral:'var(--blue)', observing:'var(--blue)' };
@@ -1642,7 +1652,7 @@ async function showPatternsModalV3() {
     const orig = window.renderChart;
     window.renderChart = function () {
       orig.apply(this, arguments);
-      setTimeout(() => { if (window.S && S.patternsEnabled) drawPatternsOnChartV3(detectPatternsV3()); }, 100);
+      setTimeout(() => { const state = patternStateV3(); if (state && state.patternsEnabled) drawPatternsOnChartV3(detectPatternsV3()); }, 100);
     };
   }
   tryHook();
