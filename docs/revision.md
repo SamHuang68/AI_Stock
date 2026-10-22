@@ -1,3 +1,36 @@
+## 2026-10-22 K 線型態在正式頁面讀不到圖表狀態（TQ-01、交接單第 9 節 1、2 項）
+
+- 基底：`f235a664db1e7b9830fe5ed8011134e041b03d0b`（origin/main）；分支 `claude/pattern-lexical-state`。實作與合併 SHA 待 PR 合併後補記。
+- 背景：交接單（`shared-ai-memory/sessions/2026-10-16-taiex-kline-repeat-8d-handoff.md`）把「`window.S` 在正式頁面的實際狀態」列為最優先、TQ-01 列為測試盲點，原由 Codex 承接；Codex 自 2026-10-17 起沒有進展，Sam 2026-10-22 指示由 Claude 接手。
+- 實測（本機 18432 正式頁面，內建瀏覽器）：
+  - `stock_terminal.html:241` 是頂層 `let S = {...}`（自初始提交就是），不會成為 `window.S`。載入後 `typeof window.S` 為 `undefined`，詞法 `S` 有 38 個欄位，`window.S === S` 為 false。
+  - 開啟 `^TWII`、`__TXF__` 主圖後 `window.S` 仍是 undefined。這兩個標的不是 `MarketChart` 註冊的標的（`isMarketChart` 為 false），所以 `market_chart_v3.js` 那 29 處守衛不影響它們。
+  - 只有開啟 `MarketChart` 註冊的標的（如 `__MARGIN_RATIO__`）時，`load()` 才會建出一個和詞法 `S` 不同的空物件當 `window.S`；之後的行為因此依使用順序而不同。
+- 問題（已證實，非推測）：`pattern_v3.js` 用 `window.S && ...` 守衛。在正式頁面開 2330（126 根日 K）：
+  - `detectPatterns()` 不帶參數回 0 個；帶入 K 線回 9 個型態；
+  - `renderPatternsPanel()` 顯示「分析了 0 個日 K 線，無觸發任何形態規則」；帶入 K 線則是「共偵測到 9 個型態」；
+  - `patternsToggle()` 開啟後 `S.patternLines` 仍為 0，疊圖沒有畫出；暫時讓 `window.S` 指向 `S` 後畫出 30 條線。
+  - 既有瀏覽器測試（`pattern_modal_browser.cjs` 等）都先注入 `window.S`，所以測不到。
+- 根因：腳本用 `window.S` 讀取圖表狀態，但正式頁面的狀態是詞法綁定，不在 window 上；同一份腳本的其他地方已直接用 `S`，只有這四處守衛用 `window.S`。
+- 修正後行為：
+  - `pattern_v3.js` 新增 `patternStateV3()`：優先用詞法 `S`，沒有時才退回 `window.S`；`detectPatternsV3`、`drawPatternsOnChartV3`、`renderPatternsPanelV3` 與 `renderChart` 掛勾四處改用它。
+  - 結果：型態偵測不帶參數時讀得到目前圖表的 K 線；型態面板顯示實際偵測結果；使用者打開型態開關時才畫疊圖（開關仍由使用者控制，預設行為不變）。
+  - `stock_terminal_v2.html` 已重建（`?v=` 版本碼隨整體資產雜湊更新，故多行變動）。
+- 有意不做的：**沒有**全域補 `window.S = S`。touxin_5d、peak_observation、peak_observation_100d、conditional_expectation 四個模組各有 `typeof window.S !== 'undefined' && S.tab && S.tab !== 'stats'` 守衛，目前等於沒作用（切換股票時一律刷新）；全域補別名會讓它們在非統計分頁時提前 return，而我尚未確認切到統計分頁時是否會重新觸發刷新，可能讓卡片消失。這 16 處、`market_chart_v3.js` 29 處與 `market_score_bar_v3.js` 16 處維持原樣，分類見下。
+- `window.S` 守衛分類（共 68 處，正式頁面現況）：
+  - `pattern_v3.js` 4 處：已證實失效，本次修正。
+  - `market_chart_v3.js` 29 處、`market_score_bar_v3.js` 16 處：只在 `MarketChart` 註冊的標的（`__MARGIN_RATIO__` 等 6 個）才會走到，且 `load()` 會先建出 `window.S`，目前有效但依使用順序；非 `^TWII`、`__TXF__` 主圖路徑。
+  - touxin／peak／conditional 的 16 處：守衛目前無作用，補別名會翻轉行為，暫不動。
+  - `polish_v3.js` 2 處、`fundamental_v3.js` 1 處：前者在 `MarketChart` 註冊標的才有意義；後者已用 `typeof S !== 'undefined'` 優先。
+  - 這是人工讀碼加正式頁面抽測的分類，沒有逐處在實機驗證每一個分支。
+- 驗證：
+  - 新增 `tests/pattern_prod_state_selftest.js` 6 項：用 Node `vm` 先宣告頂層 `let S`（斷言 `window.S` 為 undefined），再載入未修改的 `pattern_v3.js`；在舊程式上 4 項失敗，修正後全過。
+  - `pattern_breakout_day_volume_selftest.js`、`test_bundle_fresh`、`test_build_reproducibility` 通過。
+  - 本機頁面尚未部署新版，部署後實機確認列在待驗證。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-22 台指期日盤／夜盤改由同一個場次選擇函式決定（QB-01、D-01、D-02、D-09、QB-08、QB-04）
 
 - 基底：`f235a664db1e7b9830fe5ed8011134e041b03d0b`（origin/main）；分支 `claude/txf-session-selector`。實作與合併 SHA 待 PR 合併後補記。

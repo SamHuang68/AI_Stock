@@ -2,61 +2,62 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "f235a664db1e7b9830fe5ed8011134e041b03d0b",
+  "baseCommit": "0dc6ad88112bc0656690ce2f74c32a85bcfe65b7",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "台指期日盤夜盤場次選擇",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "/market/snapshot、/txf、Pulse 頂列共用場次選擇，snapshot 加快取，Yahoo 補欄位規則（QB-01、D-01、D-02、D-09、QB-08、QB-04）",
+      "id": "型態在正式頁面讀取詞法 S",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "pattern_v3.js 在沒有 window.S 的正式頁面也要偵測並疊圖（TQ-01）",
       "targets": [
-        "tests.test_txf_session_selection",
-        "tests.test_pulse_extraction",
-        "tests.test_market_contract",
-        "tests.test_marketflow_txf_source_date_safety",
-        "tests.test_taiex_quote_official_base",
-        "tests.test_txf_session_quality",
-        "tests.test_txf_intraday",
-        "tests.test_完整審查資料",
-        "tests.test_decision_context",
-        "tests.test_決策資料品質",
-        "tests.test_tw_index_charts_rows",
-        "tests.test_pulse_intel",
-        "tests.test_no_new_silent_exceptions",
-        "tests.test_no_undefined_names"
+        "tests/pattern_prod_state_selftest.js"
       ],
       "changes": [
-        "server/server.py",
-        "server/pulse_orchestration.py",
-        "tests/test_txf_session_selection.py"
+        "src/chart/pattern_v3.js",
+        "tests/pattern_prod_state_selftest.js"
       ],
       "inputs": [
-        "server/exchange_source_dates.py",
-        "server/log_once.py",
-        "server/lru_cache.py",
-        "server/market_contract.py",
-        "server/market_routes.py",
-        "server/pulse_orchestration.py",
-        "server/server.py",
-        "tests/fixtures/大盤昨收分歧.json",
-        "tests/silent_except_baseline.json",
-        "tests/test_decision_context.py",
-        "tests/test_market_contract.py",
-        "tests/test_marketflow_txf_source_date_safety.py",
-        "tests/test_no_new_silent_exceptions.py",
-        "tests/test_no_undefined_names.py",
-        "tests/test_pulse_extraction.py",
-        "tests/test_pulse_intel.py",
-        "tests/test_taiex_quote_official_base.py",
-        "tests/test_tw_index_charts_rows.py",
-        "tests/test_txf_intraday.py",
-        "tests/test_txf_session_quality.py",
-        "tests/test_txf_session_selection.py",
-        "tests/test_完整審查資料.py",
-        "tests/test_決策資料品質.py"
+        "src/chart/pattern_v3.js",
+        "tests/pattern_prod_state_selftest.js"
+      ]
+    },
+    {
+      "id": "型態突破量既有契約",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "pattern_v3.js 修改後既有型態自測不退化",
+      "targets": [
+        "tests/pattern_breakout_day_volume_selftest.js"
+      ],
+      "changes": [
+        "src/chart/pattern_v3.js"
+      ],
+      "inputs": [
+        "src/chart/pattern_v3.js",
+        "tests/pattern_breakout_day_volume_selftest.js"
+      ]
+    },
+    {
+      "id": "打包產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "src 變更後重建 stock_terminal_v2.html",
+      "targets": [
+        "tests.test_bundle_fresh",
+        "tests.test_build_reproducibility"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_v2.py",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/test_build_reproducibility.py",
+        "tests/test_bundle_fresh.py"
       ]
     }
   ]
