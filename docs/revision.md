@@ -1,3 +1,25 @@
+## 2026-10-23 台指期參考價標示為結算價、大盤備援報價採官方昨收（QB-02 標示部分、QB-12）
+
+- 基底：`7fa4119eb44da76ffe9ab45d9f17c98c27688df6`（origin/main）；分支 `claude/ref-labels-quote-prev`。實作與合併 SHA 待 PR 合併後補記。
+- 背景：兩項原由 Codex 的台指期／大盤 8D 承接（交接單補充二、補充三），Codex 自 2026-10-17 起沒有進展，Sam 2026-10-22 指示由 Claude 接手，並於 2026-10-23 指示「補完三項」。
+- **QB-02（標示部分）**：
+  - 問題：`quote_contract` 預設把 `referenceType` 標成 `previous_close`，但台指期的參考價來自 TAIFEX MIS 的 `CRefPrice`，是**結算價**（日盤＝前一日結算價，夜盤＝當日日盤結算價），不是前收盤價。
+  - 修正：`/market/snapshot` 的 `__TXF__` 與 `/txf` 標 `settlement`；昨收若由 Yahoo 補入、或主報價只來自 Yahoo，仍標 `previous_close`（Yahoo 昨收不是結算價）。
+  - 影響：`referenceType` 只出現在顯示標籤（行情格子的提示文字、決策證據、預警證據），全專案沒有任何程式拿它做判斷；價格、漲跌與漲跌幅的數字都沒有改。
+  - **有意不做**：日線主圖的昨收口徑。日線資料來自 FinMind `TaiwanFuturesDaily` 的 `close`，沒有保存 `settlement_price`，圖上逐根 K 的漲跌是「收盤減前一根收盤」；期交所的漲跌口徑是「收盤減前一日結算價」，審查者在事故日重現差 42 點。要改成結算價口徑得擴充 `data/txf_daily.csv` 欄位、回補歷史、改所有讀者，並會改變畫面上的歷史漲跌數字，需要 Sam 明確決定，本次不做。
+- **QB-12**：
+  - 問題：`^TWII`、`^TWOII` 在 MIS 沒有成交價與開盤價時（盤前、或當日尚無資料），`_trusted_quote_override` 回 None，`/quote` 與 `/quote-batch` 改走 Yahoo，連昨收也取 Yahoo 的 `chartPreviousClose`。2026-10-14 該值與官方昨收差 1%（49302 對 48341.31）。但 MIS 在這種情況仍帶官方昨收 `y`。
+  - 修正：新增 `_trusted_prev_close(sym)`，只對 `_BAD_YF` 的指數，取 MIS 的官方昨收（缺、為 0、非有限數或抓取失敗都回 None，並以 `log_once` 留下記錄）；兩個 Yahoo 備援分支用「Yahoo 價配官方昨收」，來源標為 `yahoo-v8-chart+twse-mis-prev`。MIS 完全失敗時行為與原本相同。
+  - 未改：`_trusted_quote_override` 本身與既有「盤前 MIS 無成交價仍不回空」的測試。
+- 驗證：
+  - `test_taiex_quote_official_base` 新增 3 個案例（批次與單檔都採官方昨收、MIS 完全失敗維持原行為、官方昨收只用於不可信指數與無效值）；`test_txf_session_selection` 新增 2 個案例（結算價標示、Yahoo 補入或只有 Yahoo 時不標結算價）。
+  - 在舊程式上，QB-12 的 3 個案例與結算價標示案例失敗；保留舊行為的案例通過。
+  - 驗證計畫列的 12 個測試模組共 160 個案例通過（跳過 1 個既有案例）。
+  - 未在實機驗證：台股 2026-10-23（週五）颱風休市、10-26（週一）國定假日休市（Sam 告知，未對照交易所公告），下一個交易日是 10-27（週二）；盤前無成交價的實際行為要等該日開盤前才看得到。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-22 K 線型態在正式頁面讀不到圖表狀態（TQ-01、交接單第 9 節 1、2 項）
 
 - 基底：`f235a664db1e7b9830fe5ed8011134e041b03d0b`（origin/main）；分支 `claude/pattern-lexical-state`。實作與合併 SHA 待 PR 合併後補記。

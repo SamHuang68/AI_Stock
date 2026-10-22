@@ -202,7 +202,8 @@ def market_snapshot(indices: dict[str, Any] | None, txf: dict[str, Any] | None,
             q["name"] = q.get("name") or name
             quotes[symbol] = q
     if isinstance(txf, dict) and txf.get("price") is not None:
-        q = attach_quote_contract(txf, symbol="__TXF__", market="TW", session=txf.get("session") or "night", source=txf.get("source") or "taifex-mis")
+        # TAIFEX MIS 的參考價 CRefPrice 是結算價（日盤＝前一日結算價，夜盤＝當日日盤結算價），不是前收盤價（審查 QB-02）。
+        q = attach_quote_contract(txf, symbol="__TXF__", market="TW", session=txf.get("session") or "night", source=txf.get("source") or "taifex-mis", reference_type="settlement")
         q["name"] = q.get("name") or "台指期"
         quotes["__TXF__"] = q
     generated = generated_at or datetime.now(timezone.utc)
