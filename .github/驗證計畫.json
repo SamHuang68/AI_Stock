@@ -2,62 +2,55 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "0dc6ad88112bc0656690ce2f74c32a85bcfe65b7",
+  "baseCommit": "7fa4119eb44da76ffe9ab45d9f17c98c27688df6",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "型態在正式頁面讀取詞法 S",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "pattern_v3.js 在沒有 window.S 的正式頁面也要偵測並疊圖（TQ-01）",
-      "targets": [
-        "tests/pattern_prod_state_selftest.js"
-      ],
-      "changes": [
-        "src/chart/pattern_v3.js",
-        "tests/pattern_prod_state_selftest.js"
-      ],
-      "inputs": [
-        "src/chart/pattern_v3.js",
-        "tests/pattern_prod_state_selftest.js"
-      ]
-    },
-    {
-      "id": "型態突破量既有契約",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "pattern_v3.js 修改後既有型態自測不退化",
-      "targets": [
-        "tests/pattern_breakout_day_volume_selftest.js"
-      ],
-      "changes": [
-        "src/chart/pattern_v3.js"
-      ],
-      "inputs": [
-        "src/chart/pattern_v3.js",
-        "tests/pattern_breakout_day_volume_selftest.js"
-      ]
-    },
-    {
-      "id": "打包產物與原始碼一致",
+      "id": "台指期參考價標示與大盤備援昨收",
       "kind": "unittest",
-      "timeoutSeconds": 300,
-      "reason": "src 變更後重建 stock_terminal_v2.html",
+      "timeoutSeconds": 600,
+      "reason": "台指期 referenceType 標示結算價（QB-02）；^TWII／^TWOII 在 MIS 無成交價時備援報價採官方昨收（QB-12）",
       "targets": [
-        "tests.test_bundle_fresh",
-        "tests.test_build_reproducibility"
+        "tests.test_txf_session_selection",
+        "tests.test_taiex_quote_official_base",
+        "tests.test_market_contract",
+        "tests.test_pulse_extraction",
+        "tests.test_decision_context",
+        "tests.test_decision_http",
+        "tests.test_early_warning",
+        "tests.test_no_new_silent_exceptions",
+        "tests.test_no_undefined_names",
+        "tests.test_完整審查資料",
+        "tests.test_決策資料品質",
+        "tests.test_txf_session_quality"
       ],
       "changes": [
-        "stock_terminal_v2.html"
+        "server/server.py",
+        "server/market_routes.py",
+        "tests/test_txf_session_selection.py",
+        "tests/test_taiex_quote_official_base.py"
       ],
       "inputs": [
-        "build_v2.py",
-        "stock_terminal.html",
-        "stock_terminal_v2.html",
-        "tests/test_build_reproducibility.py",
-        "tests/test_bundle_fresh.py"
+        "server/log_once.py",
+        "server/market_contract.py",
+        "server/market_routes.py",
+        "server/server.py",
+        "tests/fixtures/大盤昨收分歧.json",
+        "tests/silent_except_baseline.json",
+        "tests/test_decision_context.py",
+        "tests/test_decision_http.py",
+        "tests/test_early_warning.py",
+        "tests/test_market_contract.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/test_no_undefined_names.py",
+        "tests/test_pulse_extraction.py",
+        "tests/test_taiex_quote_official_base.py",
+        "tests/test_txf_session_quality.py",
+        "tests/test_txf_session_selection.py",
+        "tests/test_完整審查資料.py",
+        "tests/test_決策資料品質.py"
       ]
     }
   ]
