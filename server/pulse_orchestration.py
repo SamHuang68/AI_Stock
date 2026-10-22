@@ -79,6 +79,28 @@ def txf_for_snapshot(txf: dict | None, txf_night: dict | None, now: datetime | N
     return txf_night
 
 
+def night_block(txf: dict | None) -> dict | None:
+    """/txf 回應中的夜盤區塊。缺少時，只有主報價本身是夜盤才能當夜盤。
+
+    過去主報價只要有 ampRate 就視為夜盤；日盤報價也有 ampRate，日盤時段會把日盤價放進 txf_night（審查 D-09）。"""
+    if not (isinstance(txf, dict) and txf.get('ok')):
+        return None
+    night = txf.get('night')
+    if isinstance(night, dict) and night.get('price') is not None:
+        return night
+    if txf.get('price') is not None and txf.get('session') == 'night':
+        return txf
+    return None
+
+
+def strip_txf(txf_primary: dict | None, txf_night: dict | None, now: datetime | None = None) -> dict | None:
+    """Pulse 頂列的期現價差、台指期趨勢與漲跌幅用的台指期報價，與 /market/snapshot 同一個場次選擇。
+
+    過去一律以夜盤區塊優先，日盤時段的價差等於「前一晚夜盤收盤 − 即時加權」，數字與正逆價差符號都可能錯（審查 D-01）。"""
+    return txf_for_snapshot(txf_primary, txf_night, now) or txf_night or (
+        txf_primary if isinstance(txf_primary, dict) and txf_primary.get('price') is not None else None)
+
+
 def configure(**kwargs: Any) -> None:
     for key, value in kwargs.items():
         setattr(_deps, key, value)
@@ -166,15 +188,7 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
         inst = bd.get('inst')
 
     # 夜盤：快取未命中則輕量直取（與 _handle_txf 同源 helper）
-    txf_night = None
-    if txf and txf.get('ok'):
-        n = txf.get('night')
-        if n and n.get('price') is not None:
-            txf_night = n
-        elif txf.get('price') is not None and (
-            txf.get('session') == 'night' or txf.get('ampRate') is not None
-        ):
-            txf_night = txf
+    txf_night = night_block(txf)
     if txf_night is None:
         try:
             n = handler._txf_mis_session(1)
@@ -506,10 +520,11 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
         o00_trend = _deps.price_series_quant(
             [], latest=o00.get('price'), quote_change_pct=o00.get('changePct'))
     txf_live = None
+    txf_pick = None
     try:
-        # strip 顯示的台指期價（夜盤優先）覆寫連續日線末端
-        if isinstance(txf_night, dict):
-            txf_live = txf_night.get('price')
+        # 頂列台指期價：與 /market/snapshot 同一個場次選擇（依時間戳，日盤時段用日盤），覆寫連續日線末端
+        txf_pick = strip_txf(txf_primary, txf_night)
+        txf_live = (txf_pick or {}).get('price')
         if txf_live is None and isinstance(txf, dict):
             txf_live = txf.get('price')
         txf_closes = _deps.tw_index_closes('__TXF__', n=30, dated=True)
@@ -517,9 +532,9 @@ def build_pulse_payload(handler, path: str, *, job_id=None, publication_guard=No
         # 日線只提供 vs5／Z／趨勢；漲跌幅不可從跨日／換月快取反推。
         txf_trend = _deps.price_series_quant(
             txf_closes, latest=txf_live,
-            quote_change_pct=(txf_night or {}).get('changePct'),
-            latest_date=((txf_night or {}).get('tradeDate') or (txf_night or {}).get('sourceDate'))
-            if (txf_night or {}).get('session') in ('day', 'regular') else None)
+            quote_change_pct=(txf_pick or {}).get('changePct'),
+            latest_date=((txf_pick or {}).get('tradeDate') or (txf_pick or {}).get('sourceDate'))
+            if (txf_pick or {}).get('session') in ('day', 'regular') else None)
     except Exception as e:
         print('[pulse] txf trend', e)
         txf_trend = _deps.price_series_quant([])
