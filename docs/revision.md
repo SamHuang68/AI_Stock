@@ -10,7 +10,10 @@
 - 實測：兩端 `/sectors?mkt=TW` 為 56 列，其中 32 列 `industry: true`；正式站 Pulse 產業排行 12 列全是單一產業；本機 `/selftest` 21／21 通過，熱力圖 32 格。
 - 本機停機約 7 分鐘（21:44:57–21:52:11）：停掉舊程序後，重啟指令的引號寫錯而沒有執行，之後由 `START_ALL.cmd` 恢復。正式站不受影響。
 - 未驗證：閘道／Tailscale 端版本（需 Owner token）、正式站經閘道的實機畫面、手機尺寸畫面。
-- 另：2026-10-22 14:03 發現 WaveDeck（原 PID 59760，版本 `1a4d014b`）已不在執行，log 在 04:36 後無輸出也無錯誤，停止原因待查；尚未重啟。
+- WaveDeck：2026-10-22 14:03 發現原 PID 59760（版本 `1a4d014b`）已不在執行，log 在 04:36 後無輸出也無錯誤，停止原因至今不明。
+  - Sam 指示執行後，備份 `wavedeck/data`（213 檔），主工作樹快轉到 `61091d6dff0c0925431eaeeff647f76320192653`，重建發布收據後以 `START_WAVEDECK.cmd --no-browser` 啟動。
+  - 實測（PID 77460）：`runtimeCommit` 為 `61091d6d`、`releaseVerified` 為 true；Halted、paper、急停維持、持倉 0；帳戶來源 `paper_sim`、權益 1,000,000、回撤 `measured`；`wavedeck/data/master/` 前後無變動。
+- #257（WaveDeck 過大 JSON 回 400 不再重設連線）：實作 `0695da8`（合併前分支頭）、合併 `61091d6dff0c0925431eaeeff647f76320192653`，已隨上述 WaveDeck 部署。對執行中的 WaveDeck 實送超量本體與只宣告超量各 25 次，全部收到 400，0 次連線中止。
 
 ---
 
