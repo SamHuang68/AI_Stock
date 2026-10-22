@@ -1,3 +1,19 @@
+## 2026-10-22 合併與發布狀態補記（#256、6caa8b96）
+
+- 基底：`6caa8b96f4fcec5b3675eb10430ccbc846c8db53`（main）。只補記狀態，不改程式；歷史段落不覆寫。本段補充下方「類股熱力圖與 Pulse 只用 32 個單一產業類股」的「實作與合併 SHA 待 PR 合併後補記」。
+
+| PR | 內容 | 實作 SHA（合併前分支頭） | 合併 SHA | 發布 |
+| --- | --- | --- | --- | --- |
+| #256 | 類股熱力圖與 Pulse 只用 32 個單一產業 | `e47be84d1c0aa4efea71779487d1c6e33656ded9` | `6caa8b96f4fcec5b3675eb10430ccbc846c8db53` | 2026-10-21 21:44（正式）、21:52（本機） |
+
+- 發布紀錄在 `AI-Workspace\docs\stock-terminal\release-6caa8b96\發布紀錄.md`：stage `tests=passed`，停機後完整備份 14 個 SQLite，promote 後 `data/` 83 項。
+- 實測：兩端 `/sectors?mkt=TW` 為 56 列，其中 32 列 `industry: true`；正式站 Pulse 產業排行 12 列全是單一產業；本機 `/selftest` 21／21 通過，熱力圖 32 格。
+- 本機停機約 7 分鐘（21:44:57–21:52:11）：停掉舊程序後，重啟指令的引號寫錯而沒有執行，之後由 `START_ALL.cmd` 恢復。正式站不受影響。
+- 未驗證：閘道／Tailscale 端版本（需 Owner token）、正式站經閘道的實機畫面、手機尺寸畫面。
+- 另：2026-10-22 14:03 發現 WaveDeck（原 PID 59760，版本 `1a4d014b`）已不在執行，log 在 04:36 後無輸出也無錯誤，停止原因待查；尚未重啟。
+
+---
+
 ## 2026-10-21 類股熱力圖與 Pulse 只用 32 個單一產業類股
 
 - 基底：`f219007905479a2f92e3e60e2db4e90afe1a71ea`（origin/main）；分支 `claude/heat-industry-sectors-only`。實作與合併 SHA 待 PR 合併後補記。
