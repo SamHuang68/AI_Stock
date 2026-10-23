@@ -44,10 +44,19 @@ function official(symbol='^TWII',asOf='2026-10-16T13:33:00+08:00') {
     const e=env();e.store.publish(fallback(),'chart-fallback');e.store.publish(official('^TWII','2026-10-15T13:33:00+08:00'),'snapshot');
     assert.equal(e.store.get().quotes['^TWII'].market.referencePrice,48625.828125);count++;
   }
-  // 同一來源仍拒絕較舊行情；台指期不適用指數備援校正例外。
+  // 同一來源仍拒絕較舊行情。
   for(const symbol of ['^TWII','__TXF__']) {
     const e=env();const newer=official(symbol,'2026-10-16T13:34:00+08:00');newer.quotes[symbol].market.price=47200;
     e.store.publish(newer,'snapshot');e.store.publish(official(symbol),'snapshot');assert.equal(e.store.get().quotes[symbol].market.price,47200);count++;
+  }
+  // 台指期不適用加權／櫃買的同日官方校正例外：必須真的先有 chartFallback。
+  {
+    const e=env();e.store.publish(fallback('2026-10-16T13:33:25+08:00','__TXF__'),'chart-fallback');
+    e.store.publish(official('__TXF__','2026-10-16T13:33:00+08:00'),'snapshot');
+    const kept=e.store.get().quotes.__TXF__;
+    assert.equal(kept.chartFallback,true,'台指期不能因正式來源而接受較舊行情');
+    assert.equal(kept.market.asOf,'2026-10-16T13:33:25+08:00');
+    assert.equal(kept.market.referencePrice,48625.828125);count++;
   }
   // 實際原始形狀：當日日 K 為 null，最後有效收盤屬於前一交易日。
   {
