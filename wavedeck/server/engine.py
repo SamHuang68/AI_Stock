@@ -285,7 +285,8 @@ def _publish_execution_config(cfg: dict) -> dict[str, Any]:
                 transition["positions"] = {key: position for key in ("account", "strategy", "txt_target", "ai_suggested")}
                 transition["execution"] = {key: None for key in (previous.get("execution") or {})}
                 transition["execution"].update(status="idle", evidence_kind="paper_ledger", position_confirmed=True)
-                transition["exec"] = {"lots": abs(position), "last_order_action": "恢復紙上帳本"}
+                # 沒有紙上價格快照；不得沿用 TXT 商品的最後價格來評價紙上持倉。
+                transition["exec"] = {"price": None, "lots": abs(position), "last_order_action": "恢復紙上帳本"}
         restored = {**previous, **transition}
         transition["fsm"] = _confirmed_fsm(restored, {"positions": restored.get("positions"), "execution": restored.get("execution")})
     snap = RUNTIME.patch(

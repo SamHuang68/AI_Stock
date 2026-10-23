@@ -123,7 +123,24 @@ class 引擎整合測試(unittest.TestCase):
         self.assertEqual(restored['positions']['account'], 2)
         self.assertEqual(restored['exec']['lots'], 2)
         self.assertIsNone(restored['execution'].get('order_id'))
-        self.assertEqual(restored['account']['equity_status'], 'measured')
+        self.assertIsNone(restored['exec']['price'])
+        self.assertIsNone(restored['account']['equity'])
+        self.assertEqual(restored['account']['equity_status'], 'price_unknown')
+
+    def test_legacy_paper_restore_does_not_value_ledger_with_txt_price(self):
+        self.txt(account=5)
+        self.runtime.patch(mode='live', paper_runtime=None, exec={'price': 200},
+                           paper_ledger={'position': 1, 'avgPrice': 100, 'realized': 0, 'priceUnknown': False})
+        restored = self.engine.set_exec_mode('paper')['state']
+        self.assertEqual(restored['positions']['account'], 1)
+        self.assertEqual(restored['paper_ledger']['position'], 1)
+        self.assertEqual(restored['paper_ledger']['avgPrice'], 100)
+        self.assertFalse(restored['paper_ledger']['priceUnknown'])
+        self.assertIsNone(restored['exec']['price'])
+        self.assertIsNone(restored['account']['mark_price'])
+        self.assertIsNone(restored['account']['equity'])
+        self.assertIsNone(restored['account']['unrealized'])
+        self.assertEqual(restored['account']['equity_status'], 'price_unknown')
 
     def test_mode_round_trip_keeps_existing_ledger_mismatch_and_kill_protection(self):
         self.runtime.patch(positions={'account': 2}, paper_ledger={'position': 1, 'avgPrice': None, 'priceUnknown': True})
