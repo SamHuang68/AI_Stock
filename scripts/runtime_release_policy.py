@@ -58,7 +58,9 @@ def assert_safe_tree(root):
     root = Path(root)
     assert_safe_member(root.as_posix())
     assert_no_links(root)
-    if not root.exists():
+    # 一般檔案沒有子項可列舉；名稱與祖先連結檢查已在上面完成。對檔案呼叫 os.walk 會在 Windows 拋
+    # NotADirectoryError [WinError 267]，擋下所有複製單檔（如 .private_web_release.json）的發布流程。
+    if not root.exists() or root.is_file():
         return
     data_root = root.name.casefold() == 'data'
     def fail(error):

@@ -1,3 +1,28 @@
+## 2026-10-24 單一資料根候選分支的三組缺陷修正（ST-R1、ST-R2、ST-R3）
+
+- 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`（origin/main）；分支 `claude/runtime-unification-fixes`，疊在 Codex 的 `review/runtime-unification`（`f3f7ebda5017d01c059abf5be71b4b2f0822921f`）之上。**本分支是單一資料根架構的候選，不是已驗收的版本，不可合併、不可發布。**
+- 背景：Codex 交接單 `Documents\Codex\2026-10-23\task-2\ST-Claude-Handoff.md`（2026-10-24）列出該分支三組仍未修的缺陷，當時因審查限制未能套用；Sam 2026-10-24 指示「照建議執行」，由 Claude 複核並修正。Claude 獨立核對過三項描述與程式碼相符。
+- **ST-R1（發布單檔被當目錄遍歷）**：
+  - 問題：`runtime_release_policy.assert_safe_tree` 在名稱與祖先連結檢查後，對一般檔案仍呼叫 `os.walk(..., onerror=fail)`，Windows 拋 `NotADirectoryError [WinError 267]`。呼叫端 `private_web_release._copy_item` 是所有發布共用的複製路徑（基準 `442b908` 沒有這個呼叫），所以連**舊模式**的 stage、promote 也會被擋。
+  - 修正：名稱與祖先連結檢查之後，`root.is_file()` 直接回傳。受保護名稱與 junction 的拒絕仍在前面，反向案例（單一受保護檔仍被拒）通過。
+- **ST-R2（gateway／host 輸出路徑）**：
+  - 問題：gateway 只取得 auth 檔的寫入權；稽核紀錄、客戶端追蹤、啟動追蹤、PID 檔，以及 host 的三個日誌與 PID 檔，路徑來自設定與環境變數，沒有確認不碰受保護的資料根／復原根、也不是硬連結別名。需要本機設定誤指或別名才會發生，沒有遠端提權。
+  - 修正：非舊模式時，在任何探測、建目錄或寫入之前檢查所有輸出：與受保護根雙向不重疊，並沿用 `data_paths.assert_no_links`（符號連結、junction、硬連結、非正規拼寫）。gateway 新增 `_pid_path`、`_assert_gateway_outputs`；host 新增 `_host_output_paths`、`_assert_host_outputs`。舊模式不受影響。
+- **ST-R3（ETF 清單只在匯入時載入）**：
+  - 問題：外部模式下 ETF 更新在長駐後端內同程序執行，`ETFS = load_catalog()` 只在匯入時執行一次，修改 `etf_catalog.json` 後要重啟才生效；舊模式每輪是新程序，沒有此問題。
+  - 修正：`run()` 每輪開頭重新讀一份清單，整輪（預期數、最低門檻、待補代號、逐檔抓取）用同一份快照。
+  - 測試 fixture：`test_runtime_workers.setUp` 的 `patch.dict(os.environ, clear=True)` 清掉 Windows 家目錄變數，7 案在 `Path.home()` 出錯；只保留 `HOME`、`USERPROFILE`、`HOMEDRIVE`、`HOMEPATH` 四個，不帶入其他環境。
+- 驗證（Python 3.12，與 CI 相同）：
+  - R1：`test_runtime_package_policy` 9 案通過，含原本紅燈的 `test_regular_file_is_checked_without_directory_traversal`。
+  - R2：`test_shared_backend_launcher` 12 案通過，含原本 3 案共 28 個失敗觀察（gateway 2 案、host 1 案的 4 個子案例）。
+  - R3：`test_runtime_workers` 11 案通過；新增「兩輪之間改清單，第二輪看到新清單」案例，舊程式失敗（清單停在首次載入的 10 檔）。
+  - **完整套件**：`unittest discover -s tests`，2146 案例通過、8 個跳過、0 失敗（Python 3.12）。第一輪 12 個沒過，其中 6 個 ETF 追蹤器測試是 R3 初版（每輪無條件重讀）造成，已改成「目錄檔案修改時間或大小有變才重讀」；6 個發布測試是替身沒跟上產品（假 `_run` 未處理 `git ls-tree`、需複製真實 `runtime_release_policy.py`），已補。
+  - 沒有重跑 JS、瀏覽器與 WaveDeck 測試：本次只改 Python，Codex 的 a47220e 矩陣中這些項目已通過（WaveDeck 專屬驗證依 Sam 豁免）。
+- 沒有做：沒有搬正式資料、沒有停服務、沒有刪備份、沒有部署；WaveDeck 專屬驗證依 Sam 先前豁免未跑；沒有通讀分支其餘約 6000 行。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-23 單一資料根架構隔離候選（未驗證、尚有阻塞）
 
 - 基底為已封存原修復`b42ee9dea07e57a718c01c474285d41b58dff774`，整合分支`review/runtime-unification`；VERSION維持5.0。新增explicit binding、資料身分與切換收據、ST/WD namespace lease、consumer路徑、發布copy排除及Local共用入口核對；legacy保持原安裝路徑，不會自動啟用新根或建立空正式庫。

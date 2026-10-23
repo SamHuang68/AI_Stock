@@ -1738,6 +1738,30 @@ def create_server(settings: Settings | None = None) -> PrivateWebServer:
     return PrivateWebServer((active.listen_host, active.listen_port), Handler, active)
 
 
+def _pid_path() -> Path:
+    pid_path = Path(os.environ.get("ST_WEB_PID_PATH", str(ROOT / "data" / "private_web_gateway.pid")))
+    return pid_path if pid_path.is_absolute() else ROOT / pid_path
+
+
+def _assert_gateway_outputs(binding, settings) -> None:
+    """外部資料根模式下，gateway 所有會寫入的檔案都不得碰到受保護的資料根或復原根，也不得是硬連結別名。
+
+    gateway 只取得 auth 檔的寫入權（見 bootstrap_gateway_auth）；稽核紀錄、客戶端追蹤、啟動追蹤與 PID 檔
+    的路徑來自設定與環境變數，若被誤指到正式資料、或與正式檔案是硬連結，append／截斷會改到不屬於它的資料。
+    必須在任何探測或寫入之前檢查（審查 ST-R2）。"""
+    from data_paths import assert_no_links, protected_roots
+    protected = tuple(Path(os.path.realpath(root)) for root in protected_roots(binding))
+    outputs = (settings.access_request_path, settings.audit_path, settings.client_trace_path,
+               STARTUP_TRACE, _pid_path())
+    for output in outputs:
+        path = Path(output).absolute()
+        real = Path(os.path.realpath(path))
+        for root in protected:
+            if real == root or root in real.parents or real in root.parents:
+                raise RuntimeError('gateway output overlaps a protected runtime/recovery root')
+        assert_no_links(path)
+
+
 def _gateway_auth_bootstrap(settings):
     binding_path = ROOT.parent / 'runtime_binding.json'
     manifest_path = ROOT / '.private_web_release.json'
@@ -1755,6 +1779,8 @@ def _gateway_auth_bootstrap(settings):
     binding = validate_binding(resolve_binding(code_root=ROOT, environ=env,
         installation_binding=binding_path if binding_path.exists() else None), expected_role='client')
     validate_release_capability(ROOT, binding)
+    if binding.mode != 'legacy':
+        _assert_gateway_outputs(binding, settings)
     return bootstrap_gateway_auth(binding, writable_file=settings.access_request_path)
 
 
@@ -1800,13 +1826,7 @@ def _serve_gateway(settings) -> None:
         pid=os.getpid(),
         elapsedMs=round((time.monotonic() - bind_started) * 1000),
     )
-    pid_value = os.environ.get(
-        "ST_WEB_PID_PATH",
-        str(ROOT / "data" / "private_web_gateway.pid"),
-    )
-    pid_path = Path(pid_value)
-    if not pid_path.is_absolute():
-        pid_path = ROOT / pid_path
+    pid_path = _pid_path()
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()) + "\n", encoding="ascii")
     print(

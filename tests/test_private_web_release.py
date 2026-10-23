@@ -326,6 +326,12 @@ class PrivateWebReleaseTests(unittest.TestCase):
 
         def run(argv, *, cwd, capture=False):
             calls.append(argv)
+            if argv[:2] == ['git', 'ls-tree']:
+                # stage 前的封存成員檢查（_validate_git_archive_members）：列出與封存相同的成員
+                members = sorted(release.REQUIRED_RELEASE_FILES | set(extras))
+                if include_plan:
+                    members.append('.github/驗證計畫.json')
+                return type('Listing', (), {'stdout': '\0'.join(members) + '\0'})()
             if argv[0] == 'git':
                 with zipfile.ZipFile(argv[argv.index('--output') + 1], 'w') as archive:
                     for relative in release.REQUIRED_RELEASE_FILES | set(extras):
@@ -403,7 +409,8 @@ class PrivateWebReleaseTests(unittest.TestCase):
 
     def test_新收據stage的CLI發布不需要驗證模組(self):
         staged, _, _ = self.stage_fixture()
-        for relative in ('scripts/private_web_release.py', 'server/daemon_lock.py'):
+        # 被測的發布腳本啟動時會載入 runtime_release_policy.py，替身內容不是有效程式，需一併換成正式檔
+        for relative in ('scripts/private_web_release.py', 'scripts/runtime_release_policy.py', 'server/daemon_lock.py'):
             shutil.copy2(ROOT / relative, staged / relative)
         manifest = release._read_manifest(staged / release.MANIFEST_NAME)
         manifest['contentSha256'] = release._content_hashes(staged)

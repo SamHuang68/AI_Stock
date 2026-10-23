@@ -148,8 +148,31 @@ def _child_environments(runtime_env, backend_port, gateway_port, instance_id):
     return backend_env, gateway_env
 
 
+def _host_output_paths() -> tuple[Path, ...]:
+    return (LOGS / "private_web_host.jsonl", LOGS / "private_web_backend.log",
+            LOGS / "private_web_gateway.log", ROOT / "data" / "private_web_host.pid")
+
+
+def _assert_host_outputs(binding) -> None:
+    """外部資料根模式下，host 的日誌與 PID 檔不得碰到受保護的資料根／復原根，也不得是硬連結別名。
+
+    這些檔案都以 append 或覆寫方式寫入；路徑若被誤指到正式資料或與正式檔案互為硬連結，會改到不屬於 host 的資料。
+    必須在探測埠、建立目錄或啟動子程序之前檢查（審查 ST-R2）。"""
+    helpers = runpy.run_path(str(ROOT / 'server' / 'data_paths.py'))
+    protected = tuple(Path(os.path.realpath(root)) for root in helpers['protected_roots'](binding))
+    for output in _host_output_paths():
+        path = Path(output).absolute()
+        real = Path(os.path.realpath(path))
+        for root in protected:
+            if real == root or root in real.parents or real in root.parents:
+                raise RuntimeError('host output overlaps a protected runtime/recovery root')
+        helpers['assert_no_links'](path)
+
+
 def run(*, backend_port: int, gateway_port: int, max_restarts: int) -> int:
     binding, runtime_env = _runtime_environment(backend_port, gateway_port)
+    if binding is not None:
+        _assert_host_outputs(binding)
     owner_token = ROOT / "data" / "private_web_owner.token"
     if not owner_token.is_file():
         print(f"Missing {owner_token}; run: {sys.executable} scripts/setup_private_web.py", file=sys.stderr)
@@ -352,7 +375,7 @@ def main() -> None:
     parser.add_argument("--max-restarts", type=int, default=5)
     args = parser.parse_args()
     _runtime_environment(_port(str(args.backend_port), 18435), _port(str(args.gateway_port), 18434))
-    pid_path = ROOT / "data" / "private_web_host.pid"
+    pid_path = _host_output_paths()[3]
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()) + "\n", encoding="ascii")
     try:

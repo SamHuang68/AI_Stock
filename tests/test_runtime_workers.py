@@ -61,6 +61,8 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.stack.enter_context(mock.patch.dict(os.environ, {
             'ST_RUNTIME_ROLE': 'fixture', 'ST_DATA_ROOT': str(self.data),
             'ST_ETF_HISTORY_DIR': str(self.history),
+            # clear=True 會清掉 Windows 的家目錄變數，Path.home() 在 setUp 內就會出錯；只保留這幾個，不帶入其他環境
+            **{key: os.environ[key] for key in ('HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH') if key in os.environ},
         }, clear=True))
         self.binding = data_paths.binding_for(code_root=ROOT)
         self.stack.enter_context(runtime_storage.bootstrap_runtime(binding=self.binding))
@@ -94,6 +96,23 @@ class RuntimeWorkerTests(unittest.TestCase):
             self.assertEqual(dt.date.today(), called[0][1])
             self.assertGreater(called[0][2], self.api.time.monotonic())
             spawn.assert_not_called()
+
+    def test_etf_catalog_changes_apply_to_the_next_run_in_the_same_process(self):
+        # 外部模式下追蹤器在長駐後端內重複執行；模組只匯入一次，過去 ETFS 沿用首次載入的清單。
+        catalog = self.data / 'etf_catalog.json'
+        def write(codes):
+            catalog.write_text(json.dumps({'categories': [{'etfs': [
+                {'code': code, 'name': code, 'enabled': True, 'market': 'TW'} for code in codes]}]}), encoding='utf-8')
+        seen = []
+        def fake_run(target_date, trace, *, deadline_monotonic=None):
+            seen.append((sorted(self.tracker.ETFS), len(self.tracker.ETFS)))
+            return True
+        with mock.patch.object(self.tracker, 'CATALOG_FILE', str(catalog)),                 mock.patch.object(self.tracker, '_run', side_effect=fake_run):
+            write(['00001A', '00002A'])
+            self.assertTrue(self.tracker.run(dt.date.today(), run_id=uuid.uuid4().hex))
+            write(['00001A', '00002A', '00003A'])           # 兩輪之間改清單（例如 catalog POST）
+            self.assertTrue(self.tracker.run(dt.date.today(), run_id=uuid.uuid4().hex))
+        self.assertEqual([(['00001A', '00002A'], 2), (['00001A', '00002A', '00003A'], 3)], seen)
 
     def test_etf_timeout_finishes_job_without_claiming_success(self):
         run_id = uuid.uuid4().hex

@@ -94,7 +94,17 @@ _FALLBACK_ETFS = {
     '00984A': ('00984A', '主動安聯台灣高息'),
 }
 
+def _catalog_stamp():
+    """目錄檔案的 (修改時間, 大小)；檔案不存在回 None。"""
+    try:
+        info = os.stat(CATALOG_FILE)
+    except OSError:
+        return None
+    return (info.st_mtime_ns, info.st_size)
+
+
 ETFS = load_catalog()
+_CATALOG_STAMP = _catalog_stamp()
 _request_context = threading.local()
 
 
@@ -393,6 +403,14 @@ def _previous_snapshot_etf_count(history_dir: str, out_file: str) -> int:
 
 
 def run(target_date: datetime.date, *, run_id=None, deadline_monotonic=None) -> bool:
+    # 外部資料根模式下更新在長駐的後端程序內執行，模組只匯入一次；目錄檔案自上次載入後有變就重讀，整輪（預期數、
+    # 最低門檻、待補代號、逐檔抓取）用同一份快照，否則修改 etf_catalog.json 後要重啟後端才生效。
+    # 檔案沒變就沿用現有清單（不無條件重讀，既有測試與呼叫端會直接指定 ETFS）。舊模式每輪是新程序，結果相同。
+    global ETFS, _CATALOG_STAMP
+    stamp = _catalog_stamp()
+    if stamp != _CATALOG_STAMP:
+        ETFS = load_catalog()
+        _CATALOG_STAMP = stamp
     trace = UpdateTrace(run_id or os.environ.get('ST_ETF_RUN_ID'))
     trace.record('command_received', targetDate=target_date.isoformat(), expectedCount=len(ETFS))
     try:
