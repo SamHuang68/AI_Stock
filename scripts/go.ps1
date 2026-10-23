@@ -291,7 +291,8 @@ function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$Ow
         if ([int]$process.ParentProcessId -eq $ExpectedParent) {
           $commandLine = [string]$process.CommandLine
         } elseif ([string]$process.Name -eq 'python.exe') {
-          # Windows venv 會改寫 argv[0]；核對各自釘選執行檔及相同伺服器引數，保留父鏈／時間條件。
+          # Windows venv 的 base 子程序可能保留 pin 的 argv[0]；執行檔身分另由 CIM 核對。
+          # 只接受 pin/base 兩種完整命令，並保留 CMD → pin → base 的父鏈與時間條件。
           $proxy = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction Stop
           $proxyTicks = Get-ProcessStartTicks ([int]$proxy.ProcessId)
           $serverArguments = '-u "' + (Join-Path $OwnerRoot 'server\server.py') + '"'
@@ -300,7 +301,9 @@ function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$Ow
           if ($ExpectedPython -and ([string]$proxy.ExecutablePath -eq $ExpectedPython) -and
               [string]$proxy.Name -eq 'python.exe' -and [int]$proxy.ParentProcessId -eq $ExpectedParent -and
               ([string]$proxy.CommandLine -cmatch $pinCommand) -and
-              ([string]$process.CommandLine -cmatch $baseCommand) -and
+              ([string]$process.ExecutablePath -eq $ExpectedBasePython) -and
+              (([string]$process.CommandLine -cmatch $baseCommand) -or
+               ([string]$process.CommandLine -cmatch $pinCommand)) -and
               $null -ne $proxyTicks -and $launchTicks -le $proxyTicks -and $proxyTicks -le $ticks) {
             $commandLine = [string]$process.CommandLine
           }

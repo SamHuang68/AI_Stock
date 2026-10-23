@@ -299,22 +299,27 @@ $owner = $env:ST_TEST_ROOT
 $pin = Join-Path $owner 'venv\Scripts\python.exe'
 $base = Join-Path $owner 'base\python.exe'
 $launcher = Join-Path $owner 'logs\run_server_tip.cmd'
-$command = '"' + $pin + '" -u "' + (Join-Path $owner 'server\server.py') + '"'
+$command = '"' + $pin + '"  -u "' + (Join-Path $owner 'server\server.py') + '" '
 $script:Processes = @{
   50 = [pscustomobject]@{ ProcessId=50; Name='cmd.exe'; ParentProcessId=40; CommandLine=('cmd.exe /c "' + $launcher + '"') }
   60 = [pscustomobject]@{ ProcessId=60; Name='python.exe'; ParentProcessId=50; ExecutablePath=$pin; CommandLine=$command }
-  70 = [pscustomobject]@{ ProcessId=70; Name='python.exe'; ParentProcessId=60; ExecutablePath=$base; CommandLine=$command.Replace($pin,$base) }
+  70 = [pscustomobject]@{ ProcessId=70; Name='python.exe'; ParentProcessId=60; ExecutablePath=$base; CommandLine=$command }
 }
 $script:Ticks = @{ 50=[int64]100; 60=[int64]200; 70=[int64]300 }
 switch ($env:ST_TEST_CASE) {
   'direct' { $script:Processes[70].ParentProcessId=50; $script:Processes[70].ExecutablePath=$pin; $script:Processes[70].CommandLine=$command }
+  'venv-base-argv' { $script:Processes[70].CommandLine=$command.Replace($pin,$base) }
   'parent-reused' { $script:Ticks[50]=[int64]101 }
   'future-proxy' { $script:Ticks[60]=[int64]400 }
+  'old-proxy' { $script:Ticks[60]=[int64]99 }
   'deeper' { $script:Processes[60].ParentProcessId=61 }
   'non-python' { $script:Processes[60].Name='cmd.exe' }
   'wrong-pin' { $script:Processes[60].ExecutablePath='C:\other\python.exe' }
   'wrong-leaf' { $script:Processes[70].ExecutablePath='C:\other\python.exe' }
+  'leaf-is-pin' { $script:Processes[70].ExecutablePath=$pin }
+  'wrong-leaf-argv' { $script:Processes[70].CommandLine=$command.Replace($pin,'C:\other\python.exe') }
   'different-command' { $script:Processes[60].CommandLine += ' extra' }
+  'extra-leaf-argument' { $script:Processes[70].CommandLine += ' extra' }
   'wrong-root' { $script:Processes[70].CommandLine='python.exe -u C:\other\server\server.py' }
   'wrong-launcher' { $script:Processes[50].CommandLine='cmd.exe /c C:\other\run_server_tip.cmd' }
 }
@@ -345,8 +350,12 @@ if (Test-Path -LiteralPath $env:ST_TEST_RECEIPT) {
 }
 Write-Host ('FAKESTOP=' + ($script:Stopped -join ','))
 """
-        cases = ('direct', 'venv', 'parent-reused', 'future-proxy', 'deeper',
-                 'non-python', 'wrong-pin', 'wrong-leaf', 'different-command',
+        # The preserved argv case is the real Windows venv process snapshot:
+        # the leaf executable is base Python, but both command lines name pin.
+        cases = ('direct', 'venv-preserved-argv', 'venv-base-argv',
+                 'parent-reused', 'future-proxy', 'old-proxy', 'deeper',
+                 'non-python', 'wrong-pin', 'wrong-leaf', 'leaf-is-pin',
+                 'wrong-leaf-argv', 'different-command', 'extra-leaf-argument',
                  'wrong-root', 'wrong-launcher')
         for name, engine in _powershell_engines().items():
             for case in cases:
@@ -355,7 +364,7 @@ Write-Host ('FAKESTOP=' + ($script:Stopped -join ','))
                     code, output = self.run_ps(engine, driver, ST_TEST_CASE=case,
                                                ST_TEST_ROOT=self.root)
                     self.assertEqual(code, 0, output)
-                    accepted = case in ('direct', 'venv')
+                    accepted = case in ('direct', 'venv-preserved-argv', 'venv-base-argv')
                     self.assertEqual(self.receipt.exists(), accepted, output)
                     stopped = re.search(r'(?m)^FAKESTOP=(.*)$', output)
                     self.assertIsNotNone(stopped, output)

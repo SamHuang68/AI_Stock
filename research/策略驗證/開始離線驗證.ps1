@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$標的 = '2330',
     [double]$買進基點 = 25,
     [double]$賣出基點 = 55,

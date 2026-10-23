@@ -1,29 +1,47 @@
-// Self-test: overnight panel uses /txf night OHLC + ampRate fields.
+// Exercise the shipped overnight panel through its public render entrypoint.
 // Run in Node: node tests/txf_night_selftest.js
 'use strict';
 
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg || 'assert failed');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const sourcePath = path.join(__dirname, '..', 'src', 'chart', 'overnight_v3.js');
+const source = fs.readFileSync(sourcePath, 'utf8');
+const quotePaths = ['NQ=F', 'ES=F', 'YM=F', '^SOX', 'TSM'].map(sym =>
+  `/yf/${encodeURIComponent(sym)}?range=5d&interval=1d`);
+
+async function render(txf) {
+  const requested = [];
+  const unexpected = [];
+  const window = { AppKernel: { api: { async getJson(url) {
+    requested.push(url);
+    if (url === '/txf') return txf;
+    if (quotePaths.includes(url)) return { chart: { result: [{ meta: {},
+      timestamp: [1700000000, 1700086400],
+      indicators: { quote: [{ close: [100, 100.8] }] },
+    }] } };
+    unexpected.push(url);
+    throw new Error(`Unexpected request: ${url}`);
+  } } } };
+  const host = {
+    innerHTML: '', isConnected: true, classList: { add() {} },
+    closest: () => null, querySelector: () => null, querySelectorAll: () => [],
+  };
+  const context = vm.createContext({
+    window, AppKernel: window.AppKernel,
+    document: { getElementById: id => id === 'ovn-style' ? {} : null },
+    S: { positions: { '2330': { lastPrice: 100, stop: 98 } }, watches: {} },
+  });
+  vm.runInContext(source, context, { filename: sourcePath });
+  assert.equal(typeof window.overnightRenderInto, 'function', 'production public entrypoint exists');
+  await window.overnightRenderInto(host);
+  assert.deepEqual(unexpected, [], 'fixture cannot silently satisfy a new data dependency');
+  assert.deepEqual(requested.sort(), ['/txf', ...quotePaths].sort(), 'all production sources are exercised');
+  return host.innerHTML;
 }
 
-/** Mirror overnight_v3.js night selection + amp fallback */
-function pickNight(d) {
-  if (!d || !d.ok) return null;
-  const n = (d.night && d.night.price != null) ? d.night
-    : (d.session === 'night' && d.price != null) ? d : null;
-  if (!n || n.price == null) return null;
-  let amp = n.ampRate;
-  if (amp == null && n.high != null && n.low != null && n.prevClose > 0) {
-    amp = (n.high - n.low) / n.prevClose * 100;
-  }
-  let changePct = n.changePct;
-  if (changePct == null && n.price != null && n.prevClose > 0) {
-    changePct = (n.price - n.prevClose) / n.prevClose * 100;
-  }
-  return { price: n.price, changePct, ampRate: amp, high: n.high, low: n.low, prevClose: n.prevClose };
-}
-
-function main() {
+async function main() {
   const sample = {
     ok: true,
     price: 43678,
@@ -41,10 +59,15 @@ function main() {
       session: 'night',
     },
   };
-  const n = pickNight(sample);
-  assert(n && n.price === 42650, 'prefer night block over day primary');
-  assert(Math.abs(n.ampRate - 4.09) < 1e-9, 'ampRate from night');
-  assert(Math.abs(n.changePct - (-2.46)) < 1e-9, 'changePct from night');
+  const html = await render(sample);
+  assert.match(html, /42,650/, 'prefer night price over day primary');
+  assert.doesNotMatch(html, /43,678/, 'day primary must not leak into the night panel');
+  assert.match(html, /4\.09%/, 'ampRate comes from night');
+  assert.match(html, /-2\.46%/, 'changePct comes from night');
+  assert.match(html, /04:59:59/, 'night timestamp is rendered');
+  assert.match(html, /97\.54 ⚠破停損/, 'TXF drives the actual position estimate and stop warning');
+  assert.match(html, /依 台指期夜盤/, 'action source identifies TXF');
+  assert.match(html, /\+0\.80%/, 'opposing US estimate remains visible');
 
   const noAmp = {
     ok: true,
@@ -53,23 +76,26 @@ function main() {
     prevClose: 43727,
     high: 43873,
     low: 42086,
-    changePct: -2.46,
   };
-  const n2 = pickNight(noAmp);
-  const expectAmp = (43873 - 42086) / 43727 * 100;
-  assert(n2 && Math.abs(n2.ampRate - expectAmp) < 1e-9, 'amp fallback (H-L)/prev');
+  const fallback = await render(noAmp);
+  const expectedAmp = ((43873 - 42086) / 43727 * 100).toFixed(2);
+  assert.ok(fallback.includes(expectedAmp + '%'), 'missing amp is calculated from OHLC/previous close');
+  assert.match(fallback, /-2\.46%/, 'missing changePct is calculated from price/previous close');
+  assert.match(fallback, /97\.54 ⚠破停損/, 'primary night fallback still drives actions');
 
-  const dayOnly = { ok: true, session: 'day', price: 43000, night: null };
-  assert(pickNight(dayOnly) == null, 'no night when day-only');
+  const dayOnly = await render({ ok: true, session: 'day', price: 43000, night: null });
+  assert.match(dayOnly, /暫無夜盤資料/, 'incomplete day-only data is not a night quote');
+  assert.match(dayOnly, /依 美股連動預估/, 'actions identify the US fallback');
+  assert.match(dayOnly, /100\.80/, 'US estimate drives the actual position estimate');
+  assert.doesNotMatch(dayOnly, /⚠破停損/, 'positive US fallback must not retain the TXF warning');
 
-  // 行動預估：台指期夜盤優先於美股連動
-  function actionPct(txfPct, usEst) {
-    return txfPct != null ? txfPct : usEst;
-  }
-  assert(actionPct(-2.46, 0.8) === -2.46, 'TXF night drives action');
-  assert(actionPct(null, 0.8) === 0.8, 'fallback to US estimate');
+  const invalid = await render({ ok: true, session: 'day', night: { price: Infinity } });
+  assert.match(invalid, /暫無夜盤資料/, 'non-finite night prices are rejected by production normalization');
+  const primary = await render({ ...noAmp, session: 'day', ampRate: 4.09 });
+  assert.match(primary, /42,650/, 'complete OHLC primary quote remains an accepted fallback');
+  assert.match(primary, /97\.54 ⚠破停損/, 'accepted primary quote uses production action priority');
 
   console.log('txf_night_selftest: PASS');
 }
 
-main();
+main().catch(error => { console.error(error); process.exitCode = 1; });
