@@ -778,37 +778,6 @@ async function refreshMarginRatioCell() {
   });
 })();
 
-// TWSE MIS 即時：加權(t00)→^TWII、櫃買(o00)→^TWOII。
-// 有有效 price 才覆寫 Yahoo 值；盤前無成交(price=null)則保留 Yahoo。
-async function refreshTwIndexCells() {
-  const r = await fetch(`${SERVER_P}/twindex`, { cache: 'no-store' });
-  if (!r.ok) return;
-  const d = await r.json();
-  if (!d || !d.ok || !d.indices) return;
-  const map = { 't00': '^TWII', 'o00': '^TWOII' };
-  for (const [code, sym] of Object.entries(map)) {
-    const ix = d.indices[code];
-    if (!ix || ix.price == null) continue;          // 無即時成交 → 不覆寫
-    const cell = document.querySelector(`[data-mkt-sym="${sym}"]`);
-    if (!cell) continue;
-    const prev = ix.prevClose;
-    const cur = ix.price;
-    const delta = (prev != null) ? (cur - prev) : null;
-    const chgPct = (ix.changePct != null) ? ix.changePct
-      : (delta != null && prev ? delta / prev * 100 : null);
-    cell.classList.remove('loading');
-    cell.querySelector('.px').textContent = fmtIdx(cur);
-    if (delta == null || chgPct == null) continue;
-    applyMktCellTone(cell, delta, true);
-    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
-    const dEl = cell.querySelector('.delta');
-    dEl.textContent = sign + Math.abs(delta).toFixed(Math.abs(delta) >= 100 ? 0 : 2);
-    const ch = cell.querySelector('.ch');
-    const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '－';
-    ch.textContent = arrow + Math.abs(chgPct).toFixed(2) + '%';
-  }
-}
-
 async function refreshTxfCell() {
   const cell = document.querySelector('[data-mkt-sym="__TXF__"]');
   if (!cell) return;

@@ -2,25 +2,46 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "292a2d9cee84a24e764f5ee4c3c195393d818fc8",
+  "baseCommit": "8765239f701a945c845e56b73f1ec754dce8e185",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "id": "大盤標頭既有契約",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "移除無呼叫者的 refreshTwIndexCells 後標頭自測不退化",
       "targets": [
-        "tests.test_dist_scrub"
+        "tests/tw_index_day_change_selftest.js"
       ],
       "changes": [
-        "docs/revision.md"
+        "src/ui/polish_v3.js",
+        "tests/tw_index_day_change_selftest.js"
       ],
       "inputs": [
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "src/ui/polish_v3.js",
+        "tests/tw_index_day_change_selftest.js"
+      ]
+    },
+    {
+      "id": "打包產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "src 變更後重建 stock_terminal_v2.html",
+      "targets": [
+        "tests.test_bundle_fresh",
+        "tests.test_build_reproducibility"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_v2.py",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/test_build_reproducibility.py",
+        "tests/test_bundle_fresh.py"
       ]
     }
   ]
