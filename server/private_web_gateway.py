@@ -1454,6 +1454,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             "x-forwarded-for",
             "x-forwarded-host",
             "x-forwarded-proto",
+            "x-st-gateway-role",
         }
         for key, value in self.headers.items():
             if key.lower() not in blocked:

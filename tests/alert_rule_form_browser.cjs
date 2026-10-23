@@ -25,6 +25,7 @@ const legacy = [
   const page = await context.newPage();
   const errors = [], posts = [], dialogs = [];
   let rules = JSON.parse(JSON.stringify(legacy));
+  let config = { enabled: true, running: true, telegram: {}, email: {}, webhook: {} };
   page.on('pageerror', e => errors.push(e.message));
   page.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
   await context.route('**/*', r => {
@@ -37,7 +38,7 @@ const legacy = [
     if (file === '') return r.fulfill({ contentType: 'text/html; charset=utf-8', body: html });
     const abs = path.join(root, file);
     if (req.method() === 'GET' && /\.(js|css|png|svg|woff2?)$/.test(file) && !file.includes('..') && fs.existsSync(abs)) return r.fulfill({ path: abs });
-    if (url.pathname === '/alert/config') return r.fulfill({ json: { enabled: true, running: true, telegram: {}, email: {}, webhook: {} } });
+    if (url.pathname === '/alert/config') return r.fulfill({ json: config });
     if (url.pathname === '/alert/rules' && req.method() === 'GET') return r.fulfill({ json: rules });
     if (url.pathname === '/alert/rules' && req.method() === 'POST') {
       rules = JSON.parse(req.postData());
@@ -92,6 +93,28 @@ const legacy = [
   assert.equal(priceRule.price, 180);
   assert.equal('threshold' in priceRule, false);
   assert.equal('once' in priceRule, false, '未勾選時不寫 once');
+
+  // Inert markup must remain data in both value attributes and rule table text.
+  // All routes above are fixtures; this does not send a test notification.
+  const inert = '\"><span data-review-marker="inert">A & B</span>';
+  config = {
+    enabled: true, telegram: { chat_id: inert },
+    email: { smtp_host: inert, user: inert, to: inert }, webhook: { url: inert },
+  };
+  rules = [
+    { id: 90, sym: inert, market: inert, type: 'cross_up', price: inert, note: inert },
+    { id: 91, sym: inert, type: 'composite', combine: inert,
+      conditions: [{ left: inert, op: 'lt', right: inert }] },
+  ];
+  await page.evaluate(() => window.alertPushOpen());
+  await page.waitForFunction(() => document.querySelector('#ap-tg-chat')?.value.includes('data-review-marker'));
+  for (const id of ['ap-tg-chat', 'ap-em-host', 'ap-em-user', 'ap-em-to', 'ap-wh-url']) {
+    assert.equal(await page.inputValue('#' + id), inert);
+  }
+  assert.equal(await page.locator('#ap-body [data-review-marker]').count(), 0);
+  assert.equal(await page.locator('#ap-rules tr').count(), 1);
+  assert.equal(await page.locator('#ap-rules td').first().textContent(), inert);
+  assert.equal(posts.length, 2, 'rendering settings must not send alerts or rewrite rules');
 
   assert.deepEqual(errors, []);
   await browser.close();
