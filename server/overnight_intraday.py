@@ -332,11 +332,18 @@ def _market_snapshot(market: str, fetcher) -> dict:
             except Exception as exc:
                 errors.append({"symbol": item["symbol"], "error": str(exc)[:160]})
     benchmark_symbol = universe["benchmark"]["symbol"]
-    if benchmark_symbol not in normalized:
+    benchmark_returns = None
+    if benchmark_symbol in normalized:
+        try:
+            benchmark_returns = derive_session_returns(normalized[benchmark_symbol]["rows"])
+        except ValueError as exc:
+            # Preserved gap rows count as observations, not valid returns. A
+            # short benchmark degrades this market without aborting its peers.
+            errors.append({"symbol": benchmark_symbol, "error": str(exc)[:160]})
+    if benchmark_returns is None:
         return {"market": market, "label": universe["label"], "status": "insufficient",
                 "benchmark": universe["benchmark"], "members": [], "errors": errors,
                 "quality": {"status": "insufficient", "warnings": ["benchmark_unavailable"]}}
-    benchmark_returns = derive_session_returns(normalized[benchmark_symbol]["rows"])
     members = []
     for item in universe["members"]:
         series = normalized.get(item["symbol"])
