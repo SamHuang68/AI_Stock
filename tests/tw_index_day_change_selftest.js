@@ -26,7 +26,7 @@ function slice(source, startMarker, endMarker) {
 const headerCode = slice(terminal, '/** 漲跌字串：', 'async function fetchYF');
 const marksCode = slice(polish, '// 昨收虛線 + 右軸讀數', '\nfunction renderChartLegend');
 // 下方大盤列的實際更新路徑：/market/snapshot → marketData 事件 → renderCanonicalMarketQuote。
-// refreshTwIndexCells 目前沒有任何呼叫者，不作為驗收路徑。
+// 舊的 refreshTwIndexCells 沒有任何呼叫者，已於 2026-10-23 移除；實際路徑只有這條。
 const marketDataCode = fs.readFileSync(path.join(root, 'src/core/market_data_v5.js'), 'utf8').replace(/\r\n/g, '\n');
 const stripCode = slice(polish, 'function applyMktCellTone(', 'async function refreshMktBar()');
 const patchCode = slice(polish, '(function patchTwIndexHeader()', '// ============================================================\n// 大盤融資維持率');

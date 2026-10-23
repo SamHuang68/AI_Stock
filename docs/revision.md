@@ -1,3 +1,16 @@
+## 2026-10-23 移除無呼叫者的 refreshTwIndexCells（交接單第 9 節第 3 項）
+
+- 基底：`8765239f701a945c845e56b73f1ec754dce8e185`（origin/main）；分支 `claude/remove-dead-twindex-cells`。實作與合併 SHA 待 PR 合併後補記。
+- 背景：Codex 台指期／大盤 8D 交接單第 9 節第 3 項「`refreshTwIndexCells` 死碼是否移除」，Sam 2026-10-22 指示由 Claude 接手、2026-10-23 指示「補完」。
+- 查證：`git grep` 在 `src`、`stock_terminal.html`、`stock_terminal_v2.html`、`tests` 全部範圍（含 HTML 內聯事件與字串呼叫）都只有定義，沒有任何呼叫者；下方大盤小框的實際更新路徑是 `/market/snapshot` → `marketData` 事件 → `renderCanonicalMarketQuote`（2026-10-15 審查更正已記錄）。
+- 修正：移除 `src/ui/polish_v3.js` 的 `refreshTwIndexCells`（31 行，直接讀 `/twindex` 並改寫小框）；它與正式路徑並存會讓人誤以為小框有兩個來源。`refreshTxfCell` 與其餘函式不動。自測 `tw_index_day_change_selftest.js` 的註解改為說明已移除。`stock_terminal_v2.html` 已重建。
+- 沒有刪減任何畫面功能：函式從未被呼叫，行為不變。
+- 驗證：`tw_index_day_change_selftest.js`（25 組）、`test_bundle_fresh`、`test_build_reproducibility` 通過。
+- 同單其餘項目：第 5 項（案例 12 文件）2026-10-15 已更正，不需再做；第 4 項（無頭瀏覽器驗收是否納入日常驗證計畫）與第 6 項（Issue #213 與大盤 8D 是否合併）屬流程決定，仍待 Sam。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-23 合併與發布狀態補記（#259～#262、292a2d9c）
 
 - 基底：`292a2d9cee84a24e764f5ee4c3c195393d818fc8`（main）。只補記狀態，不改程式；歷史段落不覆寫。本段補充下方四個 PR 各段的「實作與合併 SHA 待 PR 合併後補記」「未合併、未發布」。
