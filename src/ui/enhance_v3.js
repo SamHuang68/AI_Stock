@@ -66,6 +66,11 @@
   // 同一本體兩個分數(26 vs 65)互相矛盾。現統一走 canonical 路徑。
   const _canonTech = {};   // 'SYM|MKT' -> 1y日線技術面分數(槓桿已映射本體)
   const _canonFail = {};   // 'SYM|MKT' -> true(抓不到，fallback 用畫面指標)
+  let statsRenderSeq = 0;
+  function currentStatsRequest(request) {
+    return request.seq === statsRenderSeq && request.loadSeq === window.__loadSeq &&
+      S.tab === 'stats' && S.sym === request.sym && S.mkt === request.mkt;
+  }
 
   // ---- 技術面分數 0~100（可傳入指定 ind/candles，否則用目前載入個股）----
   // 台股／美股同一公式（技術指標無市場邊界；勿拆兩套以免不可比）。
@@ -142,7 +147,7 @@
     return (s.startsWith('__') && s.endsWith('__'));
   }
 
-  async function computeCanonTech(sym, mkt) {
+  async function computeCanonTech(sym, mkt, request) {
     const key = sym + '|' + (mkt || 'TW');
     // 合成序列／壞日線指數：不打 Yahoo 個股 1y（會 404 或錯資料）
     if (_isSynthOrMacro(sym)) {
@@ -169,14 +174,14 @@
       if (sc == null) { _canonFail[key] = true; return; }
       if (lev && lev.inverse) sc = 100 - sc;   // 反向 ETF 與本體相反
       _canonTech[key] = sc;
-      if (typeof S !== 'undefined' && S.tab === 'stats' && (S.sym || '').toUpperCase() === sym) {
+      if (currentStatsRequest(request)) {
         const card = document.querySelector('#rpanel .dual-card');
         if (card) {
           // 保留目前基本面分數（從畫面讀回）後重繪
           card.outerHTML = dualCardHtml(null);
           if (window.fetchFund) fetchFund(S.sym, S.mkt).then(f => {
             const c2 = document.querySelector('#rpanel .dual-card');
-            if (c2 && S.tab === 'stats') c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null, f);
+            if (c2 && currentStatsRequest(request)) c2.outerHTML = dualCardHtml(f && f.score != null ? f.score : null, f);
           });
         }
       }
@@ -246,16 +251,17 @@
     window._enhStatsPatched = true;
     const orig = window.renderStats;
     window.renderStats = function () {
+      const request = { sym: S.sym, mkt: S.mkt, loadSeq: window.__loadSeq, seq: ++statsRenderSeq };
       const base = orig.apply(this, arguments);
       const head = dualCardHtml(null) + vpPanelHtml();
       // 非同步補基本面分數 + canonical(1y日線) 技術面（槓桿/反向自動映射本體）
       const symU = (S.sym || '').toUpperCase();
       const mktU = S.mkt || 'TW';
       if (symU && _canonTech[symU + '|' + mktU] == null && !_canonFail[symU + '|' + mktU])
-        computeCanonTech(symU, mktU);
+        computeCanonTech(symU, mktU, request);
       if (window.fetchFund && S.sym) {
         fetchFund(S.sym, S.mkt).then(f => {
-          if (S.tab !== 'stats') return;
+          if (!currentStatsRequest(request)) return;
           const card = document.querySelector('#rpanel .dual-card');
           if (card) card.outerHTML = dualCardHtml(f && f.score != null ? f.score : null, f);
         });

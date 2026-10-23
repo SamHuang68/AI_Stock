@@ -170,6 +170,9 @@
 
     // Space 切自選
     if (e.key === ' ' || e.code === 'Space') {
+      // 保留控制項原生啟動，以及控制項自身的鍵盤處理。
+      if (e.ctrlKey || e.metaKey || e.altKey || (e.target && e.target.closest &&
+          e.target.closest('button,a[href],summary,[role="button"],[role="link"],[role="menuitem"],[role="tab"]'))) return;
       e.preventDefault();
       cycleWl(e.shiftKey ? -1 : 1);
       return;

@@ -130,11 +130,15 @@ function renderChipSection(chip) {
   if (typeof renderStats !== 'function') return setTimeout(patchStats, 100);
   if (window._origRenderStats) return;
   window._origRenderStats = window.renderStats;
+  let renderSeq = 0;
   window.renderStats = function () {
+    const requestSeq = ++renderSeq;
     let h = window._origRenderStats.apply(this, arguments);
     if (!S.sym || S.mkt !== 'TW') return h;
+    const sym = S.sym, mkt = S.mkt, loadSeq = window.__loadSeq;
     // Async fetch and inject when ready
-    fetchChip(S.sym, S.mkt).then(chip => {
+    fetchChip(sym, mkt).then(chip => {
+      if (requestSeq !== renderSeq || loadSeq !== window.__loadSeq || S.sym !== sym || S.mkt !== mkt) return;
       const stats = document.getElementById('rpanel');
       if (!stats || S.tab !== 'stats') return;
       const ex = document.getElementById('chip-sect');

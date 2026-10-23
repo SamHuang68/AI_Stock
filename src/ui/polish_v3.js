@@ -1432,11 +1432,15 @@ function fmtBig(n, unit) {
   if (typeof renderStats !== 'function') return setTimeout(patchStatsKeystats, 100);
   // Need to wrap whatever's currently there (chip_v3.js also wraps it)
   const prev = window.renderStats;
+  let renderSeq = 0;
   window.renderStats = function () {
+    const requestSeq = ++renderSeq;
     let h = prev.apply(this, arguments);
     if (!S.sym) return h;
+    const sym = S.sym, mkt = S.mkt, loadSeq = window.__loadSeq;
     // Async fetch and inject — find element and update after render
-    fetchKeyStats(S.sym, S.mkt).then(ks => {
+    fetchKeyStats(sym, mkt).then(ks => {
+      if (requestSeq !== renderSeq || loadSeq !== window.__loadSeq || S.sym !== sym || S.mkt !== mkt || S.tab !== 'stats') return;
       // 回填 STATS 上方「MKT CAP」列（Yahoo chart meta 沒有市值，先前永遠 --）
       if (ks && ks.marketCap != null) {
         const el = document.getElementById('rp-MKTCAP');
