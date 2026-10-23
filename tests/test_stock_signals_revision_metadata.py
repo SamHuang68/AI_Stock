@@ -8,7 +8,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -254,7 +254,46 @@ class StockSignalsRevisionMetadataTests(unittest.TestCase):
         self.assertEqual(result['reason'], 'INSUFFICIENT_BARS')
         self.assertEqual(result['bars'], 9)
         self.assertEqual(result['dataQuality']['continuousBars'], 9)
-        self.assertEqual(result['dataQuality']['inputBars'], 130)
+        quality = result['dataQuality']
+        self.assertEqual(quality['rawInputBars'], 130)
+        self.assertEqual(quality['inputBars'], 131, '日曆對齊後包含缺日邊界列')
+        self.assertEqual(quality['excludedBeforeLastGap'], 122)
+        self.assertEqual(quality['inputBars'], quality['continuousBars'] + quality['excludedBeforeLastGap'])
+
+    def test_health_calendar_failure_is_explicit_and_preserves_source_warning(self):
+        ds.upsert_bars('DEMO', 'TW', full_completed_rows(), source='Yahoo Finance')
+        for failure in ('malformed_json', 'query_failure'):
+            with self.subTest(failure=failure):
+                with closing(ds.get_conn()) as connection, connection:
+                    if failure == 'malformed_json':
+                        connection.execute('INSERT OR REPLACE INTO calendar_years VALUES(?,?,?,?)',
+                                           (2026, 'invalid-json', '[]', 'fixture'))
+                    else:
+                        connection.execute('ALTER TABLE calendar_years RENAME COLUMN closed TO fixture_closed')
+                with mock.patch('signal_stats_pool.load_cached', return_value=None), \
+                     mock.patch.object(routes.ss, 'build_frame', side_effect=AssertionError('日曆失敗不得計算指標')) as frame:
+                    result = routes.analyze_symbol('DEMO', 'TW', with_stats=False, allow_network=False,
+                                                   use_cache=False, chip_dir=self.directory.name, now=NOW)
+                    frame.assert_not_called()
+                self.assertFalse(result['ok'])
+                self.assertEqual(result['reason'], 'CALENDAR_UNAVAILABLE')
+                self.assertIn('日曆無法核對', result['message'])
+                self.assertNotIn('日線不足', result['message'])
+                self.assertIn('日曆無法核對', result['dataWarning'])
+                self.assertIn('歷史修訂', result['dataWarning'])
+                self.assertEqual(result['dataQuality']['status'], 'unknown')
+                self.assertEqual(result['dataQuality']['rawInputBars'], 131)
+                self.assertEqual(result['dataQuality']['inputBars'], 0)
+                self.assertEqual(len(ds.get_bars('DEMO', market='TW')), 131)
+
+    def test_health_closed_only_history_is_empty_not_calendar_failure(self):
+        rows = [bar('2026-10-03', 10, 11, 9, 10), bar('2026-10-04', 10, 11, 9, 10)]
+        result = self.analyze_stored_rows('2330', 'TW', rows)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['reason'], 'INSUFFICIENT_BARS')
+        self.assertEqual(result['dataQuality']['rawInputBars'], 2)
+        self.assertEqual(result['dataQuality']['inputBars'], 0)
+        self.assertNotIn('日曆無法核對', result.get('dataWarning', ''))
 
     def test_health_official_holidays_do_not_reset_complete_tw_history(self):
         result = self.analyze_stored_rows('2330', 'TW', full_completed_rows())

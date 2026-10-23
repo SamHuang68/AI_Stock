@@ -402,15 +402,17 @@ def load_alert_bars(code, market, remote_loader, *, now=None):
 
 
 def _health_session_bars(bars, code, market):
-    """依官方交易日及個股狀態保留缺口；未知年度只採最後已核對尾段。"""
+    """依官方交易日保留缺口；None 表示日曆無法核對，空清單表示沒有可用交易日。"""
     if not bars:
         return []
     by_day = {bar['date']: bar for bar in bars}
     if market == 'TW':
         from 台股交易參考 import verified_sessions, trading_status
         days = verified_sessions(bars[0]['date'], bars[-1]['date'], allow_partial=True)
+        if days is None:
+            return None
         return [by_day.get(day, {'date': day}) if trading_status(code, day) is None
-                else {'date': day} for day in days or []]
+                else {'date': day} for day in days]
     from us_equity_calendar import session
     usable = []
     cursor, end = date.fromisoformat(bars[0]['date']), date.fromisoformat(bars[-1]['date'])
@@ -441,9 +443,13 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
     loaded = loader(code, market, allow_network=allow_network, now=now)
     chips = ss.load_chip_series(code, chip_dir or CHIP_HISTORY_PATH, 60) if market == 'TW' else []
     analysis_bars = _health_session_bars(loaded['bars'], code, market)
-    result = ss.analyze(analysis_bars, symbol=code, market=market, chips=chips,
+    calendar_unavailable = analysis_bars is None
+    result = ss.analyze([] if calendar_unavailable else analysis_bars, symbol=code, market=market, chips=chips,
                         provisional_last=loaded.get('provisional', False), with_stats=with_stats)
-    result['dataQuality']['inputBars'] = len(loaded['bars'])
+    result['dataQuality']['rawInputBars'] = len(loaded['bars'])
+    if calendar_unavailable:
+        result.update(reason='CALENDAR_UNAVAILABLE',
+                      message='交易日曆無法核對，暫停個股體檢；已讀行情保留，請確認日曆資料後重試。')
     if with_stats and result.get('ok'):
         try:
             import signal_stats_pool as pool
@@ -458,8 +464,9 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
                                         '交易日曆待確認：保留最後已知日線，最新應有交易日尚不能確認。')
     result['dataSource'] = loaded.get('source')
     result['staleDays'] = loaded.get('staleDays')
-    if loaded.get('error'):
-        result['dataWarning'] = loaded['error']
+    warnings = ([result['message']] if calendar_unavailable else []) + ([loaded['error']] if loaded.get('error') else [])
+    if warnings:
+        result['dataWarning'] = '；'.join(warnings)
     result['generatedAt'] = datetime.now(ss._TZ['TW']).isoformat(timespec='seconds')
     try:
         from 個股資料品質 import assess
@@ -474,6 +481,8 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
                                      notes=['本機品質資料無法讀取；不代表資料已齊全。'])
     if loaded.get('sourceRevisionStatusUnknown'):
         result['dataQuality'].update(status='unknown', label='來源修訂狀態待確認')
+    if calendar_unavailable:
+        result['dataQuality'].update(status='unknown', label='交易日曆無法核對')
     ttl = 300 if loaded.get('provisional') else 1800
     # 來源逾時／額滿及負快取期間的結果只短暫快取，避免再次延長降級結果。
     if loaded.get('retrySoon'):
