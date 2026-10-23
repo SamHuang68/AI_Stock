@@ -367,15 +367,23 @@ class StockSignalsHttpTests(unittest.TestCase):
         self.assertEqual(d['minSample'], ss.MIN_SAMPLE)
 
     def test_single_and_batch_with_fixture_loader(self):
+        from tests.已核對資料 import 日曆資料
+        from us_equity_calendar import session as us_session
+
         def loader(code, market, **kw):
-            return {'bars': make_bars(random_walk(len(code), 260)), 'source': 'fixture',
+            # 台股採明示合成日曆；美股日期限定於正式日曆涵蓋範圍及開市日。
+            bars = make_bars(random_walk(len(code), 180), start=date(2026, 1, 2))
+            if market == 'US':
+                bars = [bar for bar in bars if us_session(bar['date'])['status'] == 'scheduled']
+            return {'bars': bars, 'source': 'fixture',
                     'provisional': False, 'staleDays': 0, 'error': None}
-        with mock.patch.object(routes, 'load_bars', loader):
+        with 日曆資料(), mock.patch.object(routes, 'load_bars', loader):
             d = self._get('/stock-signals?sym=2330&market=TW&cacheOnly=1')
             b = self._get('/stock-signals/batch?syms=2330,AAPL:US')
         self.assertTrue(d['ok'])
         self.assertEqual(d['symbol'], '2330')
         self.assertEqual([i['symbol'] for i in b['items']], ['2330', 'AAPL'])
+        self.assertTrue(all(item['ok'] for item in b['items']))
         self.assertNotIn('evidence', b['items'][0])
 
     def test_rejects_missing_or_bad_symbol(self):
