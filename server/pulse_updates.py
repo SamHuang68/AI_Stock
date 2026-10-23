@@ -15,6 +15,7 @@ from typing import Callable
 
 from daemon_lock import acquire_daemon_lock, release_daemon_lock
 from jsonl_trace import append_jsonl
+from log_once import log_once
 
 
 TABLE = 'pulse_update_jobs_v1'
@@ -127,8 +128,8 @@ class PulseUpdates:
                 'status': (job or {}).get('status'), 'elapsedMs': (job or {}).get('elapsedMs', 0),
                 **({'error': str(error)[:400]} if error else {}),
             }, max_bytes=256 * 1024, tail_lines=500)
-        except OSError:
-            pass
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+            log_once('pulse-update-trace', '診斷紀錄無法保存；更新工作繼續執行', exc=exc)
 
     def status(self, job_id=None):
         rows = self._read(f'SELECT * FROM {TABLE} ORDER BY queued_at DESC,rowid DESC LIMIT 101')

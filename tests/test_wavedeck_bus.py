@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import sys
+import json
+import threading
+from copy import deepcopy
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +19,63 @@ import wavedeck_bus as wdb  # noqa: E402
 
 
 class WaveDeckBusSmoke(unittest.TestCase):
+    def test_saves_serialize_snapshot_and_commit_without_old_report_overwrite(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = Path(td) / 'wavedeck_bus.json'
+            entered, release, second_started, second_done = [threading.Event() for _ in range(4)]
+            saved_state = deepcopy(wdb._state)
+            writer = wdb.atomic_write_json
+            failures = []
+            def paused_write(path, value, **kwargs):
+                if value['report']['symbol'] == 'OLD':
+                    entered.set()
+                    if not release.wait(3):
+                        raise AssertionError('舊寫入未收到放行通知')
+                writer(path, value, **kwargs)
+            def report(symbol):
+                try:
+                    if symbol == 'NEW':
+                        second_started.set()
+                    wdb.accept_report({'symbol': symbol, 'positions': {'account': 1}})
+                except BaseException as exc:
+                    failures.append(exc)
+                finally:
+                    if symbol == 'NEW':
+                        second_done.set()
+            try:
+                with mock.patch.object(wdb, 'STORE', store), mock.patch.object(wdb, 'atomic_write_json', side_effect=paused_write):
+                    first = threading.Thread(target=report, args=('OLD',))
+                    second = threading.Thread(target=report, args=('NEW',))
+                    first.start()
+                    try:
+                        self.assertTrue(entered.wait(2))
+                        second.start()
+                        self.assertTrue(second_started.wait(2))
+                        self.assertFalse(second_done.wait(0.1), '新回報不得越過尚未提交的舊快照')
+                    finally:
+                        release.set()
+                        first.join(3)
+                        if second.ident is not None:
+                            second.join(3)
+                    self.assertFalse(first.is_alive() or second.is_alive())
+                    self.assertEqual(failures, [])
+                    self.assertEqual(json.loads(store.read_text(encoding='utf-8'))['report']['symbol'], 'NEW')
+                    self.assertEqual(wdb.snapshot()['report']['symbol'], 'NEW')
+            finally:
+                wdb._state = saved_state
+
+    def test_save_failure_is_observable_and_keeps_previous_disk_snapshot(self):
+        self.addCleanup(setattr, wdb, '_state', deepcopy(wdb._state))
+        with tempfile.TemporaryDirectory() as td:
+            store = Path(td) / 'wavedeck_bus.json'
+            with mock.patch.object(wdb, 'STORE', store):
+                wdb.accept_report({'symbol': 'SAVED'})
+                before = store.read_bytes()
+                with mock.patch.object(wdb, 'atomic_write_json', side_effect=OSError('磁碟不可寫')), mock.patch.object(wdb, 'log_once') as warning:
+                    wdb.accept_report({'symbol': 'NEW'})
+                self.assertEqual(store.read_bytes(), before)
+                warning.assert_called_once()
+
     def test_origin_allows_wd_ports(self):
         self.assertTrue(wdb.is_wavedeck_origin("http://127.0.0.1:18433/"))
         self.assertTrue(wdb.is_wavedeck_origin("http://localhost:18765"))

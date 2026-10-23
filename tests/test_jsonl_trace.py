@@ -6,12 +6,24 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 import jsonl_trace  # noqa: E402
 
 
 class TestJsonlTrace(unittest.TestCase):
+    def test_truncated_utf8_tail_cannot_absorb_next_valid_record(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'trace.jsonl')
+            with open(path, 'wb') as fh:
+                fh.write(b'{"event":"old"}\n{"broken":"\xe4\xb8')
+            with patch.object(jsonl_trace, 'log_once') as warning:
+                jsonl_trace.append_jsonl(path, {'event': 'new'}, max_bytes=1, tail_lines=2)
+            with open(path, encoding='utf-8') as fh:
+                self.assertEqual([json.loads(line) for line in fh], [{'event': 'old'}, {'event': 'new'}])
+            warning.assert_called_once()
+
     def test_concurrent_append_and_compact_keeps_json_lines(self):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, 'trace.jsonl')

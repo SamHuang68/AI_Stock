@@ -265,7 +265,31 @@ def set_exec_mode(mode: str) -> dict[str, Any]:
 
 def _publish_execution_config(cfg: dict) -> dict[str, Any]:
     """在送單鎖內同步設定、執行狀態及兩個切換入口的推播。"""
+    previous = RUNTIME.snapshot()
+    transition = {}
+    if previous.get("mode") == "paper" and cfg["mode"] != "paper":
+        # TXT 讀回會更新共用顯示狀態；紙上部位及成交收據另外保留，帳本不改寫。
+        transition["paper_runtime"] = {key: previous.get(key) for key in ("symbol", "positions", "execution", "exec")}
+    elif previous.get("mode") != "paper" and cfg["mode"] == "paper":
+        saved = previous.get("paper_runtime")
+        if isinstance(saved, dict) and isinstance(saved.get("positions"), dict):
+            transition.update({key: saved[key] for key in ("symbol", "positions", "exec") if key in saved})
+            # Runtime.patch 合併字典；明確清除 TXT 專屬欄位後還原紙上收據。
+            transition["execution"] = {key: None for key in (previous.get("execution") or {})}
+            transition["execution"].update(saved.get("execution") or {})
+        else:
+            # 舊版沒有紙上快照時只恢復已存在帳本的部位，不把 TXT 部位當成紙上成交。
+            ledger = previous.get("paper_ledger") or {}
+            position = ledger.get("position", 0)
+            if isinstance(position, int) and not isinstance(position, bool):
+                transition["positions"] = {key: position for key in ("account", "strategy", "txt_target", "ai_suggested")}
+                transition["execution"] = {key: None for key in (previous.get("execution") or {})}
+                transition["execution"].update(status="idle", evidence_kind="paper_ledger", position_confirmed=True)
+                transition["exec"] = {"lots": abs(position), "last_order_action": "恢復紙上帳本"}
+        restored = {**previous, **transition}
+        transition["fsm"] = _confirmed_fsm(restored, {"positions": restored.get("positions"), "execution": restored.get("execution")})
     snap = RUNTIME.patch(
+        **transition,
         mode=cfg["mode"],
         account={"broker_api": cfg["broker"]["kind"]},
         lights={
@@ -273,6 +297,8 @@ def _publish_execution_config(cfg: dict) -> dict[str, Any]:
             "order_signal_file": "ok" if cfg["broker"]["kind"] == "txt_master" else "idle",
         },
     )
+    if previous.get("mode") != "paper" and cfg["mode"] == "paper":
+        snap = refresh_account()
     audit.write("mode", {"mode": cfg["mode"], "broker": cfg["broker"]["kind"]})
     try:
         push_async(snap, reason="mode", force=True)

@@ -18,6 +18,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
+from atomic_store import atomic_write_json
+from log_once import log_once
 
 TZ8 = timezone(timedelta(hours=8))
 DATA = Path(__file__).resolve().parents[1] / 'data'
@@ -74,19 +76,17 @@ def _load() -> None:
 
 def _save() -> None:
     try:
-        DATA.mkdir(parents=True, exist_ok=True)
+        # 快照與提交必須同鎖；只有原子換檔仍可能讓較舊快照覆蓋新回報。
         with _lock:
-            payload = {
+            payload = deepcopy({
                 'report': _state.get('report'),
                 'report_at': _state.get('report_at'),
                 'report_epoch_ms': _state.get('report_epoch_ms'),
                 'costs': _state.get('costs'),
-            }
-        tmp = STORE.with_suffix('.tmp')
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
-        tmp.replace(STORE)
-    except Exception:
-        pass
+            })
+            atomic_write_json(STORE, payload, backup=False)
+    except (OSError, ValueError, TypeError) as exc:
+        log_once('wavedeck-bus-save', 'WaveDeck 狀態無法保存', exc=exc)
 
 
 _load()

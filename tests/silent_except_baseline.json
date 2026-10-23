@@ -38,6 +38,6 @@
     "server/tw_index_charts.py": 6,
     "server/universe.py": 1,
     "server/watch_daemon.py": 2,
-    "server/wavedeck_bus.py": 12
+    "server/wavedeck_bus.py": 11
   }
 }

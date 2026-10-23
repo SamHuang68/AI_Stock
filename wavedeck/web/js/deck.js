@@ -17,6 +17,7 @@
   var pendingManifest = null;
   var registeredManifest = null;
   var overnightDirty = false;
+  var stRefreshId = 0;
 
   function $(id) { return document.getElementById(id); }
 
@@ -119,7 +120,7 @@
   function styleFromScore(score, advRatio, opts) {
     opts = opts || {};
     var s = Number(score);
-    var adv = Number(advRatio);
+    var adv = advRatio == null ? NaN : Number(advRatio);
     if (!isFinite(s)) s = 50;
     var hint = 50;
     if (s >= 70) hint = 65;
@@ -134,7 +135,7 @@
     var rot = opts.rotationHealth || opts.rotation || null;
     if (rot === 'broad') hint = Math.min(90, hint + 5);
     if (rot === 'narrow') hint = Math.max(20, hint - 5);
-    var spill = Number(opts.spilloverProb);
+    var spill = opts.spilloverProb == null ? NaN : Number(opts.spilloverProb);
     if (isFinite(spill)) {
       if (spill < 0.35) hint = Math.min(hint, 40);
       else if (spill > 0.65) hint = Math.max(hint, Math.min(65, hint + 5));
@@ -650,15 +651,21 @@
   }
 
   async function refreshSt() {
+    var refreshId = ++stRefreshId;
     // `/health` 刻意不開放跨來源 CORS；改用明確授權的 WaveDeck bridge，
     // 避免 WaveDeck 使用備援埠時把正常連線誤顯示為 ST OFF。
     var bridge = await jget(ST + '/bridge/wavedeck');
+    if (refreshId !== stRefreshId) return null;
     if (!bridge || !bridge.ok) {
+      stCtx = { styleHint: null, delever: false, note: '', score: null, advRatio: null,
+        rotation: null, spilloverProb: null, hotStage: null, leaders: [] };
       if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OFF';
+      if ($('stStyle')) $('stStyle').textContent = '建議暫不可用';
+      if ($('stScore')) $('stScore').textContent = '—';
       if ($('stNote') && !(state && state.st_overlay && state.st_overlay.note)) {
         $('stNote').textContent = 'ST :18432 未連線（可先開 Stock Terminal）';
       }
-      return;
+      return null;
     }
     var link = (state && state.st_link) || {};
     if ($('stSyncTxt')) {
@@ -674,6 +681,10 @@
       jget(ST + '/breadth'),
       jget(ST + '/fundamental/^TWII')
     ]);
+    if (refreshId !== stRefreshId) return null;
+    // 每次建議只用本輪取得的資料；失敗後不可再套用上一輪的高風格值。
+    stCtx = { styleHint: null, delever: false, note: '', score: null, advRatio: null,
+      rotation: null, spilloverProb: null, hotStage: null, leaders: [] };
     var tw = pack[0] || {};
     var br = pack[1] || {};
     var fund = pack[2] || {};
@@ -698,6 +709,11 @@
       : (br.date || '—');
 
     var score = fund.score != null ? fund.score : br.score;
+    if (!pack[1] || !pack[2] || br.ok === false || fund.ok === false || score == null || !isFinite(Number(score))) {
+      if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST ?';
+      if ($('stStyle')) $('stStyle').textContent = '建議暫不可用';
+      return null;
+    }
     stCtx.score = score;
     stCtx.advRatio = adv;
     $('stScore').textContent = (score != null && isFinite(score)) ? Math.round(Number(score)) : '—';
@@ -705,10 +721,13 @@
 
     // Prefer spillover/rotation already on WD overlay (from Pulse); else breadth-only
     var ov = (state && state.st_overlay) || {};
-    stCtx.rotation = ov.rotation || stCtx.rotation;
-    stCtx.spilloverProb = ov.spillover_prob != null ? ov.spillover_prob : stCtx.spilloverProb;
-    stCtx.hotStage = ov.hot_stage || stCtx.hotStage;
-    stCtx.leaders = ov.leaders || stCtx.leaders;
+    link = (state && state.st_link) || {};
+    // 失聯時留在 WD 的覆寫只供歷史顯示，不混入新取得的建議。
+    var overlayFresh = !(ov.fail_safe || link.fail_safe || link.status === 'down');
+    stCtx.rotation = overlayFresh ? (ov.rotation || null) : null;
+    stCtx.spilloverProb = overlayFresh && ov.spillover_prob != null ? ov.spillover_prob : null;
+    stCtx.hotStage = overlayFresh ? (ov.hot_stage || null) : null;
+    stCtx.leaders = overlayFresh ? (ov.leaders || []) : [];
 
     var hint = styleFromScore(score, adv, {
       rotation: stCtx.rotation,
@@ -731,51 +750,38 @@
     }
     $('stDelever').textContent = (ov && ov.delever) ? '是' : (stCtx.delever ? '建議是' : '否');
     paintSpillMeter(ov);
+    return Object.assign({}, stCtx);
   }
 
   async function applyStHint() {
-    if (stCtx.styleHint == null) await refreshSt();
-    if (stCtx.styleHint == null) throw new Error('尚無 ST 建議（確認 :18432）');
+    var hint = await refreshSt();
+    if (!hint || hint.styleHint == null) throw new Error('ST 建議未能重新取得，未套用舊資料（確認 :18432）');
     var fs = state && ((state.st_overlay && state.st_overlay.fail_safe) || (state.st_link && state.st_link.fail_safe));
     if (fs) {
-      toast('Fail-safe 中：套用 ST 會刷新宏觀覆寫並解除 Fail-safe（風格仍先鎖 ≤35）');
+      toast('已重新取得 ST 建議；套用將刷新宏觀覆寫並解除 Fail-safe');
     }
     var body = {
-      style: stCtx.styleHint,
-      delever: !!stCtx.delever,
-      note: stCtx.note || ('ST 建議風格 ' + stCtx.styleHint),
+      style: hint.styleHint,
+      delever: !!hint.delever,
+      note: hint.note || ('ST 建議風格 ' + hint.styleHint),
       meta: {
-        score: stCtx.score,
-        advRatio: stCtx.advRatio,
+        score: hint.score,
+        advRatio: hint.advRatio,
         source: 'wavedeck-console',
-        rotation: stCtx.rotation || null,
-        spillover_prob: stCtx.spilloverProb != null ? Number(stCtx.spilloverProb) : null,
-        hot_stage: stCtx.hotStage || null,
-        leaders: stCtx.leaders || []
+        rotation: hint.rotation || null,
+        spillover_prob: hint.spilloverProb != null ? Number(hint.spilloverProb) : null,
+        hot_stage: hint.hotStage || null,
+        leaders: hint.leaders || []
       }
     };
     await api('/bridge/st', { method: 'POST', body: JSON.stringify(body) });
-    var j2 = await api('/api/style', { method: 'POST', body: JSON.stringify({ style: stCtx.styleHint }) });
+    var j2 = await api('/api/style', { method: 'POST', body: JSON.stringify({ style: hint.styleHint }) });
     render(j2.state);
-    toast('已套用 ST 建議風格 → ' + stCtx.styleHint);
+    toast('已套用 ST 建議風格 → ' + j2.state.style);
   }
 
   async function boot() {
     bindStrategyControls();
-    try {
-      await refreshWd();
-    } catch (e) {
-      if ($('wdSyncTxt')) $('wdSyncTxt').textContent = 'ERR';
-      throw e;
-    }
-    refreshSt().catch(function () {});
-
-    setInterval(function () {
-      refreshWd().catch(function () { if ($('wdSyncTxt')) $('wdSyncTxt').textContent = 'ERR'; });
-    }, 2000);
-    setInterval(function () {
-      refreshSt().catch(function () { if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OFF'; });
-    }, 15000);
 
     $('styleRange').addEventListener('input', function () {
       $('styleVal').textContent = this.value;
@@ -881,15 +887,18 @@
           var j = await api('/api/exec_md/latest');
           var md = j.markdown || '';
           if (!md) { toast('尚無執行細節 MD'); return; }
-          var w = window.open('', '_blank', 'noopener');
-          if (!w) { console.log(md); toast('已輸出至 console（彈窗被擋）'); return; }
-          w.document.write(
-            '<!doctype html><meta charset="utf-8"><title>' + (j.file || 'exec.md') + '</title>' +
+          var title = String(j.file || 'exec.md').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+          var html = '<!doctype html><meta charset="utf-8"><title>' + title + '</title>' +
             '<body style="margin:0;background:#0b111a;color:#d5deea">' +
             '<pre style="margin:0;padding:16px;font:12px/1.45 ui-monospace,monospace;white-space:pre-wrap">' +
-            md.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre></body>'
-          );
-          w.document.close();
+            md.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre></body>';
+          var url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+          var link = document.createElement('a');
+          link.href = url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.click();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
           toast('執行細節：' + (j.file || 'latest.md'));
         } catch (e) {
           toast(String(e.message || e) || '尚無執行細節 MD — 先按模擬 TV');
@@ -901,8 +910,22 @@
       window.open(ST + '/#pulse', '_blank', 'noopener');
     });
     $('btnPullSt').addEventListener('click', async function () {
+      this.disabled = true;
       try { await applyStHint(); } catch (e) { toast(String(e.message || e)); }
+      finally { this.disabled = false; }
     });
+    // 先完成控制接線及輪詢；首次狀態失敗仍可操作急停並自動重試。
+    function pollWd() {
+      return refreshWd().catch(function () {
+        if ($('wdSyncTxt')) $('wdSyncTxt').textContent = 'ERR';
+      });
+    }
+    setInterval(pollWd, 2000);
+    setInterval(function () {
+      refreshSt().catch(function () { if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OFF'; });
+    }, 15000);
+    pollWd();
+    refreshSt().catch(function () { if ($('stSyncTxt')) $('stSyncTxt').textContent = 'ST OFF'; });
   }
 
   if (document.readyState === 'loading') {

@@ -85,6 +85,29 @@ class PulseUpdatesTest(unittest.TestCase):
         self.assertIsNone(queue.status('不存在')['job'])
         self.assertEqual(list(self.path.iterdir()), [])
 
+    def test_corrupt_oversized_trace_does_not_block_boot_worker(self):
+        Path(self.trace).write_bytes(b'{"padding":"' + b'x' * (256 * 1024) + b'"}\n{"broken":"\xe4\xb8')
+        queue = self.queue(interval_seconds=60)
+        calls = []
+        def builder(job_id, guard):
+            guard()
+            calls.append(job_id)
+            return committed(job_id)
+        self.assertTrue(queue.start(builder, lambda: None))
+        job_id = queue.status()['job']['jobId']
+        self.wait_job(queue, job_id, 'succeeded')
+        self.assertTrue(queue.stop(timeout=1))
+        self.assertEqual(calls, [job_id])
+        events = [json.loads(line) for line in Path(self.trace).read_text(encoding='utf-8').splitlines()]
+        self.assertTrue(any(row.get('event') == 'succeeded' for row in events))
+
+    def test_trace_encoding_failure_does_not_prevent_job_submission(self):
+        queue = self.queue()
+        with patch.object(pu, 'append_jsonl', side_effect=UnicodeError('診斷輸出失敗')), patch.object(pu, 'log_once') as warning:
+            job = queue.submit()['job']
+        self.assertEqual(queue.status(job['jobId'])['job']['status'], 'queued')
+        warning.assert_called_once()
+
     def test_status_does_not_migrate_or_modify_legacy_queue(self):
         with closing(sqlite3.connect(self.db)) as conn:
             conn.execute('CREATE TABLE old_jobs(id TEXT)')
