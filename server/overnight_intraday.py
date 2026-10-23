@@ -127,7 +127,9 @@ def _linear_slope(values, window=5):
 def normalize_yahoo_chart(payload: dict, symbol: str) -> dict:
     """Return finalized, consistently adjusted daily Open/Close rows.
 
-    Missing Open is rejected (never replaced with Close). A row factor of
+    Missing Open excludes that session's return, but preserves its valid Close
+    for the following session. Missing Close remains a gap boundary, never
+    joining the sessions on either side. A row factor of
     ``adjClose / rawClose`` is applied to Open and Close together. The most
     recent row is excluded when Yahoo marks the regular session as open.
     """
@@ -157,24 +159,23 @@ def normalize_yahoo_chart(payload: dict, symbol: str) -> dict:
     session_open = str(meta.get("marketState") or "").upper() in {"REGULAR", "PRE", "PREPRE"}
     rows, rejected = [], []
     for index, timestamp in enumerate(timestamps):
+        day = datetime.fromtimestamp(int(timestamp), tz=timezone.utc).astimezone(exchange_tz).date().isoformat()
         raw_open = _finite_number((quote.get("open") or [None] * len(timestamps))[index])
         raw_close = _finite_number((quote.get("close") or [None] * len(timestamps))[index])
         adjusted_close = _finite_number(adjclose[index] if index < len(adjclose) else None)
+        row = {"date": day, "timestamp": int(timestamp), "open": None,
+               "close": None, "adjustmentFactor": None}
+        rows.append(row)
         if not raw_open or not raw_close or not adjusted_close or min(raw_open, raw_close, adjusted_close) <= 0:
             rejected.append({"index": index, "reason": "missing_or_nonpositive_adjusted_ohlc"})
+        if not raw_close or not adjusted_close or min(raw_close, adjusted_close) <= 0:
             continue
         factor = adjusted_close / raw_close
         if not math.isfinite(factor) or factor <= 0:
             rejected.append({"index": index, "reason": "invalid_adjustment_factor"})
             continue
-        day = datetime.fromtimestamp(int(timestamp), tz=timezone.utc).astimezone(exchange_tz).date().isoformat()
-        rows.append({
-            "date": day,
-            "timestamp": int(timestamp),
-            "open": raw_open * factor,
-            "close": adjusted_close,
-            "adjustmentFactor": factor,
-        })
+        row.update(open=raw_open * factor if raw_open and raw_open > 0 else None,
+                   close=adjusted_close, adjustmentFactor=factor)
     rows.sort(key=lambda row: (row["date"], row["timestamp"]))
     deduped = {row["date"]: row for row in rows}
     rows = [deduped[day] for day in sorted(deduped)]
@@ -184,7 +185,7 @@ def normalize_yahoo_chart(payload: dict, symbol: str) -> dict:
         rows = rows[:-1]
     if len(rows) < MIN_RETURNS + 1:
         raise ValueError(f"insufficient finalized adjusted rows for {symbol}: {len(rows)}")
-    factors = [row["adjustmentFactor"] for row in rows]
+    factors = [row["adjustmentFactor"] for row in rows if row["adjustmentFactor"] is not None]
     corporate_adjusted = any(abs(math.log(factors[index] / factors[index - 1])) > 0.05 for index in range(1, len(factors)))
     return {
         "symbol": symbol,

@@ -82,7 +82,8 @@ class USEquityCalendarTests(unittest.TestCase):
         ):
             final = datetime.fromisoformat(last+'T16:00:00-05:00')
             rows = [(int((final-timedelta(days=i)).timestamp()), 100, 101, 99, 100, 10) for i in reversed(range(150))]
-            db = SimpleNamespace(get_bars=Mock(return_value=rows), upsert_bars=Mock())
+            db = SimpleNamespace(get_bars=Mock(return_value=rows), upsert_bars=Mock(),
+                                 source_revision_status=Mock(return_value={'count': 0}))
             routes.clear_cache()
             with patch.object(routes, '_datastore', return_value=db), patch.object(routes, '_fetch_remote') as fetch:
                 result = routes.load_bars('AAPL', 'US', now=datetime.fromisoformat(now))
@@ -121,6 +122,7 @@ class USEquityCalendarTests(unittest.TestCase):
             now = datetime.fromisoformat(stamp)
             rows = [(int((now-timedelta(days=i+lag)).timestamp()), 100, 101, 99, 100, 10) for i in reversed(range(150))]
             db = SimpleNamespace(get_bars=Mock(return_value=rows), upsert_bars=Mock(),
+                                 source_revision_status=Mock(return_value={'count': 0}),
                                  read_snapshot=lambda: nullcontext(None),
                                  get_bars_bulk=lambda *args, **kwargs: {})
             with patch.object(routes, '_datastore', return_value=db):
@@ -128,11 +130,12 @@ class USEquityCalendarTests(unittest.TestCase):
             with patch.dict(sys.modules, {'datastore': db, 'signal_stats_pool': SimpleNamespace(load_cached=lambda market: None)}):
                 result = routes.analyze_symbol('AAPL', 'US', now=now, with_stats=False,
                                                bars_loader=lambda *args, **kwargs: loaded, use_cache=False)
-            self.assertTrue(result['ok'])
+            self.assertEqual(result['ok'], now.year != 2029)
             self.assertEqual(result['session']['calendar']['version'], 'us-equity-sessions-1')
             self.assertEqual(result['session']['calendar']['source'], 'https://www.nyse.com/trade/hours-calendars')
             self.assertEqual(result['session']['expectedLastDate'], loaded['session']['expectedLastDate'])
             if now.year == 2029:
+                self.assertEqual(result['bars'], 0, '未知交易日曆不能聲稱有連續暖機資料')
                 self.assertIn('交易日曆待確認', result['session']['note'])
                 self.assertNotIn('已收盤', result['session']['note'])
                 self.assertEqual(result['session']['provisional'], lag == 0)

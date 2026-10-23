@@ -205,6 +205,86 @@ class StockSignalsRevisionMetadataTests(unittest.TestCase):
         self.assertIn('歷史修訂', result['error'])
         self.assertFalse(result.get('sourceRevisionStatusUnknown'))
 
+    def test_persisted_revision_warning_survives_local_reads_and_cache_clear(self):
+        with self.remote(full_completed_rows()):
+            initial = routes.load_bars('DEMO', 'TW', now=NOW)
+        baseline = self.summary(initial)
+        with mock.patch.object(routes, '_fetch_remote', side_effect=AssertionError('本機讀取不得重抓')), \
+             mock.patch.object(ds, 'upsert_bars', side_effect=AssertionError('本機讀取不得寫行情')):
+            for clear_memory in (False, True):
+                with self.subTest(clear_memory=clear_memory):
+                    if clear_memory:
+                        routes.clear_cache()
+                    result = routes.load_bars('DEMO', 'TW', allow_network=False, now=NOW)
+                    state = self.summary(result)
+                    self.assertIn('歷史修訂', result['error'])
+                    self.assertFalse(result['sourceRevisionStatusUnknown'])
+                    self.assertFalse(result['retrySoon'])
+                    self.assertEqual(state['revisionEvidenceSha256'], baseline['revisionEvidenceSha256'])
+
+    def test_first_local_metadata_failure_is_unknown_and_obeys_backoff(self):
+        with self.metadata_failure() as status:
+            first = routes.load_bars('DEMO', 'TW', allow_network=False, now=NOW)
+            self.clock[0] = 101
+            repeated = routes.load_bars('DEMO', 'TW', allow_network=False, now=NOW)
+            status.assert_called_once_with('DEMO', 'TW')
+        self.assertTrue(first['sourceRevisionStatusUnknown'])
+        self.assertTrue(first['retrySoon'])
+        self.assertEqual(repeated['error'], first['error'])
+        self.clock[0] = 161
+        recovered = routes.load_bars('DEMO', 'TW', allow_network=False, now=NOW)
+        self.assertFalse(recovered['sourceRevisionStatusUnknown'])
+        self.assertFalse(recovered['retrySoon'])
+
+    def analyze_stored_rows(self, symbol, market, rows):
+        # Legacy stored rows can include provider prices during a suspension;
+        # health must check tradability independently of the newer ingest filter.
+        ds.upsert_bars(symbol, market, rows)
+        # Only isolate the unrelated pooled-result cache; calendar, loader,
+        # normalization, health analysis and quality assessment remain production.
+        with mock.patch('signal_stats_pool.load_cached', return_value=None):
+            return routes.analyze_symbol(symbol, market, with_stats=False,
+                                         allow_network=False, use_cache=False,
+                                         chip_dir=self.directory.name, now=NOW)
+
+    def test_health_missing_whole_tw_session_restarts_warmup(self):
+        rows = full_completed_rows()
+        result = self.analyze_stored_rows('2330', 'TW', rows[:-10] + rows[-9:])
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['reason'], 'INSUFFICIENT_BARS')
+        self.assertEqual(result['bars'], 9)
+        self.assertEqual(result['dataQuality']['continuousBars'], 9)
+        self.assertEqual(result['dataQuality']['inputBars'], 130)
+
+    def test_health_official_holidays_do_not_reset_complete_tw_history(self):
+        result = self.analyze_stored_rows('2330', 'TW', full_completed_rows())
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['bars'], 131)
+        self.assertEqual(result['dataQuality']['continuousBars'], 131)
+
+    def test_health_known_suspension_resets_warmup_even_if_provider_has_prices(self):
+        result = self.analyze_stored_rows('1441', 'TW', full_completed_rows())
+        self.assertFalse(result['ok'])
+        # Official resumption 2026-09-29 through 2026-10-07: seven sessions.
+        self.assertEqual(result['bars'], 7)
+        self.assertEqual(result['dataQuality']['continuousBars'], 7)
+        self.assertEqual(result['dataQuality']['inputBars'], 131)
+
+    def test_health_missing_whole_us_session_restarts_warmup(self):
+        from us_equity_calendar import session as us_session, TZ as us_tz
+        cursor, rows = date(2026, 10, 7), []
+        while len(rows) < 131:
+            if us_session(cursor)['status'] == 'scheduled':
+                timestamp = int(datetime.combine(cursor, datetime.min.time(), tzinfo=us_tz)
+                                .replace(hour=16).timestamp())
+                rows.append((timestamp, 100.0, 101.0, 99.0, 100.0, 1000.0))
+            cursor -= timedelta(days=1)
+        rows.reverse()
+        result = self.analyze_stored_rows('AAPL', 'US', rows[:-10] + rows[-9:])
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['bars'], 9)
+        self.assertEqual(result['dataQuality']['continuousBars'], 9)
+
     def test_full_closed_snapshot_recovers_metadata_without_network_or_writes(self):
         with self.remote(full_completed_rows()), self.metadata_failure():
             first = routes.load_bars('DEMO', 'TW', now=NOW)
@@ -227,6 +307,8 @@ class StockSignalsRevisionMetadataTests(unittest.TestCase):
         self.assertIn('歷史修訂', recovered['error'])
         self.assertEqual(state['revisionCount'], 1)
         self.assertEqual(state['revisionEvidenceSha256'], first_state['revisionEvidenceSha256'])
+        again = routes.load_bars('DEMO', 'TW', allow_network=False, now=NOW)
+        self.assertIn('歷史修訂', again['error'])
 
     def test_full_closed_metadata_retry_failure_keeps_reason_until_readonly_recovery(self):
         with self.remote(full_completed_rows()), self.metadata_failure():

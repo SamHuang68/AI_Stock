@@ -243,13 +243,14 @@ class RoutesTests(unittest.TestCase):
         self.assertEqual(routes._parse_batch('2330, AAPL:US,2330,bad/x'), [('2330', 'TW'), ('AAPL', 'US')])
 
     def test_analyze_symbol_uses_injected_loader_and_caches(self):
+        from tests.已核對資料 import 日曆資料
         calls = []
 
         def loader(code, market, **kw):
             calls.append(code)
             return {'bars': make_bars(random_walk(3, 300)), 'source': 'fixture', 'provisional': False,
                     'staleDays': 0, 'error': None}
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, 日曆資料():
             a = routes.analyze_symbol('9999', 'TW', bars_loader=loader, chip_dir=tmp)
             b = routes.analyze_symbol('9999', 'TW', bars_loader=loader, chip_dir=tmp)
         self.assertTrue(a['ok'])

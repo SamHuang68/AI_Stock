@@ -1,4 +1,4 @@
-"""隔離來源停滯測試；不使用真實網路、資料庫、HTTP 服務或付費模型。"""
+"""隔離來源停滯測試；日曆用合成 SQLite，不使用正式資料、網路、HTTP 或付費模型。"""
 import sys
 import io
 import json
@@ -15,18 +15,24 @@ import stock_signals as ss
 import stock_signals_routes as routes
 import datastore
 from deadline import BoundedExecutor
+from tests.已核對資料 import 日曆資料
 
 
 class StockHealthDeadlineTests(unittest.TestCase):
     def setUp(self):
         routes.clear_cache()
+        self.calendar = 日曆資料()
+        self.calendar.__enter__()
+        self.addCleanup(self.calendar.__exit__, None, None, None)
         self.pool = BoundedExecutor(max_workers=2, max_in_flight=2, prefix='health-fixture')
         self.release = threading.Event()
         self.now = datetime(2026, 10, 3, 18, tzinfo=timezone(timedelta(hours=8)))
         self.rows = [(int((self.now - timedelta(days=200 - i)).timestamp()), 100, 101, 99, 100, 1000)
                      for i in range(150)]
         self.ds = SimpleNamespace(get_bars=mock.Mock(return_value=self.rows),
-                                  upsert_bars=mock.Mock(), fetch_yahoo_daily=mock.Mock())
+                                  upsert_bars=mock.Mock(), fetch_yahoo_daily=mock.Mock(),
+                                  source_revision_status=mock.Mock(return_value={'count': 0}),
+                                  read_snapshot=datastore.read_snapshot)
         self.patches = [mock.patch.object(routes, '_datastore', return_value=self.ds),
                         mock.patch.object(routes, '_remote_pool', self.pool),
                         mock.patch.object(routes, 'REMOTE_FETCH_SECONDS', .025)]

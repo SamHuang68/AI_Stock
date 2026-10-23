@@ -60,9 +60,44 @@ class OvernightIntradayTest(unittest.TestCase):
         self.assertLess(max(abs(row['overnight']) for row in rows), 0.02)
 
     def test_missing_open_is_rejected_not_imputed(self):
-        normalized = oi.normalize_yahoo_chart(yahoo_payload(missing_open=90), 'MU')
+        payload = yahoo_payload(missing_open=170, end=datetime(2026, 10, 22, 20, tzinfo=timezone.utc))
+        normalized = oi.normalize_yahoo_chart(payload, 'MU')
         self.assertTrue(any(row['reason'] == 'missing_or_nonpositive_adjusted_ohlc' for row in normalized['rejected']))
-        self.assertEqual(len(normalized['rows']), 179)
+        self.assertEqual(len(normalized['rows']), 180)
+        missing, following = normalized['rows'][170:172]
+        self.assertIsNone(missing['open'])
+        self.assertIsNotNone(missing['close'])
+        derived = {row['date']: row for row in oi.derive_session_returns(normalized['rows'])}
+        self.assertNotIn(missing['date'], derived)
+        self.assertEqual(derived[following['date']]['previousDate'], missing['date'])
+        self.assertAlmostEqual(derived[following['date']]['overnight'], 0.003, places=12)
+        self.assertEqual(len(derived), 178)
+
+    def test_missing_close_preserves_boundary_instead_of_bridging_sessions(self):
+        payload = yahoo_payload(end=datetime(2026, 10, 22, 20, tzinfo=timezone.utc))
+        payload['chart']['result'][0]['indicators']['quote'][0]['close'][170] = None
+        normalized = oi.normalize_yahoo_chart(payload, 'MU')
+        self.assertIsNone(normalized['rows'][170]['close'])
+        derived = {row['date']: row for row in oi.derive_session_returns(normalized['rows'])}
+        self.assertNotIn(normalized['rows'][170]['date'], derived)
+        self.assertNotIn(normalized['rows'][171]['date'], derived)
+        self.assertEqual(derived[normalized['rows'][172]['date']]['previousDate'], normalized['rows'][171]['date'])
+        self.assertEqual(len(derived), 177)
+
+    def test_relative_returns_keep_previous_date_guard_after_missing_open(self):
+        end = datetime(2026, 10, 22, 20, tzinfo=timezone.utc)
+        member = oi.normalize_yahoo_chart(yahoo_payload(missing_open=170, end=end), 'MU')['rows']
+        benchmark = oi.normalize_yahoo_chart(yahoo_payload(symbol='^SOX', end=end), '^SOX')['rows']
+        member_returns = oi.derive_session_returns(member)
+        aligned = oi.residualize(member_returns, oi.derive_session_returns(benchmark))
+        self.assertEqual(len(aligned), 178)
+        self.assertTrue(all(abs(row['overnight']) < 1e-12 for row in aligned))
+        # A genuinely absent benchmark date changes the next return's start;
+        # the existing previousDate guard must still exclude that pair.
+        benchmark.pop(170)
+        mismatched = oi.residualize(member_returns, oi.derive_session_returns(benchmark))
+        self.assertNotIn(member[171]['date'], {row['date'] for row in mismatched})
+        self.assertEqual(len(mismatched), 177)
 
     def test_mismatched_arrays_fail_closed(self):
         payload = yahoo_payload()

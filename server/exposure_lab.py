@@ -653,12 +653,14 @@ def _level_map(contract: dict | None, preferred: tuple[str, ...]) -> dict[str, f
     return out
 
 
-def _return_map(levels: dict[str, float]) -> dict[str, float]:
-    out: dict[str, float] = {}
+def _return_map(levels: dict[str, float]) -> dict[tuple[str, str], float]:
+    # A shared end date does not imply a shared return interval when one source
+    # omits a session. Keep both endpoints so those observations cannot pair.
+    out: dict[tuple[str, str], float] = {}
     dates = sorted(levels)
     for previous, current in zip(dates, dates[1:]):
         if levels[previous] > 0 and levels[current] > 0:
-            out[current] = levels[current] / levels[previous] - 1.0
+            out[(previous, current)] = levels[current] / levels[previous] - 1.0
     return out
 
 
@@ -714,8 +716,8 @@ def _daily_leverage_metrics(
         'trackingResidualAnnualPct': round(residual_vol, 3) if residual_vol is not None else None,
         'empiricalCostGapAnnualPct': round(cost_gap, 3) if cost_gap is not None else None,
         'sampleDays': len(common),
-        'sampleStart': common[0] if common else None,
-        'sampleEnd': common[-1] if common else None,
+        'sampleStart': common[0][1] if common else None,
+        'sampleEnd': common[-1][1] if common else None,
         'quality': (
             ('ready' if len(common) >= 120 else 'partial_scope')
             if total_return_product else 'tracking_only_unadjusted_product'
