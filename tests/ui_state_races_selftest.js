@@ -173,6 +173,7 @@ async function statsCases() {
 
 async function weeklyCases() {
   const h = harness();
+  h.evaluate(parseSource(), 'stock_terminal.html:parseYF');
   h.evaluate(section(html, 'const RANGE_DEFS = [', 'function renderRangeBar()'));
   h.evaluate(section(html, 'function _posPrice(v)', '/**'));
   h.evaluate(section(html, 'function patchTodayDailyBarWithLive(', '/**'));
@@ -201,23 +202,86 @@ async function weeklyCases() {
     assert.equal(data.candles.at(-1).volume, 300000, '原週量必須保留');
     assert.equal(data.candles.slice(-20).reduce((s, c) => s + c.close, 0) / 20, 100.4);
   }
-  const missingDay = fixture();
-  h.scope.applyFreshness(missingDay, daily);
-  assert.equal(missingDay.candles.length, 22, '日線落後時仍補當日日 K');
-  assert.equal(missingDay.candles.at(-1)._synthetic, true);
-  assert.equal(missingDay.candles.at(-1).volume, 100000);
-  const noVolume = fixture();
-  noVolume.candles.at(-1).time = noVolume.meta.regularMarketTime;
+  // PR #219 的真實日 K 日期／close／metadata；OHLC 與量只作明示合成邊界。
+  // 不能把上面的每週一根 fixture 當成日線保全案例，也不複寫 parseYF。
+  const incident = JSON.parse(read('tests/fixtures/加權行情20261016.json'));
+  function dailyData(todayClose = null) {
+    const close = incident.yahoo.close.slice();
+    close[2] = todayClose;
+    return h.scope.parseYF({ chart: { result: [{
+      meta: { ...incident.yahoo.meta }, timestamp: incident.yahoo.timestamp.slice(),
+      indicators: { quote: [{ close, open: close, high: close, low: close,
+        volume: close.map(value => value == null ? null : 100) }] },
+    }] } });
+  }
+  const previousTimezone = process.env.TZ;
+  const originalDate = h.evaluate('Date');
+  try {
+    for (const timezone of ['UTC', 'Pacific/Honolulu']) {
+      process.env.TZ = timezone;
+      for (const receivedAt of ['2026-10-17T06:12:30+08:00', '2026-10-18T06:12:30+08:00']) {
+        const now = Date.parse(receivedAt);
+        h.scope.Date = class extends Date {
+          constructor(...args) { super(...(args.length ? args : [now])); }
+          static now() { return now; }
+        };
+        const missingDay = dailyData();
+        missingDay.meta.fetchedAt = receivedAt;
+        assert.equal(missingDay.candles.length, 2, '正式 parser 省略當日 null close');
+        const prior = JSON.stringify(missingDay.candles);
+        h.scope.applyFreshness(missingDay, daily);
+        assert.equal(missingDay.candles.length, 3, '日線缺當日 K 仍補一根');
+        assert.equal(JSON.stringify(missingDay.candles.slice(0, 2)), prior, '不得改寫前兩個交易日');
+        const added = missingDay.candles.at(-1);
+        assert.equal(added.time, 1792128805, '新棒時間必須是 10/16 來源時間，不是 10/17、10/18 取得時間');
+        assert.equal(added.close, 47111.26);
+        assert.equal(added._synthetic, true);
+        assert.equal(added.volume, 0, '來源未知量不虛構');
+      }
+    }
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+    h.scope.Date = originalDate;
+  }
+  const presentDay = dailyData(47111.26);
+  h.scope.applyFreshness(presentDay, daily);
+  assert.equal(presentDay.candles.length, 3, '當日已存在不得重複追加');
+  assert.equal(presentDay.candles.at(-1).time, 1792112400, '保留當日日 K 的來源起點時間');
+  assert.equal(presentDay.candles.at(-1)._synthetic, undefined);
+
+  const noVolume = dailyData(47111.26);
   noVolume.candles.at(-1).volume = 0;
+  noVolume.meta.regularMarketVolume = 100000;
   h.scope.applyFreshness(noVolume, daily);
-  assert.equal(noVolume.candles.length, 21);
+  assert.equal(noVolume.candles.length, 3);
+  assert.equal(noVolume.candles.at(-1).time, 1792112400, '補量不得搬動成交日期');
   assert.equal(noVolume.candles.at(-1).volume, 100000, '同日日線補量保留');
-  const sameDay = fixture();
-  sameDay.candles.at(-1).time = sameDay.meta.regularMarketTime;
-  sameDay.candles.at(-1).close = 107;
+  const sameDay = dailyData(47110.26);
   h.scope.applyFreshness(sameDay, daily);
-  assert.equal(sameDay.candles.at(-1).close, 108, '同日日線對齊現價保留');
+  assert.equal(sameDay.candles.length, 3);
+  assert.equal(sameDay.candles.at(-1).time, 1792112400);
+  assert.equal(sameDay.candles.at(-1).close, 47111.26, '同日日線對齊現價保留');
   assert.equal(sameDay.candles.at(-1)._livePatched, true);
+
+  for (const override of [
+    { regularMarketTime: null }, { regularMarketPrice: null },
+    { regularMarketTime: 1791939600, fetchedAt: '2026-10-18T06:12:30+08:00' },
+  ]) {
+    const data = dailyData();
+    Object.assign(data.meta, override);
+    const before = JSON.stringify(data.candles);
+    h.scope.applyFreshness(data, daily);
+    assert.equal(JSON.stringify(data.candles), before, '缺來源時間／價格或來源較舊不得合成新日 K');
+  }
+  // 合成前一場分鐘資料，僅驗 interval 邊界，並非實際成交重現。
+  const previousMinute = { candles: ['13:29:00', '13:30:00'].map(time => ({
+    time: Date.parse('2026-10-15T' + time + '+08:00') / 1000,
+    open: 100, high: 100, low: 100, close: 100, volume: 10,
+  })), meta: { regularMarketTime: 1792128805, regularMarketPrice: 101 } };
+  const minuteBefore = JSON.stringify(previousMinute.candles);
+  h.scope.applyFreshness(previousMinute, { interval: '1m' });
+  assert.equal(JSON.stringify(previousMinute.candles), minuteBefore, '前場分鐘資料不能經日線流程追加一根今日 K');
 }
 
 function macroHarness(id = '__TW_RATES__') {
@@ -289,6 +353,45 @@ async function macroCases() {
     assert.equal(valid.state.sym, id);
     valid.calls[1].resolve({ ok: false, status: 503 }); await flush();
     assert.equal(valid.button.disabled, false, '重新載入完成後釋放按鈕');
+  }
+
+  // 市場圖暖路徑之後切回指數：這是完成載入的狀態邊界，不替代標頭計算函式。
+  const incident = JSON.parse(read('tests/fixtures/加權行情20261016.json'));
+  for (const id of ['__TW_RATES__', '__MARGIN_RATIO__']) {
+    for (const sym of ['^TWII', '__TXF__']) {
+      for (const range of ['1d', '6mo']) {
+        for (const completion of ['network', 'http', 'json', 'before-response', 'during-delay']) {
+          const h = macroHarness(id);
+          const refresh = completion === 'before-response' || completion === 'during-delay';
+          const pending = refresh ? h.scope.MarketChart.refresh(id) : h.scope.MarketChart.load(id);
+          if (completion === 'during-delay') {
+            h.calls[0].resolve(response({ ok: true })); await pending;
+          }
+          h.finishEquity();
+          h.state.sym = sym; h.state.range = range;
+          const market = incident.official.quotes[sym].market;
+          h.state.data = { candles: [{ time: 1792026000, close: 46969.87 }],
+            heroPrice: market.price, yesterdayClose: market.referencePrice,
+            marketHeadline: { ...market } };
+          h.state.dataIdentity = { sym, mkt: 'TW', loadSeq: h.scope.__loadSeq };
+          h.add('ci-price').textContent = String(market.price);
+          h.scope.status = 'OK · ' + sym;
+          const capture = () => JSON.stringify({ sym: h.state.sym, mkt: h.state.mkt, range: h.state.range,
+            identity: h.state.dataIdentity, data: h.state.data,
+            price: h.elements.get('ci-price').textContent, status: h.scope.status });
+          const before = capture();
+          if (completion === 'network') h.calls[0].reject(new Error('舊總經請求離線'));
+          if (completion === 'http') h.calls[0].resolve({ ok: false, status: 503 });
+          if (completion === 'json') h.calls[0].resolve({ ok: true, json: async () => { throw new Error('舊總經 JSON 損壞'); } });
+          if (completion === 'before-response') h.calls[0].resolve(response({ ok: true }));
+          if (completion === 'during-delay') await h.fire(600);
+          await pending;
+          assert.equal(capture(), before, `${id} ${completion} 不得改寫 ${sym} ${range} 的價格、前收、日期或期間`);
+          assert.equal(h.loading.style.display, 'none');
+          assert.equal(h.calls.length, 1, '不得重新抓回已離開的總經圖');
+        }
+      }
+    }
   }
 
   // 新更新已佔用共用按鈕時，舊成功／失敗／延遲回呼都不能解除新請求。
