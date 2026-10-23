@@ -2,46 +2,28 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "8765239f701a945c845e56b73f1ec754dce8e185",
+  "baseCommit": "6945c039cb275264544e9a5dc5bd25701f4c9bcb",
   "documentation": [
-    "docs/revision.md"
+    "docs/revision.md",
+    "docs/shared-main-chart-recurrence-8d.md"
   ],
   "cases": [
     {
-      "id": "大盤標頭既有契約",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "移除無呼叫者的 refreshTwIndexCells 後標頭自測不退化",
-      "targets": [
-        "tests/tw_index_day_change_selftest.js"
-      ],
-      "changes": [
-        "src/ui/polish_v3.js",
-        "tests/tw_index_day_change_selftest.js"
-      ],
-      "inputs": [
-        "src/ui/polish_v3.js",
-        "tests/tw_index_day_change_selftest.js"
-      ]
-    },
-    {
-      "id": "打包產物與原始碼一致",
+      "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
-      "timeoutSeconds": 300,
-      "reason": "src 變更後重建 stock_terminal_v2.html",
+      "timeoutSeconds": 600,
+      "reason": "發布狀態只改文件；分享封存掃描",
       "targets": [
-        "tests.test_bundle_fresh",
-        "tests.test_build_reproducibility"
+        "tests.test_dist_scrub"
       ],
       "changes": [
-        "stock_terminal_v2.html"
+        "docs/revision.md",
+        "docs/shared-main-chart-recurrence-8d.md"
       ],
       "inputs": [
-        "build_v2.py",
-        "stock_terminal.html",
-        "stock_terminal_v2.html",
-        "tests/test_build_reproducibility.py",
-        "tests/test_bundle_fresh.py"
+        "docs/revision.md",
+        "docs/shared-main-chart-recurrence-8d.md",
+        "tests/test_dist_scrub.py"
       ]
     }
   ]

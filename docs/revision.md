@@ -1,3 +1,14 @@
+## 2026-10-23 整併大盤 8D 與台指期 8D（交接單第 9 節第 6 項）
+
+- 基底：`6945c039cb275264544e9a5dc5bd25701f4c9bcb`（origin/main）；分支 `claude/consolidate-chart-8d`。實作與合併 SHA 待 PR 合併後補記。
+- 決定：Sam 2026-10-23「整併」。兩份 8D（`docs/大盤當日漲跌8D報告.md`；`AI-Workspace/docs/stock-terminal/台指期重複回歸8D/台指期重複回歸8D報告.md`）是同一個共用主圖流程的兩次發作，共同根因是參考價與當前報價沒有單一契約、測試自行提供正式頁面沒有的 `window.S`，以及前一次 8D 結案範圍不足。
+- 做法：新增 `docs/shared-main-chart-recurrence-8d.md`（依規則 0013 用英文檔名）作為主文件，寫共同範圍、共同根因與流出根因、各項措施的合併與發布狀態、驗證層級與未解事項。**兩份原報告不改寫**，保留當歷史與證據來源；本文件只引用，不複製其證據。
+- 本文件記錄但不新增決定的事項：日線主圖結算價口徑（暫緩）、分鐘級資料來源未補、無頭瀏覽器驗收是否納入日常驗證計畫（仍待 Sam）、Issue #213 維持開啟。
+- 驗證：只改文件；`tests.test_dist_scrub` 通過；文中 PR 合併 SHA 與日期逐項對照 `gh pr view` 與 `docs/revision.md`（#217 合併日以 GitHub 為準：2026-10-16）。
+- 發布狀態：文件變更，不涉及發布。
+
+---
+
 ## 2026-10-23 移除無呼叫者的 refreshTwIndexCells（交接單第 9 節第 3 項）
 
 - 基底：`8765239f701a945c845e56b73f1ec754dce8e185`（origin/main）；分支 `claude/remove-dead-twindex-cells`。實作與合併 SHA 待 PR 合併後補記。
