@@ -65,11 +65,12 @@ def append_jsonl(
                 except (UnicodeError, json.JSONDecodeError):
                     damaged += 1
                     continue
-                tail.append(text)
+                # 二進位讀取會保留既有 CRLF；統一成單一 LF，避免重複壓縮累加 CR。
+                tail.append(text.rstrip('\r\n') + '\n')
         if damaged:
             log_once('trace-recovery:' + os.path.basename(path),
                      f'診斷紀錄含 {damaged} 筆損毀行；壓縮時保留完整 JSON 紀錄')
         tmp = path + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as fh:
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as fh:
             fh.writelines(tail)
         _replace_with_retry(Path(tmp), Path(path))
