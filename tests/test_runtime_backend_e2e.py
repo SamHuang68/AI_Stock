@@ -20,7 +20,13 @@ ROOT = Path(__file__).resolve().parents[1]
 @unittest.skipUnless(os.environ.get('ST_RUNTIME_E2E') == '1',
                      'explicit isolated runtime process acceptance is required')
 class RuntimeBackendProcessTests(unittest.TestCase):
+    def test_real_st_backend_rejects_second_writer_without_stopping_first(self):
+        self._assert_fixture_services(include_wavedeck=False)
+
     def test_real_services_share_fixture_root_and_reject_second_st_writer(self):
+        self._assert_fixture_services(include_wavedeck=True)
+
+    def _assert_fixture_services(self, *, include_wavedeck):
         with tempfile.TemporaryDirectory(prefix='st-runtime-e2e-') as directory:
             base = Path(directory)
             data = base / 'runtime'
@@ -89,6 +95,9 @@ class RuntimeBackendProcessTests(unittest.TestCase):
                 self.assertNotEqual(second.wait(timeout=15), 0)
                 self.assertIn('another process owns', second_log.read_text(encoding='utf-8', errors='replace'))
                 self.assertIsNone(st.poll(), 'rejected contender must not stop the existing fixture writer')
+                self.assertTrue((data / 'runtime_locks/st-backend.writer.lock').is_file())
+                if not include_wavedeck:
+                    return
                 wd_port = port()
                 wd, wd_log = start('wavedeck/run.py', dict(environment, WAVEDECK_PORT=str(wd_port)), 'wd')
                 status = health(wd, wd_log, wd_port, '/health')

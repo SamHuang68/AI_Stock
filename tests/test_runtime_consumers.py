@@ -159,6 +159,63 @@ for name in ('datastore', 'alert_daemon', 'stock_signals_routes', 'feature_setti
 assert not list(DATA.rglob('*.db'))
 ''')
 
+    def test_override_import_never_connects_or_acquires_a_lease(self):
+        self.run_consumer('''
+sys.path.insert(0, str(ROOT))
+before = {path.relative_to(DATA) for path in DATA.rglob('*')}
+with patch.object(sqlite3, 'connect', side_effect=AssertionError('匯入不得開啟 SQLite')):
+    for name in ('override_alpha', 'server.override_alpha'):
+        module = importlib.import_module(name)
+        assert module.DB == DATA / 'override_alpha.db'
+assert not getattr(sys, '_st_runtime_leases', {})
+assert {path.relative_to(DATA) for path in DATA.rglob('*')} == before
+assert not (DATA / 'override_alpha.db').exists()
+''')
+
+    def test_override_business_calls_require_lease_and_existing_database(self):
+        self.run_consumer('''
+import override_alpha as alpha
+from runtime_storage import bootstrap_runtime, StorageOwnershipError
+calls = (alpha.init_db, lambda: alpha.log_event({'note': '拒絕'}),
+         alpha.recent, alpha.summary_for_review)
+def refused():
+    for call in calls:
+        try:
+            call()
+        except StorageOwnershipError:
+            continue
+        raise AssertionError('無 lease 或缺資料庫時仍允許業務呼叫')
+refused()
+assert not alpha.DB.exists()
+with bootstrap_runtime(code_root=ROOT):
+    refused()
+    assert not alpha.DB.exists()
+    alpha.DB.touch()  # 僅建立本案例自己的小型 SQLite fixture。
+    result = alpha.log_event({'style': 2, 'delever': True, 'note': '合成覆寫',
+                              'source': 'fixture', 'meta': {'score': 3.0}})
+    assert result['ok'] and result['id'] == 1
+    alpha.init_db()
+    rows = alpha.recent()
+    assert len(rows) == 1 and rows[0]['note'] == '合成覆寫'
+    assert rows[0]['delever'] is True and rows[0]['score'] == 3.0
+    assert '合成覆寫' in alpha.summary_for_review()
+refused()
+with closing(sqlite3.connect(alpha.DB.as_uri() + '?mode=ro', uri=True)) as connection:
+    assert connection.execute('SELECT COUNT(*) FROM override_log').fetchone()[0] == 1
+''')
+
+    def test_override_first_read_initializes_only_with_lease(self):
+        self.run_consumer('''
+import override_alpha as alpha
+from runtime_storage import bootstrap_runtime
+alpha.DB.touch()
+with bootstrap_runtime(code_root=ROOT):
+    assert alpha.recent() == []
+    assert alpha.summary_for_review() == '尚無覆寫紀錄。'
+with closing(sqlite3.connect(alpha.DB.as_uri() + '?mode=ro', uri=True)) as connection:
+    assert connection.execute("SELECT name FROM sqlite_master WHERE name='override_log'").fetchone()
+''')
+
     def test_real_storage_roundtrip_and_chip_ledger_use_one_root(self):
         self.run_consumer('''
 from runtime_storage import bootstrap_runtime
@@ -267,6 +324,63 @@ with patch.dict(os.environ, {'ST_AI_TRACE_PATH': 'logs/fixture-ai.jsonl'}):
     assert ai_local.TRACE_PATH == ROOT / 'logs/fixture-ai.jsonl'
 assert not base.exists(), '純路徑解析不得建立 legacy 目錄'
 ''', fixture=False)
+
+    def test_standalone_reports_refuse_before_source_config_or_delivery(self):
+        self.run_consumer('''
+from contextlib import ExitStack
+from data_paths import binding_for
+sys.path.insert(0, str(ROOT))
+import alert_daemon, etf_report_email, daily_morning_brief
+assert binding_for().mode == 'fixture'
+with ExitStack() as stack:
+    guarded = [(etf_report_email, 'fetch_delta'), (daily_morning_brief, '_pct_daily'),
+               (daily_morning_brief, '_txf'), (alert_daemon, 'load_config'),
+               (alert_daemon, 'push_email')]
+    calls = [stack.enter_context(patch.object(module, name, side_effect=AssertionError(name)))
+             for module, name in guarded]
+    assert etf_report_email.main() == 2
+    assert daily_morning_brief.main() == 2
+    assert all(call.call_count == 0 for call in calls)
+assert not (DATA / 'alert_config.json').exists()
+assert not (DATA / 'logs').exists()
+''')
+
+    def test_legacy_standalone_reports_keep_existing_flow_offline(self):
+        self.run_consumer('''
+from contextlib import ExitStack
+from data_paths import binding_for
+sys.path.insert(0, str(ROOT))
+import alert_daemon, etf_report_email, daily_morning_brief
+assert binding_for().mode == 'legacy'
+with ExitStack() as stack:
+    load = stack.enter_context(patch.object(alert_daemon, 'load_config', return_value={}))
+    send = stack.enter_context(patch.object(alert_daemon, 'push_email', return_value=(True, 'fixture')))
+    fetch = stack.enter_context(patch.object(etf_report_email, 'fetch_delta', return_value={'etfs': []}))
+    stack.enter_context(patch.object(etf_report_email.etf_report, 'build_report_html', return_value=('合成', '<p>合成</p>')))
+    stack.enter_context(patch.object(etf_report_email.etf_report, 'build_report_text', return_value='合成'))
+    prices = stack.enter_context(patch.object(daily_morning_brief, '_pct_daily', return_value=(100.0, 1.0)))
+    futures = stack.enter_context(patch.object(daily_morning_brief, '_txf', return_value=(20000.0, 1.0, 2.0)))
+    assert etf_report_email.main() == 0
+    assert daily_morning_brief.main() == 0
+    assert fetch.call_count == 1 and prices.call_count == len(daily_morning_brief.DRIVERS) + 2
+    assert futures.call_count == 1 and load.call_count == 2 and send.call_count == 2
+''', fixture=False)
+
+    def test_batch_preflight_precedes_file_side_effects(self):
+        # 僅核對 BAT 入口契約，不啟動 BAT、排程、檔案清理或寄信。
+        self.assertTrue((ROOT / 'scripts/assert_standalone_runtime.ps1').is_file())
+        for name in ('daily_chip.bat', 'daily_morning_brief.bat'):
+            with self.subTest(name=name):
+                source = (ROOT / 'scripts' / name).read_text(encoding='utf-8')
+                body, refused = source.split(':bound_runtime_refused', 1)
+                first_effect = min(body.index('mkdir'), body.index('>>'), body.index('forfiles'))
+                self.assertLess(body.index('assert_standalone_runtime.ps1'), first_effect)
+                self.assertLess(body.index('if errorlevel 1 goto bound_runtime_refused'), first_effect)
+                for variable in ('ST_DATA_BINDING', 'ST_DATA_ROOT', 'ST_RUNTIME_ROLE'):
+                    self.assertLess(body.index(f'if defined {variable} goto bound_runtime_refused'), first_effect)
+                self.assertTrue(body.rstrip().endswith('exit /b %RC%'))
+                self.assertTrue(refused.rstrip().endswith('exit /b 2'))
+                self.assertFalse(any(token in refused for token in ('mkdir', '>>', 'forfiles', 'python ')))
 
 
 if __name__ == '__main__':

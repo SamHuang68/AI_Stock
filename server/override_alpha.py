@@ -67,10 +67,13 @@ def init_db() -> None:
             c.commit()
 
 
-init_db()
+if data_paths.binding_for().mode == 'legacy':
+    init_db()
 
 
 def log_event(body: dict[str, Any]) -> dict[str, Any]:
+    if data_paths.binding_for().mode != 'legacy':
+        init_db()
     body = body if isinstance(body, dict) else {}
     meta = body.get('meta') if isinstance(body.get('meta'), dict) else {}
     row = {
@@ -111,6 +114,8 @@ def log_event(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def recent(limit: int = 40) -> list[dict[str, Any]]:
+    if data_paths.binding_for().mode != 'legacy':
+        init_db()
     lim = max(1, min(200, int(limit)))
     with _lock:
         with closing(_conn()) as c:

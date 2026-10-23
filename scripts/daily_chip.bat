@@ -6,6 +6,11 @@ REM  Logs go to logs\chip_YYYY-MM-DD.log
 REM ===========================================================
 setlocal enabledelayedexpansion
 chcp 65001 > nul
+if defined ST_DATA_BINDING goto bound_runtime_refused
+if defined ST_DATA_ROOT goto bound_runtime_refused
+if defined ST_RUNTIME_ROLE goto bound_runtime_refused
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0assert_standalone_runtime.ps1" -CodeRoot "%~dp0.."
+if errorlevel 1 goto bound_runtime_refused
 cd /d "%~dp0.."
 
 if not exist "logs" mkdir "logs"
@@ -22,3 +27,7 @@ REM Cleanup logs older than 30 days
 forfiles /p "logs" /m "chip_*.log" /d -30 /c "cmd /c del @path" 2>nul
 
 exit /b %RC%
+
+:bound_runtime_refused
+echo [拒絕] 綁定資料模式不允許獨立籌碼更新；未建立或清理日誌。
+exit /b 2

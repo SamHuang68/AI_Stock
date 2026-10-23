@@ -171,6 +171,26 @@ def _target_namespace(path: Path, binding) -> str:
     raise StorageOwnershipError('write is outside the bound runtime data root')
 
 
+def _is_existing_backend_credential(path: Path, binding) -> bool:
+    """Keep the two existing credential stores in code/data, not runtime data.
+
+    This is an exact-file compatibility rule, not permission for code/data.
+    The caller must still hold the ST writer lease, and the normal link checks
+    apply to the file and all parents before this predicate is evaluated.
+    """
+    if binding.mode != 'external' or not paths._same(path.parent, binding.code_root / 'data'):
+        return False
+    for protected in paths.protected_roots(binding):
+        if paths._inside(path, protected) or paths._inside(protected, path):
+            return False
+    name = path.name.casefold()
+    for base in ('ai_key.bin', 'alert_secrets.bin'):
+        if name in {base, base + '.bak'} or re.fullmatch(
+                r'\.' + re.escape(base) + r'(?:\.bak)?\.[a-z0-9_]{8}\.tmp', name):
+            return True
+    return False
+
+
 def assert_write_allowed(path, *, namespace='st', must_exist=False, binding=None) -> None:
     bound = binding if binding is not None else paths.binding_for()
     target = Path(os.path.abspath(path))
@@ -194,15 +214,17 @@ def assert_write_allowed(path, *, namespace='st', must_exist=False, binding=None
         if must_exist and not target.is_file():
             raise StorageOwnershipError('required authentication store does not exist')
         return
-    actual = _target_namespace(target, bound)
+    credential = namespace is None and _is_existing_backend_credential(target, bound)
+    actual = 'st' if credential else _target_namespace(target, bound)
     requested = actual if namespace is None else namespace
     if requested not in {'st', 'wavedeck'} or requested != actual:
         raise StorageOwnershipError('cross-namespace write refused')
-    relative = target.relative_to(bound.data_root)
-    if not relative.parts or relative.parts[0].casefold() in {paths.IDENTITY_FILE, paths.CUTOVER_FILE, paths.FIXTURE_FILE}:
-        raise StorageOwnershipError('runtime identity and cutover metadata are read-only')
-    if relative.parts[0].casefold() == 'runtime_locks' and target.name.casefold().endswith('.writer.lock'):
-        raise StorageOwnershipError('writer lease files are owned by bootstrap')
+    if not credential:
+        relative = target.relative_to(bound.data_root)
+        if not relative.parts or relative.parts[0].casefold() in {paths.IDENTITY_FILE, paths.CUTOVER_FILE, paths.FIXTURE_FILE}:
+            raise StorageOwnershipError('runtime identity and cutover metadata are read-only')
+        if relative.parts[0].casefold() == 'runtime_locks' and target.name.casefold().endswith('.writer.lock'):
+            raise StorageOwnershipError('writer lease files are owned by bootstrap')
     lease = sys._st_runtime_leases.get(requested)
     if lease is None or lease.closed or lease.pid != os.getpid() or lease.binding != bound or (lease.handle is not None and lease.handle.closed):
         raise StorageOwnershipError('no writer lease; use the managed backend queue or an isolated fixture bootstrap')

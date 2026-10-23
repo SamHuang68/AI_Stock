@@ -73,6 +73,10 @@ def to_text(rows, etf_count, date):
 
 
 def main():
+    from data_paths import binding_for
+    if binding_for().mode != 'legacy':
+        print('綁定資料模式不允許獨立寄送 ETF 報表；請使用已登記後端的 POST /etf-report/email。', file=sys.stderr)
+        return 2
     try:
         delta = fetch_delta()
     except Exception as e:

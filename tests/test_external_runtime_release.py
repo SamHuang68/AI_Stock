@@ -48,7 +48,8 @@ class ExternalRuntimeReleaseTests(unittest.TestCase):
             self.assertEqual({path.name: path.read_bytes() for path in runtime.iterdir()}, before)
 
     def test_legacy_local_cannot_sync_from_an_external_private_web_installation(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+        # Keep Path.home() meaningful without inheriting the user's environment.
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'HOME': tmp, 'USERPROFILE': tmp}, clear=True):
             root = Path(tmp).resolve()
             source, _, _ = fixture(root)
             local_install = root / 'local'
@@ -127,7 +128,7 @@ class ExternalRuntimeReleaseTests(unittest.TestCase):
             self.assertFalse(recovery.exists())
 
     def test_external_local_sync_does_not_copy_or_backup_data(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'HOME': tmp, 'USERPROFILE': tmp}, clear=True):
             root = Path(tmp).resolve()
             config = {'storageMode': 'external', 'dataBinding': str(root / 'binding.json')}
             with patch.object(local, 'shared_client_status', return_value={'storageMode': 'external'}) as status, \

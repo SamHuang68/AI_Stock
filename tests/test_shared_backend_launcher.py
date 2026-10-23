@@ -20,7 +20,109 @@ import private_web_gateway as gateway
 from test_external_runtime_release import fixture, write
 
 
+def gateway_settings(code):
+    return SimpleNamespace(
+        access_request_path=code / 'data' / 'private_web_access_requests.json',
+        audit_path=code / 'logs' / 'private_web_audit.jsonl',
+        client_trace_path=code / 'logs' / 'private_web_client.jsonl')
+
+
 class SharedBackendLauncherTests(unittest.TestCase):
+    def test_external_gateway_startup_rejects_protected_outputs_before_writing(self):
+        fields = ('access_request_path', 'audit_path', 'client_trace_path', 'pid', 'startup')
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+            install, runtime, recovery = fixture(Path(tmp).resolve())
+            code = install / 'current'
+            write(code / 'runtime_storage_capability.json', {'schemaVersion': 1,
+                  'capabilityVersion': 1, 'storageModes': ['external']})
+            write(recovery / 'sentinel.json', {'sentinel': 'recovery'})
+            sentinels = (runtime / 'business.json', recovery / 'sentinel.json')
+            before = {path: path.read_bytes() for path in sentinels}
+            targets = (*sentinels, runtime, recovery, runtime.parent)
+            for field in fields:
+                for target in targets:
+                    with self.subTest(field=field, target=target.name):
+                        settings = gateway_settings(code)
+                        env = {}
+                        startup = code / 'logs' / 'private_web_gateway_startup.jsonl'
+                        if field == 'pid':
+                            env['ST_WEB_PID_PATH'] = str(target)
+                        elif field == 'startup':
+                            startup = target
+                        else:
+                            setattr(settings, field, target)
+                        with patch.object(gateway, 'ROOT', code), \
+                             patch.object(gateway, 'STARTUP_TRACE', startup), \
+                             patch.dict(os.environ, env), \
+                             patch.object(gateway.Settings, 'load', return_value=settings), \
+                             patch.object(gateway, '_serve_gateway') as serve:
+                            with self.assertRaisesRegex(RuntimeError, 'protected'):
+                                gateway.main()
+                            serve.assert_not_called()
+                        self.assertEqual({path: path.read_bytes() for path in sentinels}, before)
+                        self.assertFalse((code / 'data').exists())
+                        self.assertFalse((code / 'logs').exists())
+
+    def test_external_gateway_startup_rejects_hard_link_output_aliases(self):
+        for field in ('access_request_path', 'audit_path', 'client_trace_path', 'pid', 'startup'):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp, \
+                 patch.dict(os.environ, {}, clear=True):
+                install, runtime, _ = fixture(Path(tmp).resolve())
+                code = install / 'current'
+                write(code / 'runtime_storage_capability.json', {'schemaVersion': 1,
+                      'capabilityVersion': 1, 'storageModes': ['external']})
+                sentinel = runtime / 'unregistered.json'
+                write(sentinel, {'sentinel': 'keep'})
+                before = sentinel.read_bytes()
+                alias = code / 'output.json'
+                os.link(sentinel, alias)
+                settings = gateway_settings(code)
+                env = {}
+                startup = code / 'logs' / 'private_web_gateway_startup.jsonl'
+                if field == 'pid':
+                    env['ST_WEB_PID_PATH'] = str(alias)
+                elif field == 'startup':
+                    startup = alias
+                else:
+                    setattr(settings, field, alias)
+                with patch.object(gateway, 'ROOT', code), \
+                     patch.object(gateway, 'STARTUP_TRACE', startup), \
+                     patch.dict(os.environ, env), \
+                     patch.object(gateway.Settings, 'load', return_value=settings), \
+                     patch.object(gateway, '_serve_gateway') as serve:
+                    with self.assertRaisesRegex(RuntimeError, 'hard-link'):
+                        gateway.main()
+                    serve.assert_not_called()
+                self.assertEqual(sentinel.read_bytes(), before)
+                self.assertFalse((code / 'data').exists())
+                self.assertFalse((code / 'logs').exists())
+
+    def test_external_host_rejects_log_and_pid_aliases_before_probe_or_spawn(self):
+        outputs = ('logs/private_web_host.jsonl', 'logs/private_web_backend.log',
+                   'logs/private_web_gateway.log', 'data/private_web_host.pid')
+        for relative in outputs:
+            with self.subTest(output=relative), tempfile.TemporaryDirectory() as tmp, \
+                 patch.dict(os.environ, {}, clear=True):
+                install, runtime, _ = fixture(Path(tmp).resolve())
+                code = install / 'current'
+                (code / 'server').mkdir(parents=True)
+                shutil.copy2(ROOT / 'server/data_paths.py', code / 'server/data_paths.py')
+                write(code / 'runtime_storage_capability.json', {'schemaVersion': 1,
+                      'capabilityVersion': 1, 'storageModes': ['external']})
+                sentinel = runtime / 'unregistered.json'
+                write(sentinel, {'sentinel': 'keep'})
+                before = sentinel.read_bytes()
+                alias = code / relative
+                alias.parent.mkdir(parents=True, exist_ok=True)
+                os.link(sentinel, alias)
+                with patch.object(host, 'ROOT', code), patch.object(host, 'LOGS', code / 'logs'), \
+                     patch.object(host, '_health_payload') as probe, patch.object(host, '_spawn') as spawn:
+                    with self.assertRaisesRegex(RuntimeError, 'hard-link'):
+                        host.run(backend_port=18435, gateway_port=18434, max_restarts=1)
+                    probe.assert_not_called()
+                    spawn.assert_not_called()
+                self.assertEqual(sentinel.read_bytes(), before)
+
     def test_external_host_requires_installation_sidecar_for_gateway(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
             root = Path(tmp).resolve()
@@ -46,8 +148,11 @@ class SharedBackendLauncherTests(unittest.TestCase):
             write(code / 'runtime_storage_capability.json', {'schemaVersion': 1,
                   'capabilityVersion': 1, 'storageModes': ['external']})
             auth = code / 'data' / 'private_web_access_requests.json'
-            with patch.object(gateway, 'ROOT', code):
-                lease = gateway._gateway_auth_bootstrap(SimpleNamespace(access_request_path=auth))
+            settings = gateway_settings(code)
+            with patch.object(gateway, 'ROOT', code), \
+                 patch.object(gateway, 'STARTUP_TRACE', code / 'logs' / 'private_web_gateway_startup.jsonl'):
+                lease = gateway._gateway_auth_bootstrap(settings)
+            self.assertFalse((code / 'logs').exists())
             try:
                 store = gateway.AccessRequestStore(auth)
                 row, created = store.create(display_name='Fixture User', contact_email='fixture@example.com',
@@ -128,14 +233,22 @@ class SharedBackendLauncherTests(unittest.TestCase):
         response = Mock(status=200)
         response.read.return_value = json.dumps(upstream).encode()
         handler = gateway.Handler.__new__(gateway.Handler)
-        handler.settings = SimpleNamespace(upstream_host='127.0.0.1', upstream_port=1,
-                                           mode='isolated-host', instance_id='fixture')
+        handler.server = SimpleNamespace(settings=SimpleNamespace(
+            upstream_host='127.0.0.1', upstream_port=1,
+            mode='isolated-host', instance_id='fixture'))
         handler._json = Mock()
         with patch.object(gateway.http.client, 'HTTPConnection') as connection:
             connection.return_value.getresponse.return_value = response
             handler._gateway_health()
         payload = handler._json.call_args.args[1]
-        self.assertEqual(payload['runtime']['dataRootId'], upstream['dataRootId'])
+        self.assertIs(payload['ok'], True)
+        self.assertIs(payload['upstream'], True)
+        self.assertEqual(payload['gateway'], 'private-web')
+        self.assertEqual(payload['mode'], 'isolated-host')
+        self.assertEqual(payload['instance'], 'fixture')
+        self.assertEqual(payload['runtime'], {
+            'dataRootId': upstream['dataRootId'], 'storageMode': 'external',
+            'runtimeRole': 'backend', 'capabilityVersion': 1, 'runtimeCommit': 'a' * 40})
         self.assertNotIn('secret', json.dumps(payload))
         self.assertEqual(payload['capabilities'], {'wavedeck': False, 'remoteTrading': False})
 
