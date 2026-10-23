@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
 import stock_signals as ss
 import datastore
+import chip_history_tracker
 import 個股資料品質 as quality
 import 個股還原研究 as adjusted
 import 每日個股留存 as daily
@@ -265,7 +266,7 @@ class AdjustmentTests(unittest.TestCase):
                     'rows': [(stamp - 86400, 9, 9, 9, 9, 1), (stamp + 3600, 11, 11, 11, 11, 1),
                              (stamp + 86400, 12, 12, 12, 12, 1)]}
             with patch.object(datastore, 'update', return_value=0), patch.object(datastore, 'fetch_yahoo_daily', return_value=pack) as fetch, \
-                    patch.object(updater.tracker, 'CHIP_HISTORY_PATH', str(Path(tmp) / 'chip_history')), redirect_stdout(io.StringIO()):
+                    patch.object(chip_history_tracker, 'CHIP_HISTORY_PATH', str(Path(tmp) / 'chip_history')), redirect_stdout(io.StringIO()):
                 code = updater.main(['--start', '2026-09-27', '--end', '2026-09-27', '--data-dir', tmp, '--adjustments'])
             # 首存 10 與來源 11 不相容：追加能力保留，但不能把下載成功誤報為研究可用。
             self.assertEqual(code, 1)

@@ -33,6 +33,26 @@ class RuntimePackagePolicyTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
+    def test_regular_file_is_checked_without_directory_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / '.private_web_release.json'
+            target.write_bytes(b'{}')
+            with patch.object(policy.os, 'walk', side_effect=AssertionError('一般檔案不可下降列舉')) as walk:
+                policy.assert_safe_tree(target)
+            walk.assert_not_called()
+            self.assertEqual(target.read_bytes(), b'{}')
+
+    def test_single_protected_file_is_rejected_before_directory_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'data' / 'runtime' / 'sentinel.json'
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b'{}')
+            with patch.object(policy.os, 'walk') as walk:
+                with self.assertRaisesRegex(RuntimeError, 'protected'):
+                    policy.assert_safe_tree(target)
+            walk.assert_not_called()
+            self.assertEqual(target.read_bytes(), b'{}')
+
     def test_windows_reparse_attribute_is_rejected_before_traversal(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / 'junction'

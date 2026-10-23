@@ -111,9 +111,13 @@ class 發布完整性測試(unittest.TestCase):
         manifest['commit'] = commit
         manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
         (staged / 'server/server.py').write_text('變更', encoding='utf-8')
-        with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])):
+        with patch.object(release, 'resolve_commit', return_value=(commit, commit[:12])), \
+                patch.object(release, '_run') as run:
+            run.return_value.stdout = 'server/server.py\0'
             with self.assertRaisesRegex(RuntimeError, '內容與受測版本不符'):
                 release.stage_release(self.root, ref=commit)
+            run.assert_called_once_with(['git', 'ls-tree', '-r', '--name-only', '-z', commit],
+                                        cwd=release.ROOT, capture=True)
 
     def test_回復版本保留新寫入的執行期資料(self):
         release.promote_release(self.root, release_id='abc123', approved=True)

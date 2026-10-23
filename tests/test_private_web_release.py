@@ -394,9 +394,11 @@ class PrivateWebReleaseTests(unittest.TestCase):
         with patch.object(release, 'resolve_commit', return_value=(commit, 'abc123')), \
                 patch.object(release, '_run') as run, \
                 patch.object(release, '_validation_helpers') as helpers:
+            run.return_value.stdout = 'server/server.py\0'
             result = release.stage_release(self.install_root, ref=commit)
         self.assertTrue(os.path.samefile(result, staged))
-        run.assert_not_called()
+        run.assert_called_once_with(['git', 'ls-tree', '-r', '--name-only', '-z', commit],
+                                    cwd=release.ROOT, capture=True)
         helpers.assert_not_called()
 
     def test_新收據stage的CLI發布不需要驗證模組(self):
