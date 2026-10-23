@@ -23,9 +23,13 @@ _SCRIPT_DIR = str(Path(__file__).resolve().parent)
 sys.path = [str(ROOT)] + [p for p in sys.path if p not in ("", ".", _SCRIPT_DIR)]
 
 from server.程序單例 import acquire as acquire_instance  # noqa: E402
+from runtime_paths import BINDING, bootstrap, runtime_data, guard_write, identity, backend_url
 
 # 必須早於 audit／engine／state 的匯入；RUNTIME 在模組載入時就會讀寫資料。
-_INSTANCE_LOCK = acquire_instance(ROOT / "data")
+_INSTANCE_LOCK = acquire_instance(ROOT / "data") if BINDING.mode == "legacy" else bootstrap()
+# Set the registered backend before importing any ST-facing modules.
+if BINDING.mode != "legacy":
+    os.environ["ST_URL"] = backend_url()
 
 from server import audit  # noqa: E402
 from server.engine import (  # noqa: E402
@@ -77,7 +81,7 @@ PORT_FALLBACKS = [
     38433,
     8765,
 ]
-PORT_FILE = ROOT / "data" / "wavedeck.port"
+PORT_FILE = runtime_data("wavedeck.port")
 
 
 def _boot_sync_config() -> None:
@@ -91,6 +95,8 @@ def _boot_sync_config() -> None:
             account={"broker_api": kind},
         )
     except Exception as exc:
+        if BINDING.mode != "legacy":
+            raise
         sys.stderr.write(f"[wavedeck] boot config sync skipped: {exc}\n")
 
 
@@ -254,6 +260,8 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "service": "WaveDeck",
                     "baseDir": str(ROOT),
+                    "dataDir": str(runtime_data()),
+                    **identity(),
                     "pythonExe": sys.executable,
                     "pid": os.getpid(),
                     "port": self.server.server_port,
@@ -281,6 +289,9 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/llm_busy":
             try:
+                if BINDING.mode != "legacy":
+                    from server.gate_bridge import request_gate
+                    return _json(self, 200, request_gate())
                 from pathlib import Path as _P
 
                 _root = _P(__file__).resolve().parents[2]
@@ -290,6 +301,8 @@ class Handler(BaseHTTPRequestHandler):
 
                 return _json(self, 200, lg.status())
             except Exception as exc:
+                if BINDING.mode != "legacy":
+                    return _json(self, 503, {"ok": False, "error": str(exc), **identity()})
                 return _json(self, 200, {"ok": True, "held": False, "error": str(exc)})
         if path == "/api/state":
             return _json(self, 200, {"ok": True, "state": RUNTIME.snapshot()})
@@ -486,9 +499,12 @@ def _bind_server() -> tuple[ThreadingHTTPServer, int]:
 
 def _write_port_file(port: int) -> None:
     try:
+        guard_write(PORT_FILE)
         PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
         PORT_FILE.write_text(str(port), encoding="utf-8")
     except Exception as exc:
+        if BINDING.mode != "legacy":
+            raise
         sys.stderr.write(f"[wavedeck] port file skip: {exc}\n")
 
 

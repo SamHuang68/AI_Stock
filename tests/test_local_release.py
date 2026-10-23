@@ -27,7 +27,9 @@ def stage(source, commit):
     for relative in release.REQUIRED_RELEASE_FILES:
         write(tree / relative)
     for relative in ('scripts/local_release.py', 'scripts/start_local.ps1',
-                     'scripts/private_web_release.py', 'server/daemon_lock.py'):
+                     'scripts/private_web_release.py', 'scripts/runtime_release_policy.py',
+                     'server/daemon_lock.py', 'server/data_paths.py', 'server/runtime_storage.py',
+                     'runtime_storage_capability.json'):
         (tree / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, tree / relative)
     write(tree / 'data/public.csv', '公開種子')

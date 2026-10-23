@@ -33,9 +33,14 @@ except ImportError:
     from http_boundary import BodyReadError, read_json_body
     from deadline import BoundedExecutor, Deadline
 
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
-WATCHLIST_FILE = os.path.join(_BASE, 'data', 'stock_signal_watchlist.json')
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
+WATCHLIST_FILE = str(data_paths.data_path('stock_signal_watchlist.json', code_root=_BASE))
 
 _SYM_RE = re.compile(r'^[A-Z0-9^][A-Z0-9.\-^]{0,14}$')
 MAX_BATCH = 40

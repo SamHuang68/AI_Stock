@@ -2,6 +2,11 @@
 import json
 import sqlite3
 from contextlib import closing
+
+if __package__:
+    from .runtime_storage import assert_write_allowed
+else:
+    from runtime_storage import assert_write_allowed
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -159,6 +164,7 @@ def collect_inventory(conn, now):
 
 
 def save_report(path, report, *, nightly_day=None):
+    assert_write_allowed(path, must_exist=True)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     # 僅以可比較的證據去重；每次檢查時間另外保存，不覆寫既有報告。
     stable = {k: report.get(k) for k in ('version', 'sessionDate', 'scheduledDay', 'execution', 'checks', 'constraints',

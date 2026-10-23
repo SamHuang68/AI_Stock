@@ -50,8 +50,10 @@ _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode    = ssl.CERT_NONE
 
 # ── 路徑 ──────────────────────────────────────────────────────────
+import data_paths
+
 SCRIPT_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CATALOG_FILE = os.path.join(SCRIPT_DIR, 'data', 'etf_catalog.json')
+CATALOG_FILE = str(data_paths.data_path('etf_catalog.json', code_root=SCRIPT_DIR))
 
 # ── ETFS 觀測池：從 etf_catalog.json 動態載入 enabled=true 的 ETF ─
 def load_catalog():
@@ -101,6 +103,29 @@ def _source_event(event, **fields):
     if trace:
         trace.record(event, code=getattr(_request_context, 'code', None), **fields)
 
+
+def _remaining(deadline_monotonic):
+    if deadline_monotonic is None:
+        return TIMEOUT
+    remaining = deadline_monotonic - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('ETF tracker deadline exceeded')
+    return remaining
+
+
+def _read_response(resp, deadline_monotonic):
+    if deadline_monotonic is None:
+        return resp.read()
+    chunks = []
+    read = getattr(resp, 'read1', None) or resp.read
+    while True:
+        _remaining(deadline_monotonic)
+        chunk = read(64 * 1024)
+        _remaining(deadline_monotonic)
+        if not chunk:
+            return b''.join(chunks)
+        chunks.append(chunk)
+
 # ── HTTP 標頭：模擬瀏覽器，加 Accept-Encoding 自動處理 gzip ──────
 HEADERS = {
     'User-Agent':      ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -119,12 +144,14 @@ def http_get(url: str, referer: str = '') -> str | None:
     headers = dict(HEADERS)
     if referer:
         headers['Referer'] = referer
+    deadline = getattr(_request_context, 'deadline', None)
     for attempt in range(RETRY_TIMES):
+        _remaining(deadline)
         started = time.monotonic()
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
-                raw = resp.read()
+            with urllib.request.urlopen(req, timeout=min(TIMEOUT, _remaining(deadline)), context=_SSL_CTX) as resp:
+                raw = _read_response(resp, deadline)
                 if resp.headers.get('Content-Encoding') == 'gzip':
                     raw = gzip.decompress(raw)
                 _source_event('source_response', url=url, attempt=attempt + 1,
@@ -142,11 +169,16 @@ def http_get(url: str, referer: str = '') -> str | None:
                           error=type(e).__name__)
             if e.code in (404, 410):
                 return None
-            time.sleep(RETRY_DELAY)
+            time.sleep(min(RETRY_DELAY, _remaining(deadline)))
+        except TimeoutError:
+            if deadline is not None and deadline <= time.monotonic():
+                raise
+            _source_event('source_error', url=url, attempt=attempt + 1, error='TimeoutError')
+            time.sleep(min(RETRY_DELAY, _remaining(deadline)))
         except Exception as exc:
             _source_event('source_error', url=url, attempt=attempt + 1,
                           error=type(exc).__name__)
-            time.sleep(RETRY_DELAY)
+            time.sleep(min(RETRY_DELAY, _remaining(deadline)))
     return None
 
 
@@ -360,18 +392,20 @@ def _previous_snapshot_etf_count(history_dir: str, out_file: str) -> int:
     return 0
 
 
-def run(target_date: datetime.date, *, run_id=None) -> bool:
+def run(target_date: datetime.date, *, run_id=None, deadline_monotonic=None) -> bool:
     trace = UpdateTrace(run_id or os.environ.get('ST_ETF_RUN_ID'))
     trace.record('command_received', targetDate=target_date.isoformat(), expectedCount=len(ETFS))
     try:
-        return _run(target_date, trace)
+        _remaining(deadline_monotonic)
+        return _run(target_date, trace, deadline_monotonic=deadline_monotonic)
     except Exception as exc:
-        trace.finish(accepted=False, state='error', targetDate=target_date.isoformat(),
+        trace.finish(accepted=False, state='timeout' if isinstance(exc, TimeoutError) else 'error', targetDate=target_date.isoformat(),
                      message='更新發生例外，原快照保留。', error=type(exc).__name__)
         raise
 
 
-def _run(target_date: datetime.date, trace) -> bool:
+def _run(target_date: datetime.date, trace, *, deadline_monotonic=None) -> bool:
+    _remaining(deadline_monotonic)
     history_dir = str(etf_paths.resolve_history_dir(create=True))
     date_str = target_date.strftime('%Y-%m-%d')
     out_file = os.path.join(history_dir, f'top10_active_etf_holdings_{date_str}.json')
@@ -430,7 +464,10 @@ def _run(target_date: datetime.date, trace) -> bool:
     def worker(item):
         etf_id, (display_code, name) = item
         _request_context.trace, _request_context.code = trace, display_code
+        _request_context.deadline = deadline_monotonic
+        _remaining(deadline_monotonic)
         holdings, data_date, source = fetch_one(etf_id, target_date)
+        _remaining(deadline_monotonic)
         trace.record('etf_result', code=display_code, providerDate=data_date, source=source,
                      rows=len(holdings or []), state='received' if holdings else 'no_parsed_holdings')
         if holdings:
@@ -491,6 +528,7 @@ def _run(target_date: datetime.date, trace) -> bool:
                         'rows': len(result[code]['holdings'])} for code in succeeded_codes},
     }
     trace.record('candidate_checked', **diagnostics)
+    _remaining(deadline_monotonic)
     if not candidate_acceptance.get('accepted'):
         trace.finish(accepted=False, state=candidate_acceptance['state'],
                      message='快照未通過驗收，沿用原資料；請查看拒絕原因與來源日期。', **diagnostics)
@@ -505,6 +543,7 @@ def _run(target_date: datetime.date, trace) -> bool:
         quarantine = out_file + ('.previous-' if retained else '.invalid-') + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
         shutil.copy2(out_file, quarantine)
         print(f'[{date_str}] 舊快照已保留：{quarantine}')
+    _remaining(deadline_monotonic)
     atomic_write_json(out_file, result, backup=False)
     trace.finish(accepted=True, state='updated', message='快照已更新；來源缺漏另列，不代表全部成功。',
                  **diagnostics)
@@ -523,6 +562,8 @@ def backfill(days: int) -> bool:
 
 # ── 入口 ──────────────────────────────────────────────────────────
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立 ETF 更新；請使用受管後端工作。')
     import argparse
     parser = argparse.ArgumentParser(description='台股主動ETF持股爬蟲 (MoneyDJ)')
     parser.add_argument('--date', help='指定日期 YYYY-MM-DD (預設今天)')

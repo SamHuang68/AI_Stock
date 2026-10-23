@@ -155,6 +155,11 @@ data/private_web_access_requests.json.*
 data/private_web_gateway.pid
 data/private_web_host.pid
 data/runtime_locks/
+/data/runtime/
+/data/recovery/
+runtime_binding.json
+.st-data-root.json
+.st-cutover.json
 data/options_structure_cache.json
 data/options_structure_history.json
 data/options_structure_history.json.*.tmp

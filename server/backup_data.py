@@ -12,6 +12,7 @@ import zipfile
 import datetime
 
 import etf_paths
+import data_paths
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BACKUP_DIR = os.path.join(BASE, 'backups')
@@ -20,12 +21,14 @@ KEEP = 14                                       # 保留最近幾份(約兩週�
 
 def source_dirs():
     return [
-        ('chip_history', os.path.join(BASE, 'data', 'chip_history')),
+        ('chip_history', str(data_paths.data_path('chip_history', code_root=BASE))),
         ('etf_history', str(etf_paths.resolve_history_dir())),
     ]
 
 
 def main():
+    if data_paths.binding_for().mode != 'legacy':
+        raise RuntimeError('外置或隔離資料模式尚未核定備份與保留契約，拒絕壓縮及自動清理。')
     os.makedirs(BACKUP_DIR, exist_ok=True)
     stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     out = os.path.join(BACKUP_DIR, 'data_snapshot_%s.zip' % stamp)

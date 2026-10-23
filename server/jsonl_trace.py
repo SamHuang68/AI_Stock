@@ -37,6 +37,8 @@ def append_jsonl(
     tail_lines: int,
 ) -> None:
     """Append one JSON object as a line; compact to the last ``tail_lines`` if oversized."""
+    from runtime_storage import assert_write_allowed
+    assert_write_allowed(path, namespace=None)
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)

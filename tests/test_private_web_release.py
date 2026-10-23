@@ -79,7 +79,9 @@ class PrivateWebReleaseTests(unittest.TestCase):
 
     def prepare_cli_stage(self):
         staged = _fake_release(self.install_root, 'abc123')
-        for relative in ('scripts/private_web_release.py', 'server/daemon_lock.py'):
+        for relative in ('scripts/private_web_release.py', 'scripts/runtime_release_policy.py',
+                         'server/daemon_lock.py', 'server/data_paths.py', 'server/runtime_storage.py',
+                         'runtime_storage_capability.json'):
             shutil.copy2(ROOT / relative, staged / relative)
         manifest = release._read_manifest(staged / release.MANIFEST_NAME)
         manifest['contentSha256'] = release._content_hashes(staged)

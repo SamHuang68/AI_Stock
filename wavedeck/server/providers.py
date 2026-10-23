@@ -210,6 +210,11 @@ def resolve_provider(name: str | None = None):
 
 def _llm_gate_acquire() -> None:
     """WD = P1 on shared GPU / LM instance."""
+    from runtime_paths import BINDING
+    if BINDING.mode != "legacy":
+        from .gate_bridge import request_gate
+        request_gate("acquire")
+        return
     try:
         import sys
         from pathlib import Path
@@ -224,6 +229,11 @@ def _llm_gate_acquire() -> None:
 
 
 def _llm_gate_release() -> None:
+    from runtime_paths import BINDING
+    if BINDING.mode != "legacy":
+        from .gate_bridge import request_gate
+        request_gate("release")
+        return
     try:
         import sys
         from pathlib import Path
@@ -242,9 +252,11 @@ def infer_with_fallback(ctx: dict[str, Any], name: str | None = None) -> tuple[d
     """Try configured provider; fall back to heuristic on error."""
     primary = resolve_provider(name)
     need_gate = primary.name in {"ollama", "openai"}
-    if need_gate:
-        _llm_gate_acquire()
+    acquired = False
     try:
+        if need_gate:
+            _llm_gate_acquire()
+            acquired = True
         return primary.infer(ctx), None
     except Exception as exc:
         if primary.name == "heuristic":
@@ -255,5 +267,5 @@ def infer_with_fallback(ctx: dict[str, Any], name: str | None = None) -> tuple[d
         fb["provider"] = "heuristic"
         return fb, str(exc)
     finally:
-        if need_gate:
+        if acquired:
             _llm_gate_release()

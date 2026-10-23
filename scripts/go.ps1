@@ -54,6 +54,24 @@ if ($env:LOCALAPPDATA -and -not ($Worktree -or $Pull -or $UpdateOnly -or $Rebuil
   }
 }
 
+# Production binding is only consumed by the registered shared-client launcher.
+# Never let -Worktree/-Pull bypass that boundary and start a second writer.
+if ($env:ST_DATA_BINDING -or $env:ST_DATA_ROOT -or $env:ST_RUNTIME_ROLE) {
+  if (-not $Worktree -or $env:ST_RUNTIME_ROLE -cne 'fixture' -or $env:ST_DATA_BINDING) {
+    throw 'ST-RUNTIME-GUARD: 外置正式資料只能由已登記共用入口使用；開發工作樹須使用獨立 fixture。'
+  }
+  $fixturePin = Join-Path $Root 'data\stock_python.path'
+  if (-not (Test-Path -LiteralPath $fixturePin -PathType Leaf)) {
+    throw 'ST-RUNTIME-GUARD: fixture 檢查需要既有 Python pin；未建立 pin 或啟動服務。'
+  }
+  $fixturePython = (Get-Content -LiteralPath $fixturePin -Raw -Encoding UTF8).Trim()
+  if (-not [IO.Path]::IsPathRooted($fixturePython) -or -not (Test-Path -LiteralPath $fixturePython -PathType Leaf)) {
+    throw 'ST-RUNTIME-GUARD: fixture Python pin 無效。'
+  }
+  & $fixturePython -B (Join-Path $Root 'server\data_paths.py') describe --code-root $Root --role fixture | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'ST-RUNTIME-GUARD: fixture 資料根驗證失敗。' }
+}
+
 $TipBranch = 'cursor/st51-docs-ux-on-tip-3497'
 $TipFile = Join-Path $Root 'TIP_BRANCH'
 if (Test-Path $TipFile) {

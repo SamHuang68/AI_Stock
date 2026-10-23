@@ -24,8 +24,11 @@ def _validated_day(value):
         raise ValueError('invalid or future official chip date')
     return observed.strftime('%Y%m%d')
 
+import data_paths
+from runtime_storage import assert_write_allowed
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 YF_HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 
@@ -34,6 +37,7 @@ def _merge_snapshot(filename, additions):
     from atomic_store import atomic_write_json, load_json
     from daemon_lock import acquire_daemon_lock, release_daemon_lock
     target = Path(filename)
+    assert_write_allowed(target)
     deadline = time.monotonic() + 20
     handle = None
     while handle is None:
@@ -77,6 +81,7 @@ def record_snapshot(code, payload, directory=CHIP_HISTORY_PATH):
         return False
     if source_day > taipei_today() or source_day.weekday() >= 5:
         return False
+    directory = str(data_paths.data_path('chip_history', code_root=_BASE, override=directory))
     fn = os.path.join(directory, raw_day + '.json')
     values = {key: inst.get(key) for key in ('foreign', 'trust', 'dealer', 'total')}
     # 查詢缺值不得抹掉先前的完整全市場快照。
@@ -87,6 +92,9 @@ def record_snapshot(code, payload, directory=CHIP_HISTORY_PATH):
 
 
 def parse_and_save(day, *, directory=None):
+    directory = str(data_paths.data_path('chip_history', code_root=_BASE,
+                                        override=directory or CHIP_HISTORY_PATH))
+    assert_write_allowed(directory)
     day = _validated_day(day)
     data = fetch_t86(day)
     if data.get('stat') not in ('OK', 'ok'):
@@ -120,7 +128,7 @@ def parse_and_save(day, *, directory=None):
              'trust_net_shares': values['trust'], 'volume_shares': None,
              'source': 'chip_history/T86', 'ingested_at': stamp}
             for code, values in parsed.items()
-        ], base_dir=os.path.dirname(os.path.dirname(directory)))
+        ], data_root=Path(directory).parent)
         if n_ledger:
             print(f'[chip-tracker] {day}: appended {n_ledger} touxin ledger rows')
     except Exception as exc:
@@ -130,6 +138,9 @@ def parse_and_save(day, *, directory=None):
 
 def parse_and_save_tpex(day, *, directory=None):
     """與單檔畫面共用解析器；每日一次完整上櫃快照，日期不符時不寫入。"""
+    directory = str(data_paths.data_path('chip_history', code_root=_BASE,
+                                        override=directory or CHIP_HISTORY_PATH))
+    assert_write_allowed(directory)
     day = _validated_day(day)
     from chip_api import parse_tpex_inst
     from datetime import datetime, timezone
@@ -149,11 +160,13 @@ def parse_and_save_tpex(day, *, directory=None):
     append_rows([{'symbol': code, 'session_date': f'{day[:4]}-{day[4:6]}-{day[6:]}',
                   'trust_net_shares': values['trust'], 'volume_shares': None,
                   'source': 'chip_history/TPEx', 'ingested_at': stamp}
-                 for code, values in parsed.items()], base_dir=os.path.dirname(os.path.dirname(directory)))
+                 for code, values in parsed.items()], data_root=Path(directory).parent)
     return len(parsed)
 
 
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立籌碼更新；請使用受管後端工作。')
     day = sys.argv[1] if len(sys.argv) > 1 else taipei_today().strftime('%Y%m%d')
     try:
         n = parse_and_save(day)

@@ -1379,6 +1379,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
 
     def _gateway_health(self) -> None:
         upstream_ok = False
+        runtime = None
         try:
             conn = http.client.HTTPConnection(
                 self.settings.upstream_host,
@@ -1387,9 +1388,21 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             )
             conn.request("GET", "/health/live", headers={"Connection": "close"})
             response = conn.getresponse()
-            response.read(4096)
+            raw = response.read(4096)
             upstream_ok = response.status == 200
             conn.close()
+            if upstream_ok:
+                try:
+                    live = json.loads(raw.decode('utf-8'))
+                    identity = live.get('dataRootId') if isinstance(live, dict) else None
+                    if (live.get('storageMode') == 'external' and live.get('runtimeRole') == 'backend'
+                            and type(live.get('capabilityVersion')) is int
+                            and live['capabilityVersion'] > 0 and str(uuid.UUID(identity)) == identity
+                            and re.fullmatch(r'[0-9a-f]{40}', live.get('runtimeCommit', ''))):
+                        runtime = {key: live[key] for key in ('dataRootId', 'storageMode',
+                                   'runtimeRole', 'capabilityVersion', 'runtimeCommit')}
+                except (ValueError, TypeError, AttributeError):
+                    pass
         except OSError:
             pass
         payload = {
@@ -1400,6 +1413,9 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         }
         if self.settings.instance_id:
             payload["instance"] = self.settings.instance_id
+        if runtime is not None:
+            payload['runtime'] = runtime
+        payload['capabilities'] = {'wavedeck': False, 'remoteTrading': False}
         self._json(200, payload)
 
     def _gateway_routes(self, role: str) -> None:
@@ -1722,8 +1738,27 @@ def create_server(settings: Settings | None = None) -> PrivateWebServer:
     return PrivateWebServer((active.listen_host, active.listen_port), Handler, active)
 
 
-def main() -> None:
-    settings = Settings.load()
+def _gateway_auth_bootstrap(settings):
+    binding_path = ROOT.parent / 'runtime_binding.json'
+    manifest_path = ROOT / '.private_web_release.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig')) if manifest_path.is_file() else {}
+    explicit = (binding_path.exists() or manifest.get('storageBinding', {}).get('storageMode') == 'external'
+                or any(name in os.environ for name in ('ST_DATA_BINDING', 'ST_DATA_ROOT', 'ST_RUNTIME_ROLE')))
+    if not explicit:
+        return None
+    from data_paths import resolve_binding, validate_binding, validate_release_capability
+    from runtime_storage import bootstrap_gateway_auth
+    env = dict(os.environ)
+    if env.get('ST_RUNTIME_ROLE') not in (None, '', 'client'):
+        raise RuntimeError('gateway cannot inherit the business writer role')
+    env['ST_RUNTIME_ROLE'] = 'client'
+    binding = validate_binding(resolve_binding(code_root=ROOT, environ=env,
+        installation_binding=binding_path if binding_path.exists() else None), expected_role='client')
+    validate_release_capability(ROOT, binding)
+    return bootstrap_gateway_auth(binding, writable_file=settings.access_request_path)
+
+
+def _serve_gateway(settings) -> None:
     startup_id = settings.instance_id or uuid.uuid4().hex
     bind_started = time.monotonic()
     _startup_event(
@@ -1786,6 +1821,16 @@ def main() -> None:
     finally:
         server.server_close()
         pid_path.unlink(missing_ok=True)
+
+
+def main() -> None:
+    settings = Settings.load()
+    lease = _gateway_auth_bootstrap(settings)
+    try:
+        _serve_gateway(settings)
+    finally:
+        if lease is not None:
+            lease.close()
 
 
 if __name__ == "__main__":

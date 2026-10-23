@@ -16,7 +16,10 @@ from exchange_source_dates import breadth_cache_key, marketflow_cache_key, taipe
 def breadth_trace(base_dir: str, event: str, **fields: Any) -> None:
     """Persistent, bounded diagnostic trail for official breadth freshness."""
     try:
-        path = os.path.join(base_dir, 'logs', 'breadth_trace.jsonl')
+        from data_paths import log_path
+        from runtime_storage import assert_write_allowed
+        path = str(log_path('breadth_trace.jsonl', code_root=base_dir))
+        assert_write_allowed(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event, **fields}
         from jsonl_trace import append_jsonl

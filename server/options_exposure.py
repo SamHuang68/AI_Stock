@@ -40,9 +40,12 @@ TXO_MULTIPLIER_NTD = 50.0
 REPORT_URL = 'https://openapi.taifex.com.tw/v1/DailyMarketReportOpt'
 DELTA_URL = 'https://openapi.taifex.com.tw/v1/DailyOptionsDelta'
 TW_TZ = ZoneInfo('Asia/Taipei')
+import data_paths
+from runtime_storage import assert_write_allowed
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CACHE_PATH = os.path.join(BASE_DIR, 'data', 'options_structure_cache.json')
-HISTORY_PATH = os.path.join(BASE_DIR, 'data', 'options_structure_history.json')
+CACHE_PATH = str(data_paths.data_path('options_structure_cache.json', code_root=BASE_DIR))
+HISTORY_PATH = str(data_paths.data_path('options_structure_history.json', code_root=BASE_DIR))
 CACHE_TTL_SEC = 15 * 60
 HISTORY_LIMIT = 180
 
@@ -746,10 +749,12 @@ def _read_disk_cache() -> dict[str, Any] | None:
 
 
 def _write_disk_cache(value: dict[str, Any], commit_guard=None) -> None:
+    assert_write_allowed(CACHE_PATH)
     if commit_guard:
         commit_guard()
     os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
     temp_path = CACHE_PATH + '.tmp'
+    assert_write_allowed(temp_path)
     with open(temp_path, 'w', encoding='utf-8') as fh:
         json.dump(value, fh, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
     try:
@@ -780,10 +785,12 @@ def _read_history_rows(*, strict: bool = False) -> list[dict[str, Any]]:
 
 
 def _write_history_rows(rows: list[dict[str, Any]], commit_guard=None) -> None:
+    assert_write_allowed(HISTORY_PATH)
     if commit_guard:
         commit_guard()
     os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
     temp_path = HISTORY_PATH + f'.{os.getpid()}.{threading.get_ident()}.tmp'
+    assert_write_allowed(temp_path)
     payload = {
         'schemaVersion': 1, 'model': 'st-options-history/v1',
         'updatedAt': datetime.now(timezone.utc).isoformat(), 'rows': rows[-HISTORY_LIMIT:],

@@ -21,6 +21,7 @@ from typing import Any, Optional
 from . import audit
 from .config import load_config
 from .state import DATA, TZ8, now_iso
+from runtime_paths import BINDING, guard_write
 
 EXEC_DIR = DATA / "exec_md"
 LATEST_NAME = "latest.md"
@@ -59,9 +60,10 @@ def _cfg() -> dict[str, Any]:
 
 
 def _dir(cfg: dict[str, Any] | None = None) -> Path:
-    """Always under wavedeck/data/exec_md (config dir is informational)."""
+    """Use the bound WaveDeck runtime directory (config dir is informational)."""
     del cfg  # reserved for future absolute override
     p = DATA / "exec_md"
+    guard_write(p)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -218,6 +220,8 @@ def narrative_template(metrics: dict[str, Any], decision: dict[str, Any]) -> dic
 
 def _ollama_narrative(metrics: dict[str, Any], decision: dict[str, Any], timeout: float) -> Optional[dict[str, str]]:
     """Optional local semantic translation via Ollama JSON generate."""
+    if BINDING.mode == "fixture":
+        return None
     ocfg = load_config().get("ollama") or {}
     base = str(ocfg.get("base") or "http://127.0.0.1:11434").rstrip("/")
     model = str(ocfg.get("model") or "llama3.2")
@@ -244,7 +248,12 @@ def _ollama_narrative(metrics: dict[str, Any], decision: dict[str, Any], timeout
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    acquired = False
     try:
+        if BINDING.mode == "external":
+            from .gate_bridge import request_gate
+            request_gate("acquire")
+            acquired = True
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = json.loads(resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
@@ -252,6 +261,9 @@ def _ollama_narrative(metrics: dict[str, Any], decision: dict[str, Any], timeout
         return None
     except Exception:
         return None
+    finally:
+        if acquired:
+            request_gate("release")
     text = str(body.get("response") or "").strip()
     try:
         obj = json.loads(text)
@@ -398,6 +410,7 @@ def _prune(dir_path: Path, max_files: int) -> None:
         reverse=True,
     )
     for old in files[max(0, int(max_files)) :]:
+        guard_write(old)
         try:
             old.unlink()
         except Exception:
@@ -406,6 +419,7 @@ def _prune(dir_path: Path, max_files: int) -> None:
 
 def _update_index(dir_path: Path, entry: dict[str, Any]) -> None:
     idx_path = dir_path / INDEX_NAME
+    guard_write(idx_path)
     items: list[dict[str, Any]] = []
     if idx_path.is_file():
         try:
@@ -523,8 +537,10 @@ def write_exec_md(
         trigger=trigger,
     )
     path = dir_path / fname
+    guard_write(path)
     path.write_text(md, encoding="utf-8")
     latest = dir_path / LATEST_NAME
+    guard_write(latest)
     latest.write_text(md, encoding="utf-8")
     _prune(dir_path, int(cfg.get("max_files") or 200))
     entry = {

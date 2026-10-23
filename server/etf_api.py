@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 
 import etf_paths
 import ETF更新診斷 as tracker_diagnostics
+from data_paths import binding_for, data_path
+from runtime_storage import assert_write_allowed
 
 try:
     import slog
@@ -27,7 +29,7 @@ if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 
 ETF_DELTA_PATH = str(etf_paths.resolve_history_dir())
-ETF_CATALOG_FILE = os.path.join(_BASE, 'data', 'etf_catalog.json')
+ETF_CATALOG_FILE = str(data_path('etf_catalog.json', code_root=_BASE))
 
 # ── Tracker run state (for /etf-tracker/run + /etf-tracker/status) ──
 _tracker_state = {
@@ -56,6 +58,7 @@ def _run_tracker_async():
             if trace:
                 report = trace.finish(accepted=False, state='timeout' if code == -2 else 'error',
                                       errorCode=code, message=message)
+                assert_write_allowed(trace.directory / (run_id + '.log'))
                 (trace.directory / (run_id + '.log')).write_text(output, encoding='utf-8')
         except Exception as exc:
             output += '\n診斷紀錄保存失敗：' + type(exc).__name__
@@ -70,22 +73,33 @@ def _run_tracker_async():
         if not os.path.isfile(tracker):
             fail(-1, '找不到 ETF 更新程式，未啟動抓取。')
             return
-        env = dict(os.environ, ST_ETF_RUN_ID=run_id, PYTHONUTF8='1')
-        # Use sys.executable so we hit the same Python that's running server.py
-        proc = subprocess.run(
-            [sys.executable, tracker],
-            cwd=script_dir,
-            capture_output=True, text=True,
-            encoding='utf-8', errors='replace',
-            timeout=300,
-            env=env,
-        )
-        out = (proc.stdout or '') + ('\n' + proc.stderr if proc.stderr else '')
+        if binding_for().mode != 'legacy':
+            # The managed backend already owns the writer lease. A child
+            # process must not inherit a second writer through its environment.
+            assert_write_allowed(etf_paths.resolve_history_dir() / '.tracker-ownership-check')
+            import etf_delta_tracker as in_process_tracker
+            accepted = in_process_tracker.run(dt.date.today(), run_id=run_id,
+                                              deadline_monotonic=time.monotonic() + 300)
+            return_code = 0 if accepted else 1
+            out = '更新由正式後端執行；逐筆來源與驗收結果見本次診斷紀錄。'
+        else:
+            env = dict(os.environ, ST_ETF_RUN_ID=run_id, PYTHONUTF8='1')
+            proc = subprocess.run(
+                [sys.executable, tracker],
+                cwd=script_dir,
+                capture_output=True, text=True,
+                encoding='utf-8', errors='replace',
+                timeout=300,
+                env=env,
+            )
+            return_code = proc.returncode
+            out = (proc.stdout or '') + ('\n' + proc.stderr if proc.stderr else '')
         report = tracker_diagnostics.read_report(run_id)
-        if not report or report.get('state') == 'unfinished' or (proc.returncode and report.get('accepted')):
-            fail(proc.returncode or -3, '更新程式未留下相符的終止報告，請檢查完整紀錄。', out)
+        if not report or report.get('state') == 'unfinished' or (return_code and report.get('accepted')):
+            fail(return_code or -3, '更新程式未留下相符的終止報告，請檢查完整紀錄。', out)
             return
         directory = tracker_diagnostics.run_directory()
+        assert_write_allowed(directory / (run_id + '.log'))
         directory.mkdir(parents=True, exist_ok=True)
         (directory / (run_id + '.log')).write_text(out, encoding='utf-8')
         with _tracker_lock:
@@ -93,12 +107,12 @@ def _run_tracker_async():
                 'running': False,
                 'finishedAt': time.time(),
                 'lastDuration': round(time.time() - start, 1),
-                'lastReturnCode': proc.returncode,
+                'lastReturnCode': return_code,
                 'lastOutput': out,
                 'report': report,
             })
-    except subprocess.TimeoutExpired as exc:
-        partial = exc.stdout or ''
+    except (subprocess.TimeoutExpired, TimeoutError) as exc:
+        partial = getattr(exc, 'stdout', '') or ''
         if isinstance(partial, bytes):
             partial = partial.decode('utf-8', errors='replace')
         fail(-2, '更新逾時（5 分鐘）；請查看逐筆診斷紀錄。', partial)

@@ -35,9 +35,11 @@ class PulseUpdateStopped(RuntimeError):
 class PulseUpdates:
     def __init__(self, db_path=None, trace_path=None, *, interval_seconds=60,
                  max_run_seconds=300, clock=time.time, monotonic=time.monotonic):
-        self.db_path = os.path.abspath(db_path or os.environ.get('ST_UPDATE_JOBS_DB') or
-                                       _ROOT / 'data' / 'update_jobs.sqlite3')
-        self.trace_path = os.path.abspath(trace_path or _ROOT / 'logs' / 'pulse_updates.jsonl')
+        from data_paths import data_path, log_path
+        self.db_path = os.path.abspath(data_path('update_jobs.sqlite3', code_root=_ROOT,
+                                                override=db_path, override_env='ST_UPDATE_JOBS_DB'))
+        self.trace_path = os.path.abspath(log_path('pulse_updates.jsonl', code_root=_ROOT,
+                                                  override=trace_path))
         self.interval_seconds = max(0.01, float(interval_seconds))
         self.max_run_seconds = max(0.01, float(max_run_seconds))
         self._clock = clock
@@ -53,6 +55,8 @@ class PulseUpdates:
         self._lookup_committed = None
 
     def _connect(self):
+        from runtime_storage import assert_write_allowed
+        assert_write_allowed(self.db_path, must_exist=True)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         # 同程序不同佇列物件首次開啟同一檔案時，WAL 模式切換不可競爭。
         with _CONNECT_LOCK:

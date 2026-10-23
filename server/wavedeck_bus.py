@@ -22,7 +22,9 @@ from atomic_store import atomic_write_json
 from log_once import log_once
 
 TZ8 = timezone(timedelta(hours=8))
-DATA = Path(__file__).resolve().parents[1] / 'data'
+import data_paths
+
+DATA = data_paths.data_root(code_root=Path(__file__).resolve().parents[1])
 STORE = DATA / 'wavedeck_bus.json'
 
 # WaveDeck 預設／fallback 埠（與 bridge JS、run.py 對齊）。

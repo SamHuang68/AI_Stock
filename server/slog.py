@@ -24,8 +24,10 @@ def setup(level: str = 'INFO') -> logging.Logger:
     sh.setFormatter(fmt)
     _LOG.addHandler(sh)
     try:
-        base = os.path.dirname(os.path.abspath(__file__))
-        log_dir = os.path.join(os.path.dirname(base), 'data', 'logs')
+        from data_paths import data_path, is_external, log_path
+        from runtime_storage import assert_write_allowed
+        log_dir = str(log_path() if is_external() else data_path('logs'))
+        assert_write_allowed(os.path.join(log_dir, 'server.log'))
         os.makedirs(log_dir, exist_ok=True)
         fh = logging.FileHandler(os.path.join(log_dir, 'server.log'), encoding='utf-8')
         fh.setFormatter(fmt)

@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from .state import DATA, now_iso
+from runtime_paths import guard_write
 
 _lock = threading.Lock()
 
 
 def _conn() -> sqlite3.Connection:
     data_path = Path(DATA)
+    guard_write(data_path / "wavedeck_audit.db")
     data_path.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(data_path / "wavedeck_audit.db"))
     c.execute(

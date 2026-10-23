@@ -14,6 +14,8 @@ import uuid
 from pathlib import Path
 
 import etf_paths
+import data_paths
+from runtime_storage import assert_write_allowed
 
 # /etf-delta 回應已超過 2 MB；上限只防失控回應，不可截斷合法內容（截斷會使 JSON 無法解析）。
 MAX_PROBE_BYTES = 16 * 1024 * 1024
@@ -23,11 +25,14 @@ def _trace_path() -> Path:
     # A health read must not turn a genuinely missing history directory into
     # an empty one.  Only the sibling diagnostics directory is created by
     # ``_trace`` below.
+    if data_paths.binding_for().mode != 'legacy':
+        return data_paths.log_path('etf_snapshot_trace.jsonl')
     return etf_paths.resolve_history_dir(create=False).parent / "logs" / "etf_snapshot_trace.jsonl"
 
 
 def _trace(event: str, correlation_id: str, **fields: object) -> None:
     path = _trace_path()
+    assert_write_allowed(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {
         "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -140,4 +145,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式的 ETF 健康檢查須由受管後端執行。')
     raise SystemExit(main())

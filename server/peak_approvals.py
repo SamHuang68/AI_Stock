@@ -27,7 +27,14 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-APPROVALS_DIR = os.path.join(_BASE, 'data', 'peak_approvals')
+if __package__:
+    from . import data_paths
+    from .runtime_storage import assert_write_allowed
+else:
+    import data_paths
+    from runtime_storage import assert_write_allowed
+
+APPROVALS_DIR = str(data_paths.data_path('peak_approvals', code_root=_BASE))
 DB_PATH = os.path.join(APPROVALS_DIR, 'peak_approvals.db')
 
 _WRITE_LOCK = threading.Lock()
@@ -59,11 +66,12 @@ def _utc_now_iso() -> str:
 def _approvals_db_path(base_dir: str | os.PathLike[str] | None = None) -> str:
     if base_dir is None:
         return DB_PATH
-    return os.path.join(os.fspath(base_dir), 'data', 'peak_approvals', 'peak_approvals.db')
+    return str(data_paths.data_path('peak_approvals/peak_approvals.db', code_root=base_dir))
 
 
 def get_conn(base_dir: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
     db_path = _approvals_db_path(base_dir)
+    assert_write_allowed(db_path, must_exist=True)
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row

@@ -31,8 +31,11 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+import data_paths
+from runtime_storage import assert_write_allowed
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, 'data')
+DATA = str(data_paths.data_root(code_root=ROOT))
 DB_PATH = os.path.join(DATA, 'tdcc_holders.db')
 
 TDCC_URL = 'https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5'
@@ -142,6 +145,7 @@ def is_holders_sym(sym: str) -> bool:
 
 
 def _db() -> sqlite3.Connection:
+    assert_write_allowed(DB_PATH, must_exist=True)
     os.makedirs(DATA, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
@@ -708,6 +712,8 @@ def stock_snapshot(code: str) -> Dict[str, Any]:
 
 
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立持股更新；請使用受管後端工作。')
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument('--refresh', action='store_true')

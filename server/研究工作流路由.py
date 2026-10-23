@@ -43,15 +43,21 @@ class ResearchWorkflowRoutesMixin:
         try:
             import datastore
             import etf_paths
+            from data_paths import binding_for, data_path
             environments = (getattr(cls.__dict__.get('do_GET'), '__globals__', {}) for cls in type(self).__mro__)
             environment = next((item for item in environments if '_openapi_ds' in item), {})
             public_keys = ('_openapi_ds', '_openapi_meta', '_mops_rev_cache', '_cache', '_TW_SECTORS', 'CHIP_HISTORY_PATH')
             runtime = SimpleNamespace(**{key: environment[key] for key in public_keys if key in environment})
             database = datastore.DB_PATH
+            chip_directory = getattr(runtime, 'CHIP_HISTORY_PATH', Path(database).parent / 'chip_history')
+            catalog_path = Path(database).parent / 'etf_catalog.json'
+            if binding_for().mode != 'legacy':
+                chip_directory = data_path('chip_history', override=chip_directory)
+                catalog_path = data_path('etf_catalog.json', override=catalog_path)
             self._research_result(build_subject(symbol, database, sources=capture_subject_sources(runtime, symbol),
-                chip_directory=getattr(runtime, 'CHIP_HISTORY_PATH', Path(database).parent / 'chip_history'),
+                chip_directory=chip_directory,
                 etf_directory=etf_paths.resolve_history_dir(create=False),
-                catalog_path=Path(database).parent / 'etf_catalog.json'))
+                catalog_path=catalog_path))
         except Exception:
             self._err('已保存標的資料讀取失敗；原資料保留，未啟動來源更新', 503)
 

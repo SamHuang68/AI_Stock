@@ -45,7 +45,8 @@ class ResearchIntegrationRoutesMixin:
         self._ok(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8'))
 
     def _research_database(self):
-        return str(Path(self._BASE) / 'data' / 'market.db')
+        from data_paths import data_path
+        return str(data_path('market.db', code_root=self._BASE))
 
     def _handle_valuation_research(self):
         try:

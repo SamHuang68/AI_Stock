@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import runpy
 import signal
 import socket
 import subprocess
@@ -101,7 +102,54 @@ def _spawn(log_name: str, argv: list[str], env: dict[str, str]) -> tuple[subproc
     return process, stream
 
 
+def _runtime_environment(backend_port: int, gateway_port: int):
+    env = dict(os.environ)
+    binding_path = ROOT.parent / 'runtime_binding.json'
+    explicit = binding_path.exists() or any(name in env for name in
+                                           ('ST_DATA_BINDING', 'ST_DATA_ROOT', 'ST_RUNTIME_ROLE'))
+    if not explicit:
+        manifest_path = ROOT / '.private_web_release.json'
+        if manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
+            if manifest.get('storageBinding', {}).get('storageMode') == 'external':
+                raise RuntimeError('external host binding is missing; legacy fallback refused')
+        return None, env
+    helpers = runpy.run_path(str(ROOT / 'server' / 'data_paths.py'))
+    if env.get('ST_RUNTIME_ROLE') not in (None, '', 'backend'):
+        raise RuntimeError('host requires the backend runtime role')
+    if binding_path.exists():
+        env.setdefault('ST_RUNTIME_ROLE', 'backend')
+    binding = helpers['validate_binding'](helpers['resolve_binding'](code_root=ROOT, environ=env,
+        installation_binding=binding_path if binding_path.exists() else None), expected_role='backend')
+    if binding.mode != 'external':
+        raise RuntimeError('private host requires an external managed binding when runtime options are set')
+    if not binding_path.is_file():
+        raise RuntimeError('private host requires its managed runtime_binding.json for the authenticated gateway')
+    helpers['validate_release_capability'](ROOT, binding)
+    if (binding.backend_url != f'http://127.0.0.1:{backend_port}'
+            or binding.public_url != f'http://127.0.0.1:{gateway_port}'):
+        raise RuntimeError('host ports conflict with the installation binding')
+    env['ST_DATA_ROOT'] = str(binding.data_root)
+    env['ST_RUNTIME_ROLE'] = 'backend'
+    if binding_path.exists():
+        env['ST_DATA_BINDING'] = str(binding_path)
+    return binding, env
+
+
+def _child_environments(runtime_env, backend_port, gateway_port, instance_id):
+    backend_env = dict(runtime_env, ST_HOST='127.0.0.1', ST_PORT=str(backend_port))
+    # The authenticated proxy owns only its existing local auth adjuncts. It
+    # never opens the business database and must not inherit a writer binding.
+    gateway_env = {key: value for key, value in runtime_env.items()
+                   if key not in {'ST_DATA_ROOT', 'ST_DATA_BINDING', 'ST_RUNTIME_ROLE'}}
+    gateway_env.update(ST_WEB_UPSTREAM=f'http://127.0.0.1:{backend_port}',
+                       ST_WEB_LISTEN_HOST='127.0.0.1', ST_WEB_LISTEN_PORT=str(gateway_port),
+                       ST_WEB_INSTANCE_ID=instance_id, ST_WEB_MODE='isolated-host')
+    return backend_env, gateway_env
+
+
 def run(*, backend_port: int, gateway_port: int, max_restarts: int) -> int:
+    binding, runtime_env = _runtime_environment(backend_port, gateway_port)
     owner_token = ROOT / "data" / "private_web_owner.token"
     if not owner_token.is_file():
         print(f"Missing {owner_token}; run: {sys.executable} scripts/setup_private_web.py", file=sys.stderr)
@@ -173,18 +221,7 @@ def run(*, backend_port: int, gateway_port: int, max_restarts: int) -> int:
         attempt = len(attempts)
         instance_id = f"{run_id}-{attempt}"
 
-        backend_env = os.environ.copy()
-        backend_env.update({"ST_HOST": "127.0.0.1", "ST_PORT": str(backend_port)})
-        gateway_env = os.environ.copy()
-        gateway_env.update(
-            {
-                "ST_WEB_UPSTREAM": f"http://127.0.0.1:{backend_port}",
-                "ST_WEB_LISTEN_HOST": "127.0.0.1",
-                "ST_WEB_LISTEN_PORT": str(gateway_port),
-                "ST_WEB_INSTANCE_ID": instance_id,
-                "ST_WEB_MODE": "isolated-host",
-            }
-        )
+        backend_env, gateway_env = _child_environments(runtime_env, backend_port, gateway_port, instance_id)
 
         backend = gateway = None
         backend_log = gateway_log = None
@@ -205,7 +242,13 @@ def run(*, backend_port: int, gateway_port: int, max_restarts: int) -> int:
             for _ in range(60):
                 if stopping or backend.poll() is not None:
                     break
-                if _health(f"http://127.0.0.1:{backend_port}/health/live"):
+                live = _health_payload(f"http://127.0.0.1:{backend_port}/health/live") if binding is not None else None
+                if ((binding is None and _health(f"http://127.0.0.1:{backend_port}/health/live"))
+                    or (binding is not None and live and live.get('ok') is True
+                        and live.get('dataRootId') == binding.data_root_id
+                        and live.get('runtimeRole') == 'backend'
+                        and live.get('storageMode') == 'external'
+                        and live.get('capabilityVersion') == binding.capability_version)):
                     backend_ready = True
                     break
                 time.sleep(0.5)
@@ -308,6 +351,7 @@ def main() -> None:
     parser.add_argument("--gateway-port", type=int, default=_port(os.environ.get("ST_WEB_LISTEN_PORT", "18434"), 18434))
     parser.add_argument("--max-restarts", type=int, default=5)
     args = parser.parse_args()
+    _runtime_environment(_port(str(args.backend_port), 18435), _port(str(args.gateway_port), 18434))
     pid_path = ROOT / "data" / "private_web_host.pid"
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()) + "\n", encoding="ascii")

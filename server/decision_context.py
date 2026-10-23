@@ -51,8 +51,11 @@ if getattr(__import__('sys'), 'frozen', False):
     _BASE = os.path.dirname(__import__('sys').executable)
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_BASE, 'data', 'decision_history.db')
-TRACE_PATH = os.path.join(_BASE, 'logs', 'decision_trace.jsonl')
+import data_paths
+from runtime_storage import assert_write_allowed
+
+DB_PATH = str(data_paths.data_path('decision_history.db', code_root=_BASE))
+TRACE_PATH = str(data_paths.log_path('decision_trace.jsonl', code_root=_BASE))
 TW_TZ = timezone(timedelta(hours=8))
 
 _lock = threading.RLock()
@@ -1569,6 +1572,7 @@ def _fingerprint(pulse: dict, build_kwargs: dict | None = None, context: dict | 
 
 
 def _init_db(path: str = DB_PATH) -> None:
+    assert_write_allowed(path, must_exist=True)
     key = os.path.abspath(path)
     with _db_lock:
         if key in _db_ready and os.path.isfile(path):

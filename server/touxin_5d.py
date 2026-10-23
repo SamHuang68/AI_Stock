@@ -154,16 +154,13 @@ def build_observation(
 
     if len(sessions) < window:
         fallback_path = chip_history_path
-        if fallback_path is None and base_dir is not None:
-            fallback_path = os.path.join(os.fspath(base_dir), 'data', 'chip_history')
+        from data_paths import data_path
+        fallback_path = data_path('chip_history', code_root=base_dir, override=fallback_path)
         fb_rows = load_chip_history_fallback(
             code,
             as_of=as_of,
             window=window,
-            chip_history_path=fallback_path or os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'data', 'chip_history',
-            ),
+            chip_history_path=fallback_path,
         )
         if len(fb_rows) >= window:
             sessions = _window_sessions(fb_rows, as_of, window)

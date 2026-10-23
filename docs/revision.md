@@ -1,3 +1,14 @@
+## 2026-10-23 單一資料根架構隔離候選（未驗證、尚有阻塞）
+
+- 基底為已封存原修復`b42ee9dea07e57a718c01c474285d41b58dff774`，整合分支`review/runtime-unification`；VERSION維持5.0。新增explicit binding、資料身分與切換收據、ST/WD namespace lease、consumer路徑、發布copy排除及Local共用入口核對；legacy保持原安裝路徑，不會自動啟用新根或建立空正式庫。
+- 本機來源：core `e8209c5c08b59d44387887b407727ac6245469c7`、consumer `9dd8ccfc9e91baadf50a7d08c04287196165ecf4`、persistence `55f2151b85a3efd985d1e1dc97787a90783de1ee`、release `908bf381371f024758266fd914102595480181bf`、WD `e865087c0431eb2bc643ad2eda4c20efe8dd9450`。各差異在原封存之外整合；沒有tracked data變更。
+- 必須保留日Ksource tradeDate、嚴格較早有效K昨收、缺價整組回退及canonical headline事故契約；未變更台指期歷史結算價口徑。新架構將另跑驗證，不引用舊測試通過作新架構證據。
+- 已知未完成：WD legacy單例鎖前guard與舊測試副本依賴接線，以及fixture WD預設資源鎖namespace修正，兩筆新補丁被自動審查拒絕，未套用或代套。部分舊WD測試尚無安全隔離，必須明列blocked。另獨立排程CLI的log/外送邊界待補驗。
+- 正式Local與PrivateWeb能力不同，新的共用入口會拒絕不相容切換；合作式deadline不等同原子程序hard kill，見`runtime-storage.md`。真資料差異、停寫切換、秘密設定及備份清理未處理。
+- 本段為未測本機候選；新測試數與限制待實測後另附條目。未push、PR、合併、部署、建立ZIP、停止正式服務或搬動正式資料。
+
+---
+
 ## 2026-10-23 日 K 時間與昨收事故回歸補強（未驗證）
 
 - 基底：`282c3e7575db522e0a6a76951d98e1c69c0fb3e1`；隔離分支 `review/dayk-regression`。

@@ -13,8 +13,15 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+if __package__:
+    from . import data_paths
+    from .runtime_storage import assert_write_allowed
+else:
+    import data_paths
+    from runtime_storage import assert_write_allowed
+
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / 'data'
+DATA = data_paths.data_root(code_root=ROOT)
 DB = DATA / 'override_alpha.db'
 TZ8 = timezone(timedelta(hours=8))
 
@@ -26,6 +33,7 @@ def _now_iso() -> str:
 
 
 def _conn() -> sqlite3.Connection:
+    assert_write_allowed(DB, must_exist=True)
     DATA.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB), timeout=5)
     c.row_factory = sqlite3.Row

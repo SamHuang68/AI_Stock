@@ -30,7 +30,9 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-TAI50_CSV = os.path.join(_BASE, 'data', 'tai50_daily.csv')
+import data_paths
+
+TAI50_CSV = str(data_paths.data_path('tai50_daily.csv', code_root=_BASE))
 SOURCE = 'TWSE OpenAPI indicesReport/TAI50I'
 CURRENT_URL = 'https://openapi.twse.com.tw/v1/indicesReport/TAI50I'
 HISTORY_URL = 'https://www.twse.com.tw/indicesReport/TAI50I'

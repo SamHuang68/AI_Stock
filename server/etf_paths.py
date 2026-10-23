@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 import 台股交易參考 as trading_calendar
+import data_paths
+from runtime_storage import assert_write_allowed
 
 
 ENV_HISTORY_DIR = "ST_ETF_HISTORY_DIR"
@@ -68,7 +70,10 @@ def resolve_history_dir(
     """
     env = os.environ if environ is None else environ
     override = str(env.get(ENV_HISTORY_DIR) or "").strip()
-    if override:
+    binding = data_paths.binding_for(environ=environ)
+    if binding.mode != 'legacy':
+        path = data_paths.data_path('etf_history', binding=binding, override_env=ENV_HISTORY_DIR)
+    elif override:
         path = Path(override).expanduser()
         if not path.is_absolute():
             raise ValueError(f"{ENV_HISTORY_DIR} must be an absolute path: {override!r}")
@@ -86,6 +91,7 @@ def resolve_history_dir(
             / "etf_history"
         )
     if create:
+        assert_write_allowed(path, binding=binding)
         path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -289,7 +295,8 @@ def history_status(
         state = "ok"
     resolved_by = "explicit"
     if directory is None:
-        resolved_by = "env" if str(os.environ.get(ENV_HISTORY_DIR) or "").strip() else "default"
+        resolved_by = ('runtime-binding' if data_paths.binding_for().mode != 'legacy' else
+                       'env' if str(os.environ.get(ENV_HISTORY_DIR) or '').strip() else 'default')
     return {
         "state": state,
         "healthy": state == "ok",
@@ -496,8 +503,11 @@ def migrate_snapshots(
     function never deletes or mutates a source snapshot and uses atomic replace
     for new target files.
     """
+    if data_paths.is_external():
+        raise RuntimeError('外置正式資料的 ETF 整併須經獨立切換流程，拒絕一般遷移工具寫入。')
     destination = Path(target) if target is not None else resolve_history_dir()
     destination = Path(os.path.abspath(str(destination)))
+    assert_write_allowed(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     promote_directory = not destination.exists()
     working = destination

@@ -31,7 +31,10 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DB_PATH = os.path.join(_BASE, 'data', 'pulse_history.db')
+import data_paths
+from runtime_storage import assert_write_allowed
+
+DB_PATH = str(data_paths.data_path('pulse_history.db', code_root=_BASE))
 _lock = threading.Lock()
 _sync_lock = threading.Lock()
 _initialized = {}
@@ -141,6 +144,7 @@ def _institutional_meta(latest_inst, latest_market, merged):
 
 
 def _conn():
+    assert_write_allowed(DB_PATH, must_exist=True)
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     c = sqlite3.connect(DB_PATH, timeout=30)
     c.execute('PRAGMA journal_mode=WAL')
@@ -545,6 +549,8 @@ def start_background_sync(days: int = 40, force_full: bool = False):
 
 
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立歷史更新；請使用受管後端工作。')
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'status'
     if cmd == 'sync':
         days = int(sys.argv[2]) if len(sys.argv) > 2 else 40
