@@ -3359,6 +3359,7 @@
         "wavedeck/tests/test_paper_sim_equity.py",
         "wavedeck/tests/test_runtime_binding.py",
         "wavedeck/tests/test_runtime_launcher.py",
+        "wavedeck/tests/test_完整審查執行.py",
         "wavedeck/tests/test_策略HTTP.py",
         "wavedeck/wait_ready.ps1"
       ],
