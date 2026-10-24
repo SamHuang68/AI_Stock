@@ -33,6 +33,13 @@
   - 根因：`pulse_updates._finish` 在資料庫提交後工作即顯示 `succeeded`，**接著才**寫診斷紀錄（`_trace`），**之後**才把 `workerError` 清成 None；測試每 10 毫秒輪詢到 `succeeded` 就立刻斷言 `workerError` 為 None，中間沒有等待。寫檔慢的機器會落在這個空檔。這個競爭在 main 上同樣存在，不是分支引入的。
   - 驗證：本機把 `_trace` 人為拖慢 0.3 秒，舊測試重現與 CI 完全相同的失敗訊息，新測試通過。
   - 修正：只改測試。契約是「重試成功後 `workerError` 會被清掉」，改成最多等 3 秒讓它變成 None，斷言本身不變、不放寬；不改產品程式。
+- **ETF 目錄欄位型別驗證（Codex 的修復，Claude 審查後整合）**：
+  - 來源：Codex 在自己的隔離工作樹（`runtime-verification-c56`）基於本分支 `c56d543` 做的最小修復，提交 `e88f2d8da2def6d4d0506d71815ece253a590eb0`，交接單 `Documents\Codex\2026-10-23\task-2\ST-ETF-Catalog-Fix-Handoff.md`。我只取它的產品檔 `server/etf_delta_tracker.py` 與新測試 `tests/test_etf_catalog_validation.py`；驗證計畫由我的產生器重新產生、本段由我撰寫，維持單一寫入者。
+  - 問題：目錄裡的欄位型別錯誤（例如 `code` 是整數）會在 `_catalog_from` 拋出未預期例外（原缺陷：`int` 沒有 `.strip`），而 loader 的 `except Exception` 把它吞成「退回 fallback」。
+  - 修正：`load_catalog_with_digest` 在同一次讀取內先驗證結構（根物件與 `categories`、類別與 `etfs`、每個 ETF 的 `code`／`enabled`／`name`／`market` 型別），通過才產生雜湊；不合法回 `None` 雜湊，`run()` 因此沿用最後一份有效清單；例外縮為 `OSError／ValueError`，未預期的錯誤（如 `RuntimeError`）仍會傳出；診斷只記錯誤類別，不輸出目錄內容或路徑。
+  - 政策變化（需要知道）：過去目錄裡不合法的列會被略過，現在**任何一列不合法就整份目錄無效**，沿用上一份有效清單，只在輸出留一行紀錄。我核對過現有 `data/etf_catalog.json` 226 筆全部符合新規則；網頁端儲存入口 `/etf-catalog` 只驗證 `categories` 是陣列，UI 送出的是抓下來後切換 `enabled` 的目錄，所以不合法列只會來自手動編輯或其他 API 用戶端。
+  - 沒有改變：合法的「全部停用」仍採預設十檔；HTTP 儲存入口沒有加驗證，不能宣稱 HTTP 已拒絕非法內容。
+  - 我的獨立驗證：Codex 的新測試 3 案在 `c56d543` 的產品程式上失敗（8 個失敗＋6 個錯誤觀察，同一測試的子情境），整合後通過；加上 `test_etf_delta_tracker`、`test_ETF更新防再發`、`test_runtime_workers`（含我先前「等長內容仍重載」與「損毀沿用舊清單」）、`test_etf_paths`、`test_etf_api`、`test_etf_snapshot_health` 共 64 案全過。未重跑整套 Python（變更只在一個產品檔，由計畫版 CI 的主站分塊涵蓋）。
 - 驗證（Python 3.12，與 CI 相同）：
   - R1：`test_runtime_package_policy` 9 案通過，含原本紅燈的 `test_regular_file_is_checked_without_directory_traversal`。
   - R2：`test_shared_backend_launcher` 12 案通過，含原本 3 案共 28 個失敗觀察（gateway 2 案、host 1 案的 4 個子案例）。

@@ -308,7 +308,7 @@
         "tests.test_dist_scrub",
         "tests.test_early_warning",
         "tests.test_etf_api",
-        "tests.test_etf_delta_tracker"
+        "tests.test_etf_catalog_validation"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -535,7 +535,7 @@
         "tests/test_dist_scrub.py",
         "tests/test_early_warning.py",
         "tests/test_etf_api.py",
-        "tests/test_etf_delta_tracker.py",
+        "tests/test_etf_catalog_validation.py",
         "tests/test_exposure_lab.py",
         "tests/test_external_runtime_release.py",
         "tests/test_jsonl_trace.py",
@@ -571,6 +571,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_etf_delta_tracker",
         "tests.test_etf_paths",
         "tests.test_etf_snapshot_health",
         "tests.test_exposure_lab",
@@ -586,8 +587,7 @@
         "tests.test_history_source_date_safety",
         "tests.test_history_wal",
         "tests.test_http_boundary",
-        "tests.test_http_client",
-        "tests.test_indicators"
+        "tests.test_http_client"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -798,6 +798,7 @@
         "tests/fixtures/大盤昨收分歧.json",
         "tests/silent_except_baseline.json",
         "tests/test_Pulse更新佇列.py",
+        "tests/test_etf_delta_tracker.py",
         "tests/test_etf_paths.py",
         "tests/test_etf_snapshot_health.py",
         "tests/test_exposure_lab.py",
@@ -814,7 +815,6 @@
         "tests/test_history_wal.py",
         "tests/test_http_boundary.py",
         "tests/test_http_client.py",
-        "tests/test_indicators.py",
         "tests/test_jsonl_trace.py",
         "tests/test_launcher_safety.py",
         "tests/test_local_release.py",
@@ -848,6 +848,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_indicators",
         "tests.test_industry_revenue",
         "tests.test_international_fundamental",
         "tests.test_job_queue",
@@ -863,8 +864,7 @@
         "tests.test_local_release",
         "tests.test_log_once",
         "tests.test_lru_cache",
-        "tests.test_macro_api_contract",
-        "tests.test_macro_review_fixes"
+        "tests.test_macro_api_contract"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -1077,6 +1077,7 @@
         "tests/test_Pulse更新佇列.py",
         "tests/test_exposure_lab.py",
         "tests/test_external_runtime_release.py",
+        "tests/test_indicators.py",
         "tests/test_industry_revenue.py",
         "tests/test_international_fundamental.py",
         "tests/test_job_queue.py",
@@ -1093,7 +1094,6 @@
         "tests/test_log_once.py",
         "tests/test_lru_cache.py",
         "tests/test_macro_api_contract.py",
-        "tests/test_macro_review_fixes.py",
         "tests/test_overnight_intraday.py",
         "tests/test_private_web_gateway.py",
         "tests/test_private_web_release.py",
@@ -1124,6 +1124,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_macro_review_fixes",
         "tests.test_macro_seed_contract",
         "tests.test_margin_change_balance_delta",
         "tests.test_margin_cycle_state",
@@ -1139,8 +1140,7 @@
         "tests.test_options_schedule",
         "tests.test_overnight_intraday",
         "tests.test_peak_approvals",
-        "tests.test_peak_observation",
-        "tests.test_peak_observation_100d"
+        "tests.test_peak_observation"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -1356,6 +1356,7 @@
         "tests/test_jsonl_trace.py",
         "tests/test_launcher_safety.py",
         "tests/test_local_release.py",
+        "tests/test_macro_review_fixes.py",
         "tests/test_macro_seed_contract.py",
         "tests/test_margin_change_balance_delta.py",
         "tests/test_margin_cycle_state.py",
@@ -1372,7 +1373,6 @@
         "tests/test_overnight_intraday.py",
         "tests/test_peak_approvals.py",
         "tests/test_peak_observation.py",
-        "tests/test_peak_observation_100d.py",
         "tests/test_private_web_gateway.py",
         "tests/test_private_web_release.py",
         "tests/test_review_regressions.py",
@@ -1402,6 +1402,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_peak_observation_100d",
         "tests.test_postmarket_http",
         "tests.test_postmarket_report",
         "tests.test_private_web_access",
@@ -1417,8 +1418,7 @@
         "tests.test_quote_api",
         "tests.test_readme_api_routes",
         "tests.test_resilience_gate",
-        "tests.test_review_regressions",
-        "tests.test_runtime_backend_e2e"
+        "tests.test_review_regressions"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -1635,6 +1635,7 @@
         "tests/test_launcher_safety.py",
         "tests/test_local_release.py",
         "tests/test_overnight_intraday.py",
+        "tests/test_peak_observation_100d.py",
         "tests/test_postmarket_http.py",
         "tests/test_postmarket_report.py",
         "tests/test_private_web_access.py",
@@ -1677,6 +1678,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_runtime_backend_e2e",
         "tests.test_runtime_consumers",
         "tests.test_runtime_package_policy",
         "tests.test_runtime_revision",
@@ -1692,8 +1694,7 @@
         "tests.test_server_handler_wiring",
         "tests.test_server_http_security",
         "tests.test_server_startup_order",
-        "tests.test_shadow_feature_gates",
-        "tests.test_shadow_multifactor"
+        "tests.test_shadow_feature_gates"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -1930,7 +1931,6 @@
         "tests/test_server_http_security.py",
         "tests/test_server_startup_order.py",
         "tests/test_shadow_feature_gates.py",
-        "tests/test_shadow_multifactor.py",
         "tests/test_shared_backend_launcher.py",
         "tests/test_stock_signals.py",
         "tests/test_stock_signals_revision_metadata.py",
@@ -1950,6 +1950,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_shadow_multifactor",
         "tests.test_shared_backend_launcher",
         "tests.test_signal_indicator_parity",
         "tests.test_signal_narrative",
@@ -1965,8 +1966,7 @@
         "tests.test_trend_quant",
         "tests.test_turnover_quant",
         "tests.test_tw_calendar_closed_days",
-        "tests.test_tw_calendar_db_fallback",
-        "tests.test_tw_index_charts_rows"
+        "tests.test_tw_calendar_db_fallback"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -2193,6 +2193,7 @@
         "tests/test_runtime_storage.py",
         "tests/test_runtime_store_guards.py",
         "tests/test_runtime_workers.py",
+        "tests/test_shadow_multifactor.py",
         "tests/test_shared_backend_launcher.py",
         "tests/test_signal_indicator_parity.py",
         "tests/test_signal_narrative.py",
@@ -2209,7 +2210,6 @@
         "tests/test_turnover_quant.py",
         "tests/test_tw_calendar_closed_days.py",
         "tests/test_tw_calendar_db_fallback.py",
-        "tests/test_tw_index_charts_rows.py",
         "tests/test_us_equity_calendar.py",
         "tests/test_wavedeck_bus.py",
         "tests/test_三合一選股.py",
@@ -2226,6 +2226,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_tw_index_charts_rows",
         "tests.test_tw_name_integrity",
         "tests.test_tx_oi_rollover",
         "tests.test_txf_intraday",
@@ -2241,8 +2242,7 @@
         "tests.test_個股研究資料更新",
         "tests.test_個股訊號研究",
         "tests.test_全檢資料邊界",
-        "tests.test_公司行動比較",
-        "tests.test_前瞻對照"
+        "tests.test_公司行動比較"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -2472,6 +2472,7 @@
         "tests/test_shared_backend_launcher.py",
         "tests/test_stock_signals.py",
         "tests/test_stock_signals_revision_metadata.py",
+        "tests/test_tw_index_charts_rows.py",
         "tests/test_tw_name_integrity.py",
         "tests/test_tx_oi_rollover.py",
         "tests/test_txf_intraday.py",
@@ -2488,7 +2489,6 @@
         "tests/test_個股訊號研究.py",
         "tests/test_全檢資料邊界.py",
         "tests/test_公司行動比較.py",
-        "tests/test_前瞻對照.py",
         "tests/test_台股即時報價.py",
         "tests/test_發布完整性.py",
         "tests/test_研究品質與留存.py",
@@ -2502,6 +2502,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_前瞻對照",
         "tests.test_前瞻成熟診斷",
         "tests.test_台股即時報價",
         "tests.test_台股基本面",
@@ -2517,8 +2518,7 @@
         "tests.test_官方資料來源",
         "tests.test_情境投組HTTP",
         "tests.test_投組價格契約",
-        "tests.test_投組官方價格",
-        "tests.test_投組涵蓋契約"
+        "tests.test_投組官方價格"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -2751,6 +2751,7 @@
         "tests/test_us_equity_calendar.py",
         "tests/test_wavedeck_bus.py",
         "tests/test_三合一選股.py",
+        "tests/test_前瞻對照.py",
         "tests/test_前瞻成熟診斷.py",
         "tests/test_台股即時報價.py",
         "tests/test_台股基本面.py",
@@ -2767,7 +2768,6 @@
         "tests/test_情境投組HTTP.py",
         "tests/test_投組價格契約.py",
         "tests/test_投組官方價格.py",
-        "tests/test_投組涵蓋契約.py",
         "tests/test_發布完整性.py",
         "tests/test_研究品質與留存.py",
         "tests/test_研究缺口補完.py",
@@ -2780,6 +2780,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_投組涵蓋契約",
         "tests.test_投組研究整合",
         "tests.test_日線分欄品質",
         "tests.test_曝險壓力",
@@ -2795,8 +2796,7 @@
         "tests.test_研究整合路由",
         "tests.test_研究缺口補完",
         "tests.test_私有停止安全",
-        "tests.test_突破影子紀錄",
-        "tests.test_突破成交研究"
+        "tests.test_突破影子紀錄"
       ],
       "changes": [
         ".github/workflows/完整驗證.yml",
@@ -3030,6 +3030,7 @@
         "tests/test_wavedeck_bus.py",
         "tests/test_三合一選股.py",
         "tests/test_台股即時報價.py",
+        "tests/test_投組涵蓋契約.py",
         "tests/test_投組研究整合.py",
         "tests/test_日線分欄品質.py",
         "tests/test_曝險壓力.py",
@@ -3046,7 +3047,6 @@
         "tests/test_研究缺口補完.py",
         "tests/test_私有停止安全.py",
         "tests/test_突破影子紀錄.py",
-        "tests/test_突破成交研究.py",
         "tests/test_體檢來源期限.py"
       ]
     },
@@ -3056,6 +3056,7 @@
       "timeoutSeconds": 600,
       "reason": "單一資料根架構候選改動 server、scripts、根目錄入口與文件；變更過廣無法逐檔對應局部案例，分塊明列 tests/ 下所有測試模組（每塊上限 600 秒；Sam 2026-10-24 授權完整驗證）",
       "targets": [
+        "tests.test_突破成交研究",
         "tests.test_突破日更整合",
         "tests.test_突破組合研究",
         "tests.test_突破觀察",
@@ -3305,6 +3306,7 @@
         "tests/test_發布完整性.py",
         "tests/test_研究品質與留存.py",
         "tests/test_研究缺口補完.py",
+        "tests/test_突破成交研究.py",
         "tests/test_突破日更整合.py",
         "tests/test_突破組合研究.py",
         "tests/test_突破觀察.py",
