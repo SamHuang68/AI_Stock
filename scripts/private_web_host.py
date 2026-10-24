@@ -374,7 +374,9 @@ def main() -> None:
     parser.add_argument("--gateway-port", type=int, default=_port(os.environ.get("ST_WEB_LISTEN_PORT", "18434"), 18434))
     parser.add_argument("--max-restarts", type=int, default=5)
     args = parser.parse_args()
-    _runtime_environment(_port(str(args.backend_port), 18435), _port(str(args.gateway_port), 18434))
+    binding, _ = _runtime_environment(_port(str(args.backend_port), 18435), _port(str(args.gateway_port), 18434))
+    if binding is not None:
+        _assert_host_outputs(binding)   # PID 檔也是輸出：必須早於下面的建目錄與寫入
     pid_path = _host_output_paths()[3]
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()) + "\n", encoding="ascii")

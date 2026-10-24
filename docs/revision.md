@@ -22,6 +22,12 @@
   - 判斷：產品拒絕檔案系統別名是對的，是測試夾具沒有把暫存路徑展開；啟動器測試本來就用 `.resolve()`。另有一個跨磁碟 `os.path.relpath`（CI 的 checkout 在 D 槽、暫存在 C 槽）。
   - 修正：6 個測試檔的暫存根改用 `resolve()` 或 `os.path.realpath`（storage、consumers、workers、secrets、WaveDeck 的 runtime_binding 與 runtime_launcher），`relpath` 加 `start=`。不改產品。
   - 重現與驗證：本機建立有 8.3 短名的目錄並把 `TEMP` 指過去重現（修正前 38 個失敗），修正後這 4 個模組 49 個案例與 WaveDeck 148 個案例在短檔名與一般暫存路徑下都全過。Windows CI 因「Unit tests」失敗，後面的 WaveDeck、JS、瀏覽器步驟被跳過、沒有結果，需重新觸發完整驗證。
+- **第二意見（Codex，隔離封包、跨供應商，2026-10-24）**：範圍為相對 `f3f7ebd` 的 16 個檔案差異；結論 `significant-issues`、完整度 `insufficient`（只看到差異，看不到完整檔案），依規則不算完成審查。三項發現逐項對照程式碼：
+  - **host 在安全檢查前就覆寫 PID 檔（高）：同意，是我 R2 修正的真實缺口。** `main()` 在呼叫 `run()` 之前就建立 PID 目錄並寫入，而我的檢查只放在 `run()`；PID 檔若是受保護檔案的硬連結，會先被截斷。我的測試只測了 `run()`。修正：`main()` 取得綁定後先呼叫 `_assert_host_outputs`；新增直接呼叫 `main()` 的拒絕案例，舊程式失敗。
+  - **ETF 以修改時間與大小判斷目錄有沒有變不夠（中）：同意。** 等長內容加時間戳相同會漏判，且「先載入再取時間戳」之間檔案若更新會被標成新版。修正：改用 SHA-256，清單與雜湊來自同一次讀取；讀取失敗（雜湊為 None）時沿用現有清單、不退回 fallback。新增「等長內容且修改時間改回原值」與「檔案損毀或消失」兩個案例，舊程式都失敗。
+  - **驗證計畫自身沒有落在任何案例的 `changes`（中）：不同意。** 計畫檢查入口（`scripts/變更驗證.py --check`）本來就把 `.github/驗證計畫.json` 排除在變更對應之外，現在與先前所有 PR 一樣通過；把它塞進案例反而會讓計畫的指紋隨自己改變。
+  - 兩個未決問題：ETF 更新能否並行啟動我沒有完整驗證（`etf_api` 的 `_tracker_lock` 保護狀態更新，是否同時擋住並行啟動未確認），所以採保守設計：全域清單只在一輪開頭重新指定、整輪用同一份；若兩輪真的並行，後啟動者換清單時前一輪的後續讀取可能讀到新清單，這個風險未排除；路徑通過預檢後到實際開啟之間被換成連結（檢查時間與使用時間之差）屬已知限制，目前靠 writer lease 與目錄權限，不在本次修正範圍，記在此處。
+  - 修正後未再送複審。
 - 驗證（Python 3.12，與 CI 相同）：
   - R1：`test_runtime_package_policy` 9 案通過，含原本紅燈的 `test_regular_file_is_checked_without_directory_traversal`。
   - R2：`test_shared_backend_launcher` 12 案通過，含原本 3 案共 28 個失敗觀察（gateway 2 案、host 1 案的 4 個子案例）。

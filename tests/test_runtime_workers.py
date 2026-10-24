@@ -114,6 +114,43 @@ class RuntimeWorkerTests(unittest.TestCase):
             self.assertTrue(self.tracker.run(dt.date.today(), run_id=uuid.uuid4().hex))
         self.assertEqual([(['00001A', '00002A'], 2), (['00001A', '00002A', '00003A'], 3)], seen)
 
+    def test_etf_catalog_same_size_and_timestamp_still_reloads(self):
+        # 以內容雜湊判斷：兩輪之間改成等長的另一組代號，且把修改時間改回原值，仍要換成新清單。
+        catalog = self.data / 'etf_catalog.json'
+        def write(codes):
+            catalog.write_text(json.dumps({'categories': [{'etfs': [
+                {'code': code, 'name': code, 'enabled': True, 'market': 'TW'} for code in codes]}]}), encoding='utf-8')
+        seen = []
+        def fake_run(target_date, trace, *, deadline_monotonic=None):
+            seen.append(sorted(self.tracker.ETFS))
+            return True
+        with mock.patch.object(self.tracker, 'CATALOG_FILE', str(catalog)),                 mock.patch.object(self.tracker, '_run', side_effect=fake_run):
+            write(['00001A', '00002A'])
+            first = os.stat(catalog)
+            self.assertTrue(self.tracker.run(dt.date.today(), run_id=uuid.uuid4().hex))
+            write(['00003A', '00004A'])                       # 等長、不同內容
+            os.utime(catalog, ns=(first.st_atime_ns, first.st_mtime_ns))   # 修改時間改回原值
+            self.assertEqual(os.stat(catalog).st_size, first.st_size)
+            self.assertTrue(self.tracker.run(dt.date.today(), run_id=uuid.uuid4().hex))
+        self.assertEqual([['00001A', '00002A'], ['00003A', '00004A']], seen)
+
+    def test_etf_catalog_unreadable_keeps_the_previous_list(self):
+        # 目錄檔案暫時讀不到時，不得退回 fallback 清單，沿用上一輪已載入的清單。
+        catalog = self.data / 'etf_catalog.json'
+        catalog.write_text(json.dumps({'categories': [{'etfs': [
+            {'code': '00001A', 'name': 'x', 'enabled': True, 'market': 'TW'}]}]}), encoding='utf-8')
+        seen = []
+        def fake_run(target_date, trace, *, deadline_monotonic=None):
+            seen.append(sorted(self.tracker.ETFS))
+            return True
+        with mock.patch.object(self.tracker, 'CATALOG_FILE', str(catalog)),                 mock.patch.object(self.tracker, '_run', side_effect=fake_run):
+            self.assertTrue(self.tracker.run(dt.date.today(), run_id=uuid.uuid4().hex))
+            catalog.write_text('{ 損毀', encoding='utf-8')
+            self.assertTrue(self.tracker.run(dt.date.today(), run_id=uuid.uuid4().hex))
+            catalog.unlink()
+            self.assertTrue(self.tracker.run(dt.date.today(), run_id=uuid.uuid4().hex))
+        self.assertEqual([['00001A'], ['00001A'], ['00001A']], seen)
+
     def test_etf_timeout_finishes_job_without_claiming_success(self):
         run_id = uuid.uuid4().hex
         with mock.patch.object(self.api, '_tracker_state', {'runId': run_id}), \

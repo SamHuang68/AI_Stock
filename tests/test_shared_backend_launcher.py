@@ -123,6 +123,27 @@ class SharedBackendLauncherTests(unittest.TestCase):
                     spawn.assert_not_called()
                 self.assertEqual(sentinel.read_bytes(), before)
 
+    def test_external_host_main_rejects_a_pid_alias_before_any_write(self):
+        # main() 在呼叫 run() 之前就會建立並覆寫 PID 檔；PID 檔若是受保護檔案的硬連結，必須在截斷之前被拒絕。
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+            install, runtime, _ = fixture(Path(tmp).resolve())
+            code = install / 'current'
+            (code / 'server').mkdir(parents=True)
+            shutil.copy2(ROOT / 'server/data_paths.py', code / 'server/data_paths.py')
+            write(code / 'runtime_storage_capability.json', {'schemaVersion': 1,
+                  'capabilityVersion': 1, 'storageModes': ['external']})
+            sentinel = runtime / 'unregistered.json'
+            write(sentinel, {'sentinel': 'keep'})
+            before = sentinel.read_bytes()
+            alias = code / 'data' / 'private_web_host.pid'
+            alias.parent.mkdir(parents=True, exist_ok=True)
+            os.link(sentinel, alias)
+            with patch.object(host, 'ROOT', code), patch.object(host, 'LOGS', code / 'logs'),                  patch.object(sys, 'argv', ['private_web_host.py']),                  patch.object(host, 'run') as run:
+                with self.assertRaisesRegex(RuntimeError, 'hard-link'):
+                    host.main()
+                run.assert_not_called()
+            self.assertEqual(sentinel.read_bytes(), before, '受保護檔案在檢查之前被改寫')
+
     def test_external_host_requires_installation_sidecar_for_gateway(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
             root = Path(tmp).resolve()
