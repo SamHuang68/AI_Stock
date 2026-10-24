@@ -2,28 +2,68 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "6945c039cb275264544e9a5dc5bd25701f4c9bcb",
+  "baseCommit": "442b90841ac979d0ff42facf1513baa04edf28b7",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "條件期望後端短長期分組",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "timeoutSeconds": 300,
+      "reason": "新增獨立事件數與短期／長期分組欄位；既有 horizons／invalidIf 契約不變",
       "targets": [
-        "tests.test_dist_scrub"
+        "tests.test_conditional_expectation",
+        "tests.test_conditional_expectation_p1",
+        "tests.test_shadow_multifactor"
       ],
       "changes": [
-        "docs/revision.md",
-        "docs/shared-main-chart-recurrence-8d.md"
+        "server/conditional_expectation.py",
+        "tests/test_conditional_expectation.py"
       ],
       "inputs": [
-        "docs/revision.md",
-        "docs/shared-main-chart-recurrence-8d.md",
-        "tests/test_dist_scrub.py"
+        "server/conditional_expectation.py",
+        "tests/test_conditional_expectation.py",
+        "tests/test_conditional_expectation_p1.py",
+        "tests/test_shadow_multifactor.py"
+      ]
+    },
+    {
+      "id": "條件期望前端短長期分組",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "卡片表格分為短期／長期兩段並新增獨立事件欄，原有欄位與 T+n 列保留",
+      "targets": [
+        "tests/conditional_expectation_v5_selftest.js"
+      ],
+      "changes": [
+        "src/ui/conditional_expectation_v5.js",
+        "tests/conditional_expectation_v5_selftest.js"
+      ],
+      "inputs": [
+        "src/ui/conditional_expectation_v5.js",
+        "tests/conditional_expectation_v5_selftest.js"
+      ]
+    },
+    {
+      "id": "打包產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "src 變更後重建 stock_terminal_v2.html",
+      "targets": [
+        "tests.test_bundle_fresh",
+        "tests.test_build_reproducibility"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "build_v2.py",
+        "stock_terminal.html",
+        "stock_terminal_v2.html",
+        "tests/test_build_reproducibility.py",
+        "tests/test_bundle_fresh.py"
       ]
     }
   ]
