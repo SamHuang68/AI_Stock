@@ -3656,6 +3656,34 @@
       "inputs": [
         "tests/加權行情基準_selftest.js"
       ]
+    },
+    {
+      "id": "ETF catalog 結構驗證與恢復",
+      "kind": "unittest",
+      "timeoutSeconds": 90,
+      "reason": "僅驗證 catalog 無效型別／結構保留最後有效清單及快照、有效內容恢復、選填與零啟用相容；不擴大其他測試。",
+      "targets": [
+        "tests.test_etf_catalog_validation.EtfCatalogValidationTests"
+      ],
+      "changes": [
+        "server/etf_delta_tracker.py",
+        "tests/test_etf_catalog_validation.py"
+      ],
+      "inputs": [
+        "tests/test_etf_catalog_validation.py",
+        "tests/test_runtime_workers.py",
+        "server/etf_delta_tracker.py",
+        "server/etf_api.py",
+        "server/etf_paths.py",
+        "server/ETF更新診斷.py",
+        "server/data_paths.py",
+        "server/runtime_storage.py",
+        "server/atomic_store.py",
+        "server/daemon_lock.py",
+        "server/log_once.py",
+        "server/http_boundary.py",
+        "server/slog.py"
+      ]
     }
   ]
 }

@@ -64,28 +64,45 @@ def load_catalog():
 
 
 def load_catalog_with_digest():
-    """回傳 (清單, 內容雜湊)；雜湊與清單來自同一次讀取，檔案不存在或讀取失敗時雜湊為 None。"""
+    """回傳同次讀取的清單及 SHA；讀取或結構無效時以 None 保留既有清單。"""
     if not os.path.isfile(CATALOG_FILE):
-        print(f'[WARN] {CATALOG_FILE} 不存在，使用 fallback 10 檔主動 ETF')
+        print('[WARN] ETF catalog 不存在；保留既有清單，首次載入使用預設。')
         return _FALLBACK_ETFS, None
     try:
         with open(CATALOG_FILE, 'rb') as f:
             raw = f.read()
         data = json.loads(raw.decode('utf-8'))
+        catalog = _catalog_from(data)
         digest = hashlib.sha256(raw).hexdigest()
-    except Exception as e:
-        print(f'[ERR] 讀取 {CATALOG_FILE} 失敗：{e}，使用 fallback')
+    except (OSError, ValueError) as e:
+        # Catalog values, parser excerpts and local paths may contain private
+        # information. Log only the error class, never the submitted content.
+        print(f'[ERR] ETF catalog 讀取／結構無效（{type(e).__name__}）；保留既有清單，首次載入使用預設。')
         return _FALLBACK_ETFS, None
-    return _catalog_from(data), digest
+    return catalog, digest
 
 
 def _catalog_from(data):
+    # Validate the consumed schema before publishing either the list or digest.
+    # Optional fields retain existing defaults; unrelated metadata is ignored.
+    if not isinstance(data, dict) or not isinstance(data.get('categories'), list):
+        raise ValueError('catalog categories must be an array')
     out = {}
-    for cat in data.get('categories', []):
+    for cat in data['categories']:
+        if not isinstance(cat, dict) or not isinstance(cat.get('etfs', []), list):
+            raise ValueError('catalog category must contain an ETF array')
         for etf in cat.get('etfs', []):
-            if (etf.get('enabled') and etf.get('code')
-                    and str(etf.get('market') or 'TW').upper() == 'TW'):
-                code = etf['code'].strip().upper()
+            if not isinstance(etf, dict):
+                raise ValueError('catalog ETF must be an object')
+            code = etf.get('code')
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError('catalog ETF code must be a nonempty string')
+            if not isinstance(etf.get('enabled', False), bool):
+                raise ValueError('catalog ETF enabled must be a boolean')
+            if any(key in etf and not isinstance(etf[key], str) for key in ('name', 'market')):
+                raise ValueError('catalog ETF name and market must be strings')
+            if etf.get('enabled') and (etf.get('market') or 'TW').upper() == 'TW':
+                code = code.strip().upper()
                 name = etf.get('name', code)
                 out[code] = (code, name)
     if not out:

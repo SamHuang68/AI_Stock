@@ -1,3 +1,16 @@
+## 2026-10-24 ETF catalog 無效型別保留最後有效清單（v5.0 本機候選）
+
+- 基底：`c56d543b407a65f770776bbe57ce1af9e657c55e`；獨立分支 `fix/etf-catalog-validation`。Sam 明確授權只修 catalog 型別／結構造成更新中斷並補局部測試。實作完整 SHA 見本條目所在提交，以及本輪 `ST-ETF-Catalog-Fix-Handoff.md`；不修改 Claude 的來源分支。
+- 根因：`load_catalog_with_digest` 在讀取錯誤邊界之外解析 catalog；`code:123` 等合法 JSON 在下一輪 `.strip()`／`.get()` 時拋例外，無法依原契約沿用已知好清單。既有測試只涵蓋無效 JSON／讀不到檔案，且 mock `_run`，漏掉有效 JSON 的結構錯誤與真快照保留。
+- 修正：只在 `server/etf_delta_tracker.py` 驗證 consumed schema（categories／etfs 容器、ETF 物件、code 字串、enabled 布林、選填 name／market 字串）；通過後才產生有效 digest。預期 I/O／格式錯誤回傳 None digest，原 `run` 沿用最後有效清單與既有快照驗收流程；恢復有效內容可正常更新。診斷只記錯誤類別，不記 catalog 內容、解析片段或路徑；不以寬泛 catch 吞掉未預期程式錯誤。
+- 保持不變：合法空／全停用清單仍採預設十檔；缺少選填欄位保留既有 defaults。沒有改 HTTP catalog 儲存入口、Local／PrivateWeb 能力保護、日 K／週線／昨收或台指期結算口徑。既有快照通過驗收時原 bytes 保留；不是新增「一切更新暫停」政策。
+- 新增 `tests/test_etf_catalog_validation.py`：13 種型別／結構錯誤、最後有效清單及快照 bytes 保留、合法內容恢復、選填欄位／零啟用相容性，以及未預期 RuntimeError 不得被吞。正式 run／_run／驗收／寫入未替換；provider、環境與 logger 使用隔離 fixture。
+- 驗證：產品修改前新測試 3 個 top-level case 執行，原缺陷明確紅燈；8 failure／6 error 是子案例及後續觀察，不能當成 14 個獨立測試。修復後新測試 3＋既有 ETF tracker 8＋指定 runtime ETF worker 8，共 **19 passed、0 failed、0 error、0 skipped、0 blocked**；含既有等長且 mtime 相同內容變動、無效 JSON、缺檔、deadline 及快照保全。收據在 task-2 的 `etf-catalog-fix` 及 `bounded-review/evidence/etf-fix-*`。
+- 測試接線：新案例以模組別名引用既有 fixture，避免 unittest discovery 重複收集其 TestCase；`.github/驗證計畫.json` 只追加本次三案的明確 class target 與輸入，不執行或擴充原計畫的其他群組。
+- 邊界：未跑全套或 WaveDeck 專屬驗證，未因無關 ETF 修改重跑日 K；相關日 K／週線檔案相對基底無變動。既有架構未驗收；完整 stage 因禁止 ZIP 未驗證，Local 共用入口能力不足仍拒切。未推送、未合併、未部署、未動正式資料／服務／備份或安全設定。
+
+---
+
 ## 2026-10-24 單一資料根候選分支的三組缺陷修正（ST-R1、ST-R2、ST-R3）
 
 - 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`（origin/main）；分支 `claude/runtime-unification-fixes`，疊在 Codex 的 `review/runtime-unification`（`f3f7ebda5017d01c059abf5be71b4b2f0822921f`）之上。**本分支是單一資料根架構的候選，不是已驗收的版本，不可合併、不可發布。**
