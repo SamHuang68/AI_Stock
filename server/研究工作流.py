@@ -264,7 +264,14 @@ def build_subject(symbol: str, database: str | Path, *, sources: dict | None = N
     symbol = subject_symbol(symbol)
     sources = sources or {}
     read_issues = []
-    root = Path(database).parent
+    from data_paths import binding_for, data_path, data_root
+    bound = binding_for()
+    root = data_root(binding=bound) if bound.mode != 'legacy' else Path(database).parent
+    if bound.mode != 'legacy':
+        database = data_path('market.db', override=database)
+        chip_directory = data_path('chip_history', override=chip_directory)
+        catalog_path = data_path('etf_catalog.json', override=catalog_path)
+        etf_directory = data_path('etf_history', override=etf_directory)
     domains = {name: {'availability': 'unknown', 'asOf': None, 'source': [], 'evidence': [],
                      'reason': '尚無可核對的已保存公開資料', 'freshness': 'historical_or_unknown'}
                for name in ('fundamentals', 'flows', 'supplyChainNews', 'peersThemes', 'etfResearch')}

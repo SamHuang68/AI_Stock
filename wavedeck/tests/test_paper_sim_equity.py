@@ -99,6 +99,61 @@ class 引擎整合測試(unittest.TestCase):
     signal = _base.signal
     txt = _base.txt
 
+    def test_txt_round_trip_restores_paper_positions_receipt_and_ledger(self):
+        self.engine.handle_signal(self.signal())
+        paper = self.runtime.snapshot()
+        self.txt(account=5)
+        self.engine.sync_broker_positions()
+        self.assertEqual(self.runtime.snapshot()['positions']['account'], 5)
+        self.runtime.patch(execution={'order_id': 'live-pending', 'status': 'sent', 'position_confirmed': False})
+        restored = self.engine.set_exec_mode('paper')['state']
+        self.assertEqual(restored['positions'], paper['positions'])
+        self.assertEqual(restored['execution']['order_id'], paper['execution']['order_id'])
+        self.assertEqual(restored['execution']['evidence_kind'], 'simulated')
+        for key in ('position', 'avgPrice', 'realized', 'priceUnknown'):
+            self.assertEqual(restored['paper_ledger'][key], paper['paper_ledger'][key])
+        self.assertEqual(restored['account']['equity_status'], 'measured')
+        self.assertIsNotNone(restored['account']['equity'])
+        self.assertEqual(restored['fsm'], 'InPosition')
+
+    def test_broker_switch_restores_existing_ledger_without_a_legacy_paper_snapshot(self):
+        self.txt(account=5)
+        self.runtime.patch(paper_runtime=None, paper_ledger={'position': 2, 'avgPrice': 45020, 'realized': 0, 'priceUnknown': False})
+        restored = self.engine.set_broker('paper')['state']
+        self.assertEqual(restored['positions']['account'], 2)
+        self.assertEqual(restored['exec']['lots'], 2)
+        self.assertIsNone(restored['execution'].get('order_id'))
+        self.assertIsNone(restored['exec']['price'])
+        self.assertIsNone(restored['account']['equity'])
+        self.assertEqual(restored['account']['equity_status'], 'price_unknown')
+
+    def test_legacy_paper_restore_does_not_value_ledger_with_txt_price(self):
+        self.txt(account=5)
+        self.runtime.patch(mode='live', paper_runtime=None, exec={'price': 200},
+                           paper_ledger={'position': 1, 'avgPrice': 100, 'realized': 0, 'priceUnknown': False})
+        restored = self.engine.set_exec_mode('paper')['state']
+        self.assertEqual(restored['positions']['account'], 1)
+        self.assertEqual(restored['paper_ledger']['position'], 1)
+        self.assertEqual(restored['paper_ledger']['avgPrice'], 100)
+        self.assertFalse(restored['paper_ledger']['priceUnknown'])
+        self.assertIsNone(restored['exec']['price'])
+        self.assertIsNone(restored['account']['mark_price'])
+        self.assertIsNone(restored['account']['equity'])
+        self.assertIsNone(restored['account']['unrealized'])
+        self.assertEqual(restored['account']['equity_status'], 'price_unknown')
+
+    def test_mode_round_trip_keeps_existing_ledger_mismatch_and_kill_protection(self):
+        self.runtime.patch(positions={'account': 2}, paper_ledger={'position': 1, 'avgPrice': None, 'priceUnknown': True})
+        self.engine.set_kill_switch(True)
+        self.txt(account=5)
+        restored = self.engine.set_broker('paper')['state']
+        self.assertEqual(restored['positions']['account'], 2)
+        self.assertEqual(restored['paper_ledger']['position'], 1)
+        self.assertIsNone(restored['account']['equity'])
+        self.assertEqual(restored['account']['equity_status'], 'ledger_mismatch')
+        self.assertTrue(restored['kill_switch'])
+        self.assertEqual(restored['fsm'], 'Halted')
+
     def test_紙上成交記帳且回撤可量測(self):
         self.engine.system_control("start")
         st = self.engine.refresh_account()

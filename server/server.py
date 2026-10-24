@@ -16,6 +16,13 @@ import threading
 if __name__ == 'server' and not globals().get('__path__'):
     __path__ = [os.path.dirname(os.path.abspath(__file__))]
 
+from data_paths import binding_for as _runtime_binding, data_path as _data_path, log_path as _log_path, public_identity as _storage_identity
+from runtime_storage import bootstrap_runtime as _bootstrap_runtime, assert_write_allowed as _assert_runtime_write
+
+# Acquire the sole ST writer before importing modules that initialize queues,
+# databases, or workers. Importing the HTTP module never grants a writer lease.
+_RUNTIME_LEASE = _bootstrap_runtime(namespace='st') if __name__ == '__main__' else None
+
 try:
     import alert_daemon
 except Exception as _e:
@@ -140,7 +147,8 @@ def _breadth_trace(event, **fields):
 def _keystats_trace(event, **fields):
     """Persist sanitized market-cap acquisition transitions for one symbol."""
     try:
-        path = os.path.join(_BASE, 'logs', 'keystats_trace.jsonl')
+        path = str(_log_path('keystats_trace.jsonl', code_root=_BASE))
+        _assert_runtime_write(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         allowed = (
             'correlationId', 'symbol', 'cache', 'source', 'hasPrice',
@@ -157,7 +165,8 @@ def _keystats_trace(event, **fields):
 def _fundamental_trace(event, **fields):
     """Persist a bounded trace for market classification and model resolution."""
     try:
-        path = os.path.join(_BASE, 'logs', 'fundamental_trace.jsonl')
+        path = str(_log_path('fundamental_trace.jsonl', code_root=_BASE))
+        _assert_runtime_write(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         allowed = (
             'correlationId', 'symbol', 'market', 'kind', 'model', 'source',
@@ -183,7 +192,8 @@ def _ui_route_trace(row):
         )
         clean = {k: str((row or {}).get(k) or '')[:120] for k in allowed}
         clean['serverTs'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-        path = os.path.join(_BASE, 'logs', 'ui_route_trace.jsonl')
+        path = str(_log_path('ui_route_trace.jsonl', code_root=_BASE))
+        _assert_runtime_write(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         from jsonl_trace import append_jsonl
         append_jsonl(path, clean, max_bytes=128 * 1024, tail_lines=300)
@@ -223,7 +233,8 @@ def _boot_trace(msg):
     """Always-on boot breadcrumb — survives blank Hermes consoles (no stdout)."""
     line = time.strftime('%Y-%m-%d %H:%M:%S') + ' | ' + str(msg)
     try:
-        log_dir = os.path.join(_BASE, 'logs')
+        log_dir = str(_log_path(code_root=_BASE))
+        _assert_runtime_write(os.path.join(log_dir, 'SERVER_BOOT.txt'))
         os.makedirs(log_dir, exist_ok=True)
         with open(os.path.join(log_dir, 'SERVER_BOOT.txt'), 'a', encoding='utf-8') as fh:
             fh.write(line + '\n')
@@ -237,10 +248,10 @@ def _boot_trace(msg):
 
 
 # ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
+CHIP_HISTORY_PATH = str(_data_path('chip_history', code_root=_BASE))
 
 # v3.9 P3: 畫線雲端記憶 — 存 draw_store.json {sym: [obj,...]}（gitignore）
-DRAW_STORE_FILE = os.path.join(_BASE, 'data', 'draw_store.json')
+DRAW_STORE_FILE = str(_data_path('draw_store.json', code_root=_BASE))
 _draw_lock = threading.Lock()
 def _load_draw_store():
     try:
@@ -895,7 +906,7 @@ def _get_tw_names():
     m = {}
     # ── 本地備份讀取防線 ────────────────────────────────────
     # 優先載入上次成功儲存的名稱對照表，確保即使 OpenAPI 斷連或限流，依然有完整的股票代號可用
-    data_dir = os.path.join(_BASE, 'data')
+    data_dir = str(_data_path(code_root=_BASE))
     backup_path = os.path.join(data_dir, 'tw_names_backup.json')
     if os.path.exists(backup_path):
         try:
@@ -929,6 +940,7 @@ def _get_tw_names():
                 with open(backup_path, 'r', encoding='utf-8') as f:
                     old_count = len(json.load(f))
             if len(m) >= old_count:
+                _assert_runtime_write(backup_path)
                 os.makedirs(data_dir, exist_ok=True)
                 atomic_write_json(backup_path, m, backup=True, indent=2)
         except Exception as e:
@@ -1370,7 +1382,7 @@ def _is_tw_market_fund_sym(sym: str) -> bool:
 
 def _universe_median_pe():
     """從 data/universe.json twmeta 算上市櫃本益比中位數（濾掉異常）。"""
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'universe.json')
+    path = str(_data_path('universe.json', code_root=_BASE))
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
@@ -2847,6 +2859,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 'ok': True,
                 'status': 'ok',
                 'liveness': True,
+                **_storage_identity(),
                 'runtimeCommit': RUNTIME_COMMIT,
                 'bind': HOST,
                 'port': PORT,
@@ -2922,6 +2935,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                 'version': st_ver,
                 'runtimeCommit': RUNTIME_COMMIT,
                 'tipBranch': tip_branch,
+                **_storage_identity(),
                 'openUrl': f'http://{HOST}:{PORT}/#pulse',
                 'bind': HOST,
                 'port': PORT,
@@ -3392,7 +3406,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
     def _handle_llm_gate_get(self):
         try:
             import llm_gate as lg
-            self._ok(json.dumps(lg.status(), ensure_ascii=False).encode())
+            self._ok(json.dumps({**lg.status(), **_storage_identity()}, ensure_ascii=False).encode())
         except Exception as e:
             self._err('llm-gate: ' + str(e), 500)
 
@@ -3405,14 +3419,19 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             import llm_gate as lg
             op = str(body.get('op') or 'status')
             owner = str(body.get('owner') or 'st')
+            identity = _storage_identity()
+            if identity['storageMode'] == 'external' and op in {'acquire', 'release'} and body.get('expectedDataRootId') != identity['dataRootId']:
+                self._err('llm-gate: data root identity mismatch', 409)
+                return
             if op == 'acquire':
                 ok = lg.acquire(owner, float(body.get('ttl_sec') or 90))
-                self._ok(json.dumps({'ok': ok, **lg.status()}, ensure_ascii=False).encode())
+                self._ok(json.dumps({**lg.status(), **identity, 'ok': ok, 'acquired': ok}, ensure_ascii=False).encode())
             elif op == 'release':
                 lg.release(owner)
-                self._ok(json.dumps(lg.status(), ensure_ascii=False).encode())
+                status = lg.status()
+                self._ok(json.dumps({**status, **identity, 'released': not (status.get('held') and status.get('owner') == owner)}, ensure_ascii=False).encode())
             else:
-                self._ok(json.dumps(lg.status(), ensure_ascii=False).encode())
+                self._ok(json.dumps({**lg.status(), **identity}, ensure_ascii=False).encode())
         except Exception as e:
             self._err('llm-gate: ' + str(e), 500)
 
@@ -6690,9 +6709,9 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                             'volRatio': round(ind['volRatio'], 2) if ind['volRatio'] is not None else None})
         results = enrich_results(records, fund, chip, lookup=_openapi_lookup,
                                  monthly_revenue=_mops_monthly_revenue,
-                                 database=os.path.join(_BASE, 'data', 'market.db'),
+                                 database=str(_data_path('market.db', code_root=_BASE)),
                                  chip_history_path=CHIP_HISTORY_PATH,
-                                 trace_path=os.path.join(_BASE, 'logs', 'screen3.jsonl'),
+                                 trace_path=str(_log_path('screen3.jsonl', code_root=_BASE)),
                                  trace_id=__import__('uuid').uuid4().hex)
         results.sort(key=lambda x: (x.get('changePct') is None, -(x.get('changePct') or 0), x['sym']))
         self._ok(json.dumps({'results': results[:80], 'scanned': len(syms),

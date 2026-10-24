@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+_runtime_policy = runpy.run_path(str(ROOT / 'scripts' / 'runtime_release_policy.py'))
 STAGE_NAME = "Stock_Terminal"
 ZIP_NAME = "Stock_Terminal_v5.0.zip"
 TRACE_PATH = ROOT / "logs" / "build_dist.jsonl"
@@ -152,6 +154,7 @@ DATA_BLOCK_FILES = {
 }
 
 ROOT_ALLOW_FILES = (
+    "runtime_storage_capability.json",
     "stock_terminal.html",
     "stock_terminal_v2.html",
     "build_v2.py",
@@ -206,6 +209,12 @@ PRIVATE_WEB_ONLY_PATHS = {
 # working tree a hard preflight failure instead of silently producing a ZIP
 # that cannot provide the documented feature.
 REQUIRED_SHARE_FILES = (
+    "scripts/assert_standalone_runtime.ps1",
+    "wavedeck/runtime_paths.py",
+    "scripts/runtime_release_policy.py",
+    "server/data_paths.py",
+    "server/runtime_storage.py",
+    "runtime_storage_capability.json",
     "README.md",
     "LICENSE",
     "START_TIP.cmd",
@@ -438,6 +447,8 @@ def copy_tree_filtered(
     """Copy an allowed tree while rejecting untracked and sensitive files."""
     if not src.is_dir():
         return 0
+    if _runtime_policy['protected_member'](src.as_posix()):
+        return 0
     count = 0
     dst.mkdir(parents=True, exist_ok=True)
     normalized_prefixes = tuple(p.strip("/").lower() for p in skip_rel_prefixes)
@@ -448,7 +459,8 @@ def copy_tree_filtered(
             name
             for name in dirs
             if not should_skip_dir(name)
-            and not (root_path / name).is_symlink()
+            and not _runtime_policy['protected_member']((rel / name).as_posix(), data_root=src.name.casefold() == 'data')
+            and not _runtime_policy['is_link'](root_path / name)
             and not any(
                 (rel / name).as_posix().lower() == prefix
                 or (rel / name).as_posix().lower().startswith(prefix + "/")
@@ -460,7 +472,9 @@ def copy_tree_filtered(
         for filename in files:
             source = root_path / filename
             rel_source = source.relative_to(src).as_posix().lower()
-            if source.is_symlink() or not is_tracked(source):
+            if _runtime_policy['protected_member'](rel_source, data_root=src.name.casefold() == 'data'):
+                continue
+            if _runtime_policy['is_link'](source) or not is_tracked(source):
                 continue
             if any(
                 rel_source == prefix or rel_source.startswith(prefix + "/")
@@ -567,6 +581,7 @@ def scan_text(relative_name: str, text: str) -> list[dict[str, str]]:
 
 
 def scan_stage_content(stage: Path) -> list[dict[str, str]]:
+    _runtime_policy['assert_safe_tree'](stage)
     issues: list[dict[str, str]] = []
     for path in sorted(stage.rglob("*")):
         if not path.is_file() or not is_text_path(path):
@@ -580,6 +595,7 @@ def scan_stage_content(stage: Path) -> list[dict[str, str]]:
 
 
 def make_zip(stage: Path, zip_path: Path) -> int:
+    _runtime_policy['assert_safe_tree'](stage)
     if zip_path.exists():
         zip_path.unlink()
     file_count = 0
@@ -607,6 +623,9 @@ def verify_archive(zip_path: Path) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
     with zipfile.ZipFile(zip_path, "r") as archive:
         for info in archive.infolist():
+            if _runtime_policy['protected_member'](info.filename):
+                issues.append({'path': info.filename, 'rule': 'protected-runtime'})
+                continue
             if info.is_dir():
                 continue
             archive_path = Path(info.filename)

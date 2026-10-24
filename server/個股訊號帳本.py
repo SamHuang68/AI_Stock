@@ -4,6 +4,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
+
+if __package__:
+    from .runtime_storage import assert_write_allowed
+else:
+    from runtime_storage import assert_write_allowed
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +25,7 @@ def _json(value):
 
 
 def init(path):
+    assert_write_allowed(path, must_exist=True)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(path)) as conn, conn:
         conn.executescript('''
@@ -51,6 +57,7 @@ def register(path, report, engine_digest, now=None):
                'historicalLimitations': report['limitations']}
     protocol_id = research.digest(payload)
     init(path)
+    assert_write_allowed(path, must_exist=True)
     with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute('INSERT OR IGNORE INTO stock_protocols VALUES(?,?,?)',
                      (protocol_id, now.isoformat(), _json(payload)))
@@ -84,6 +91,7 @@ def track(path, protocol_id, series, benchmark_bars, engine_digest, *, now=None,
     finalized_today = (now.hour, now.minute) >= (14, 0)
     benchmark_bars = [b for b in benchmark_bars if b['date'] < today or (b['date'] == today and finalized_today)]
     market = research.market_regimes(benchmark_bars)
+    assert_write_allowed(path, must_exist=True)
     with closing(sqlite3.connect(path)) as conn, conn:
         for symbol, raw_bars in series:
             bars = [b for b in raw_bars if b['date'] < today or (b['date'] == today and finalized_today)]

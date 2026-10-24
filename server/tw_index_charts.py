@@ -30,7 +30,10 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DATA_DIR = os.path.join(_BASE, 'data')
+import data_paths
+from runtime_storage import assert_write_allowed
+
+DATA_DIR = str(data_paths.data_root(code_root=_BASE))
 TWOII_CSV = os.path.join(DATA_DIR, 'twoii_daily.csv')
 TXF_CSV = os.path.join(DATA_DIR, 'txf_daily.csv')
 TZ_TPE = timezone(timedelta(hours=8))
@@ -130,8 +133,10 @@ def _read_csv(path: str) -> List[Tuple]:
 
 
 def _write_csv(path: str, rows: List[Tuple]):
+    assert_write_allowed(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + '.tmp'
+    assert_write_allowed(tmp)
     with open(tmp, 'w', encoding='utf-8', newline='') as f:
         w = csv.writer(f)
         w.writerow(['date', 'open', 'high', 'low', 'close', 'volume'])

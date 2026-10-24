@@ -19,6 +19,8 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import closing
+from pathlib import Path
 
 import etf_paths
 
@@ -28,7 +30,9 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _PYEXE = sys.executable
-DATA = os.path.join(_BASE, 'data')
+import data_paths
+
+DATA = str(data_paths.data_root(code_root=_BASE))
 SRV = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -47,6 +51,9 @@ def _newest_glob(pat):
 
 def _spawn(script, *args):
     """背景跑 tracker 腳本(非阻塞)。frozen 環境無獨立 python 則回提示。"""
+    if data_paths.binding_for(code_root=_BASE).mode != 'legacy':
+        return {'ok': False, 'started': False, 'reason': 'RUNTIME_WRITER_REQUIRED',
+                'error': '外置資料模式不啟動獨立寫入腳本；此更新須由受管後端工作執行。'}
     if getattr(sys, 'frozen', False):
         return {'ok': False, 'error': '打包版無獨立 Python,請用排程或原始碼版執行此更新'}
     path = os.path.join(SRV, script)
@@ -78,9 +85,8 @@ def _st_db():
     n = 0
     try:
         import sqlite3
-        con = sqlite3.connect(p)
-        n = con.execute('SELECT COUNT(*) FROM meta').fetchone()[0]
-        con.close()
+        with closing(sqlite3.connect(Path(p).resolve().as_uri() + '?mode=ro', uri=True)) as con:
+            n = con.execute('SELECT COUNT(*) FROM meta').fetchone()[0]
     except Exception:
         pass
     return {'updated': _mtime(p), 'count': n}
@@ -113,11 +119,10 @@ def _st_margin_ratio():
     try:
         import sqlite3
         db = os.path.join(DATA, 'market.db')
-        con = sqlite3.connect(db)
-        n = con.execute(
-            "SELECT COUNT(*) FROM bars WHERE symbol='__MARGIN_RATIO__'"
-        ).fetchone()[0]
-        con.close()
+        with closing(sqlite3.connect(Path(db).resolve().as_uri() + '?mode=ro', uri=True)) as con:
+            n = con.execute(
+                "SELECT COUNT(*) FROM bars WHERE symbol='__MARGIN_RATIO__'"
+            ).fetchone()[0]
     except Exception:
         pass
     return {'updated': _mtime(p), 'count': n}
@@ -152,9 +157,8 @@ def _st_tdcc_holders():
     n = 0
     try:
         import sqlite3
-        con = sqlite3.connect(p)
-        n = con.execute('SELECT COUNT(*) FROM holders_week').fetchone()[0]
-        con.close()
+        with closing(sqlite3.connect(Path(p).resolve().as_uri() + '?mode=ro', uri=True)) as con:
+            n = con.execute('SELECT COUNT(*) FROM holders_week').fetchone()[0]
     except Exception:
         pass
     return {'updated': _mtime(p), 'count': n}

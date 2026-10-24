@@ -17,6 +17,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 import uuid
+import urllib.request
 
 if __name__ == '__main__':
     sys.dont_write_bytecode = True
@@ -73,7 +74,9 @@ def load_release_helper(install_root):
     if here.parent == Path(install_root).resolve():
         helper_root = Path(install_root) / 'current'
         manifest = read_json(helper_root / MANIFEST)
-        for key in ('scripts/private_web_release.py', 'server/daemon_lock.py'):
+        for key in ('scripts/private_web_release.py', 'server/daemon_lock.py',
+                    'scripts/runtime_release_policy.py', 'server/data_paths.py',
+                    'server/runtime_storage.py'):
             expected = manifest.get('contentSha256', {}).get(key)
             if not expected or digest(helper_root / key) != expected:
                 raise ValueError('目前版本發布 helper 雜湊不符，未執行更新')
@@ -211,6 +214,8 @@ def recheck_source(source, files, records):
 def backup_data(source, install_root, commit, reason, *, target_commit=None):
     """資料夾內每個 SQLite 比對 schema／逐表值；其他檔案比對 SHA256。"""
     source = checked_path(source)
+    helper = load_release_helper(install_root)
+    helper._release_preflight(Path(install_root), source)
     backups = checked_path(Path(install_root) / 'backups')
     backups.mkdir(parents=True, exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix='資料備份-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-', dir=backups))
@@ -258,6 +263,7 @@ def backup_data(source, install_root, commit, reason, *, target_commit=None):
 
 
 def import_stage(stage, manifest, install_root, release):
+    release._release_preflight(Path(install_root), stage)
     releases = checked_path(Path(install_root) / 'releases')
     releases.mkdir(parents=True, exist_ok=True)
     target = checked_path(releases / manifest['releaseId'])
@@ -303,6 +309,68 @@ def configuration(install_root):
     return config
 
 
+def _shared_health(url):
+    # Bound loopback URL only, no proxy environment or redirect to another host.
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    with opener.open(url + '/gateway/health', timeout=3) as response:
+        if response.status != 200:
+            raise RuntimeError('shared gateway is unavailable')
+        value = json.loads(response.read(16384).decode('utf-8'))
+        if not isinstance(value, dict):
+            raise RuntimeError('shared gateway health identity is invalid')
+        return value
+
+
+def shared_client_status(install_root, config):
+    """Inspect the existing authenticated service; never starts/stops a backend."""
+    if config.get('storageMode') != 'external' or not config.get('dataBinding'):
+        raise RuntimeError('shared client requires an explicit external installation binding')
+    source = checked_path(config['sourceInstallRoot'])
+    code = source / 'current'
+    helper = load_release_helper(install_root)
+    helpers = helper.storage_helpers()
+    env = dict(os.environ)
+    if env.get('ST_RUNTIME_ROLE') not in (None, '', 'client'):
+        raise RuntimeError('shared client role conflicts with environment')
+    env['ST_RUNTIME_ROLE'] = 'client'
+    binding = helpers['validate_binding'](helpers['resolve_binding'](
+        code_root=code, environ=env, installation_binding=config['dataBinding']), expected_role='client')
+    if binding.mode != 'external':
+        raise RuntimeError('shared client requires external storage')
+    helpers['validate_release_capability'](code, binding)
+    helper.assert_disjoint((install_root, source), helpers['protected_roots'](binding))
+    manifest = read_json(code / MANIFEST)
+    commit = manifest.get('commit')
+    if not isinstance(commit, str) or len(commit) != 40 or any(c not in '0123456789abcdef' for c in commit):
+        raise RuntimeError('shared backend revision identity is missing')
+    health = _shared_health(binding.public_url)
+    identity = health.get('runtime', {})
+    if (health.get('ok') is not True or health.get('gateway') != 'private-web' or health.get('upstream') is not True
+            or not isinstance(identity, dict) or identity.get('storageMode') != 'external'
+            or identity.get('runtimeRole') != 'backend' or identity.get('dataRootId') != binding.data_root_id
+            or identity.get('capabilityVersion') != binding.capability_version
+            or identity.get('runtimeCommit') != commit):
+        raise RuntimeError('shared backend health identity does not match the installation')
+    capabilities = health.get('capabilities', {})
+    # Existing Local includes these surfaces. No silent market-only downgrade.
+    if not isinstance(capabilities, dict) or any(capabilities.get(name) is not True for name in ('wavedeck', 'remoteTrading')):
+        raise RuntimeError('shared backend capabilities do not preserve Local WaveDeck/remoteTrading; cutover blocked')
+    return {'storageMode': 'external', 'runtimeRole': 'client', 'publicUrl': binding.public_url,
+            'dataRootId': binding.data_root_id, 'installedCommit': commit,
+            'desiredCommit': commit, 'needsSync': False}
+
+
+def _legacy_storage_guard(install_root, config, release):
+    if config.get('storageMode') not in (None, 'legacy') or config.get('dataBinding'):
+        raise RuntimeError('incomplete runtime binding; legacy data sync refused')
+    for root in (Path(install_root), Path(config['sourceInstallRoot'])):
+        if release._release_binding(root) is not None:
+            raise RuntimeError('external installation requires a registered shared client; legacy launch/sync refused')
+
+
 def active_manifest(install_root):
     current = checked_path(Path(install_root) / 'current')
     manifest = read_json(current / MANIFEST)
@@ -336,6 +404,9 @@ def status(install_root, release):
     if (Path(install_root) / SETUP_PENDING).exists():
         raise ValueError('初次設定尚未完成；請以原本相同路徑參數重新執行 setup 以修復，資料保留')
     config = configuration(install_root)
+    if config.get('storageMode') == 'external':
+        return shared_client_status(install_root, config)
+    _legacy_storage_guard(install_root, config, release)
     _, desired = select_stage(Path(config['sourceInstallRoot']), release)
     active = active_manifest(install_root)
     return {'installedCommit': active['commit'], 'desiredCommit': desired['commit'],
@@ -361,7 +432,12 @@ def sync_install(install_root, release, setup_config=None):
     install_root = checked_path(install_root)
     release.safe_install_root(install_root)
     config = setup_config or configuration(install_root)
+    if config.get('storageMode') == 'external':
+        # Activation/configuration is a separate, explicitly approved cutover.
+        return {'changed': False, **shared_client_status(install_root, config)}
+    _legacy_storage_guard(install_root, config, release)
     _, original, source = validate_roots(install_root, config['originalCheckout'], config['sourceInstallRoot'])
+    release._release_preflight(install_root, original / 'data', install_root / 'current')
     install_root.mkdir(parents=True, exist_ok=True)
     with release._release_lock(source), release._release_lock(install_root):
         release._recover_transition(install_root)
@@ -429,6 +505,7 @@ def main():
     setup.add_argument('--python', type=Path, required=True)
     sub.add_parser('status')
     sub.add_parser('sync')
+    sub.add_parser('shared-status')
     args = parser.parse_args()
     helper = load_release_helper(args.install_root)
     if args.command == 'setup':
@@ -439,6 +516,8 @@ def main():
             'sourceInstallRoot': str(checked_path(args.source_install_root)),
             'python': str(args.python.resolve()), 'port': 18432, 'host': '127.0.0.1', 'schemaVersion': 1,
         })
+    elif args.command == 'shared-status':
+        result = shared_client_status(args.install_root, read_json(args.install_root / CONFIG))
     elif args.command == 'status':
         result = status(args.install_root, helper)
     else:

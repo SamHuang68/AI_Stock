@@ -670,7 +670,9 @@ class ReviewRegressions(unittest.TestCase):
                 analyzed = routes.analyze_symbol('2330', 'TW', with_stats=False, use_cache=False,
                     bars_loader=lambda *args, **kw: loaded, chip_dir=tmp, now=now)
                 self.assertEqual(analyzed['dataSource'], 'local-db')
-                self.assertEqual(analyzed['dataWarning'], loaded['error'])
+                self.assertIn(loaded['error'], analyzed['dataWarning'])
+                self.assertEqual(analyzed['reason'], 'CALENDAR_UNAVAILABLE')
+                self.assertIn('日曆無法核對', analyzed['message'])
                 fetch.assert_called_once()
                 self.assertEqual(ds.get_bars('2330', market='TW'), [old])
                 with self.assertRaises(ValueError):

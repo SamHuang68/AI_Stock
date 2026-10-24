@@ -16,8 +16,11 @@ from typing import Any, Iterable
 import sector_flow
 
 
+import data_paths
+from runtime_storage import assert_write_allowed
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_BASE, 'data', 'sector_history.db')
+DB_PATH = str(data_paths.data_path('sector_history.db', code_root=_BASE))
 _URLS = (
     'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={date}&type=IND&response=json',
     'https://www.twse.com.tw/exchangeReport/MI_INDEX?date={date}&type=IND&response=json',
@@ -37,6 +40,7 @@ def _date_key(value: Any) -> str | None:
 
 
 def _init(path: str = DB_PATH) -> None:
+    assert_write_allowed(path, must_exist=True)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with closing(sqlite3.connect(path, timeout=10)) as conn:
         with conn:

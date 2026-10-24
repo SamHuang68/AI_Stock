@@ -33,9 +33,14 @@ except ImportError:
     from http_boundary import BodyReadError, read_json_body
     from deadline import BoundedExecutor, Deadline
 
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
-WATCHLIST_FILE = os.path.join(_BASE, 'data', 'stock_signal_watchlist.json')
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
+WATCHLIST_FILE = str(data_paths.data_path('stock_signal_watchlist.json', code_root=_BASE))
 
 _SYM_RE = re.compile(r'^[A-Z0-9^][A-Z0-9.\-^]{0,14}$')
 MAX_BATCH = 40
@@ -154,6 +159,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
     error = None
     retry_soon = False
     revision_status_unknown = False
+    revision_checked = False
     last = bars[-1]['date'] if bars else None
     sess = session_state(market, last, now)
     expected = sess['expectedLastDate']
@@ -169,6 +175,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
         _remote_fail_errors.pop(failure_key, None)
         if revision_status_unknown:
             # metadata 重試只讀既有 DB；資料齊全或禁止連網時也能解除未知。
+            revision_checked = True
             try:
                 revision = ds.source_revision_status(code, market)
             except (ValueError, sqlite3.Error, OSError) as exc:
@@ -233,6 +240,7 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
                 bars = updated_bars
                 if final_rows:
                     source = 'local-db+yahoo'
+                revision_checked = True
                 try:
                     revision = ds.source_revision_status(code, market)
                 except (ValueError, sqlite3.Error, OSError) as exc:
@@ -250,6 +258,21 @@ def load_bars(code: str, market: str, *, allow_network: bool = True,
                     source = 'local-db+yahoo'
                     if revision['count']:
                         error = '來源有歷史修訂，首次日線已保留；價格基準仍須核對，不以新來源靜默覆寫'
+    if not revision_checked and not revision_status_unknown:
+        # 警示依持久化修訂紀錄判定，不依賴是否剛補抓或本程序曾經讀取失敗。
+        try:
+            revision = ds.source_revision_status(code, market)
+        except (ValueError, sqlite3.Error, OSError) as exc:
+            warning = f'來源修訂狀態待確認，保留已讀日線（{type(exc).__name__}）：{exc}'
+            error = f'{error}；{warning}' if error else warning
+            revision_status_unknown = True
+            _revision_status_unknown[failure_key] = True
+            _remote_fail[failure_key] = max(_remote_fail.get(failure_key, 0), time.time() + 60)
+            _remote_fail_errors[failure_key] = error
+        else:
+            if revision['count']:
+                warning = '來源有歷史修訂，首次日線已保留；價格基準仍須核對，不以新來源靜默覆寫'
+                error = f'{error}；{warning}' if error else warning
     if live_extra and (not bars or bars[-1]['date'] < live_extra[0]['date']):
         bars = bars + live_extra
     if revision_status_unknown:
@@ -383,6 +406,32 @@ def load_alert_bars(code, market, remote_loader, *, now=None):
         return result
 
 
+def _health_session_bars(bars, code, market):
+    """依官方交易日保留缺口；None 表示日曆無法核對，空清單表示沒有可用交易日。"""
+    if not bars:
+        return []
+    by_day = {bar['date']: bar for bar in bars}
+    if market == 'TW':
+        from 台股交易參考 import verified_sessions, trading_status
+        days = verified_sessions(bars[0]['date'], bars[-1]['date'], allow_partial=True)
+        if days is None:
+            return None
+        return [by_day.get(day, {'date': day}) if trading_status(code, day) is None
+                else {'date': day} for day in days]
+    from us_equity_calendar import session
+    usable = []
+    cursor, end = date.fromisoformat(bars[0]['date']), date.fromisoformat(bars[-1]['date'])
+    while cursor <= end:
+        state = session(cursor)['status']
+        if state == 'unknown':
+            usable = []
+        elif state == 'scheduled':
+            day = cursor.isoformat()
+            usable.append(by_day.get(day, {'date': day}))
+        cursor += timedelta(days=1)
+    return usable
+
+
 def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
                    allow_network: bool = True, now: Optional[datetime] = None,
                    bars_loader: Optional[Callable[..., Dict[str, Any]]] = None,
@@ -398,8 +447,14 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
     loader = bars_loader or load_bars
     loaded = loader(code, market, allow_network=allow_network, now=now)
     chips = ss.load_chip_series(code, chip_dir or CHIP_HISTORY_PATH, 60) if market == 'TW' else []
-    result = ss.analyze(loaded['bars'], symbol=code, market=market, chips=chips,
+    analysis_bars = _health_session_bars(loaded['bars'], code, market)
+    calendar_unavailable = analysis_bars is None
+    result = ss.analyze([] if calendar_unavailable else analysis_bars, symbol=code, market=market, chips=chips,
                         provisional_last=loaded.get('provisional', False), with_stats=with_stats)
+    result['dataQuality']['rawInputBars'] = len(loaded['bars'])
+    if calendar_unavailable:
+        result.update(reason='CALENDAR_UNAVAILABLE',
+                      message='交易日曆無法核對，暫停個股體檢；已讀行情保留，請確認日曆資料後重試。')
     if with_stats and result.get('ok'):
         try:
             import signal_stats_pool as pool
@@ -414,8 +469,9 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
                                         '交易日曆待確認：保留最後已知日線，最新應有交易日尚不能確認。')
     result['dataSource'] = loaded.get('source')
     result['staleDays'] = loaded.get('staleDays')
-    if loaded.get('error'):
-        result['dataWarning'] = loaded['error']
+    warnings = ([result['message']] if calendar_unavailable else []) + ([loaded['error']] if loaded.get('error') else [])
+    if warnings:
+        result['dataWarning'] = '；'.join(warnings)
     result['generatedAt'] = datetime.now(ss._TZ['TW']).isoformat(timespec='seconds')
     try:
         from 個股資料品質 import assess
@@ -424,12 +480,14 @@ def analyze_symbol(code: str, market: str, *, with_stats: bool = True,
         with ds.read_snapshot() as connection:
             benchmark_code = '^TWII' if market == 'TW' else '^GSPC'
             raw = ds.get_bars_bulk([benchmark_code], market=market, connection=connection).get(benchmark_code) or []
-        result['dataQuality'] = assess(result, ss.normalize_bars(raw, market), pool.load_cached(market), now)
+        result['dataQuality'].update(assess(result, ss.normalize_bars(raw, market), pool.load_cached(market), now))
     except Exception:
-        result['dataQuality'] = {'status': 'unknown', 'label': '資料品質待確認', 'items': [],
-                                 'notes': ['本機品質資料無法讀取；不代表資料已齊全。']}
+        result['dataQuality'].update(status='unknown', label='資料品質待確認', items=[],
+                                     notes=['本機品質資料無法讀取；不代表資料已齊全。'])
     if loaded.get('sourceRevisionStatusUnknown'):
         result['dataQuality'].update(status='unknown', label='來源修訂狀態待確認')
+    if calendar_unavailable:
+        result['dataQuality'].update(status='unknown', label='交易日曆無法核對')
     ttl = 300 if loaded.get('provisional') else 1800
     # 來源逾時／額滿及負快取期間的結果只短暫快取，避免再次延長降級結果。
     if loaded.get('retrySoon'):

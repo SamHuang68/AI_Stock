@@ -16,7 +16,7 @@ def read_release_identity(root: Path) -> dict:
         commit, files = raw["commit"], raw["files"]
         if not re.fullmatch(r"[a-f0-9]{40}", commit) or not isinstance(files, dict):
             raise ValueError("發布收據格式無效")
-        required = {"VERSION", "run.py", "web/index.html", "web/js/deck.js", "web/css/deck.css"}
+        required = {"VERSION", "run.py", "runtime_paths.py", "web/index.html", "web/js/deck.js", "web/css/deck.css"}
         required.update(path.relative_to(root).as_posix() for path in (root / "server").rglob("*.py"))
         if not required.issubset(files):
             raise ValueError("發布收據缺少必要程式檔案")

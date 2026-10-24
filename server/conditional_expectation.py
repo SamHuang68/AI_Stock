@@ -15,6 +15,7 @@ import os
 import sqlite3
 from contextlib import closing
 from datetime import date, datetime, time as dtime, timedelta
+from pathlib import Path
 from typing import Any, Callable
 
 try:
@@ -43,8 +44,10 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DECISION_DB_PATH = os.path.join(_BASE, 'data', 'decision_history.db')
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
+import data_paths
+
+DECISION_DB_PATH = str(data_paths.data_path('decision_history.db', code_root=_BASE))
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 
 
 def _parse_iso(value: Any) -> datetime | None:
@@ -344,7 +347,8 @@ def regime_at_date(
         return 'UNKNOWN'
     target = as_of.isoformat()
     try:
-        with closing(sqlite3.connect(decision_db_path, timeout=5)) as conn:
+        with closing(sqlite3.connect(Path(decision_db_path).resolve().as_uri() + '?mode=ro',
+                                     uri=True, timeout=5)) as conn:
             row = conn.execute(
                 'SELECT regime FROM decision_history '
                 'WHERE substr(as_of, 1, 10) <= ? ORDER BY as_of DESC LIMIT 1',

@@ -37,8 +37,15 @@ from datetime import date, datetime, timedelta, timezone
 from html import unescape
 from typing import Any, Dict, List, Optional, Tuple
 
+if __package__:
+    from . import data_paths
+    from .runtime_storage import assert_write_allowed
+else:
+    import data_paths
+    from runtime_storage import assert_write_allowed
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, 'data')
+DATA = str(data_paths.data_root(code_root=ROOT))
 CBC_DAILY = os.path.join(DATA, 'cbc_policy_rates.csv')
 CBC_CHANGES = os.path.join(DATA, 'cbc_policy_rate_changes.csv')
 MARGIN_MIX_CSV = os.path.join(DATA, 'tw_margin_mix_daily.csv')
@@ -173,6 +180,7 @@ def is_macro_chart(sym: str) -> bool:
 
 # ── SQLite helpers ────────────────────────────────────────────
 def _db() -> sqlite3.Connection:
+    assert_write_allowed(DB_PATH, must_exist=True)
     os.makedirs(DATA, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
@@ -248,6 +256,8 @@ def scrape_cbc_rate_changes() -> List[Tuple[date, float, float, float]]:
 
 
 def save_cbc_changes(changes: List[Tuple[date, float, float, float]]) -> None:
+    assert_write_allowed(CBC_CHANGES)
+    assert_write_allowed(CBC_DAILY)
     os.makedirs(DATA, exist_ok=True)
     with open(CBC_CHANGES, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
@@ -535,6 +545,7 @@ def _recompute_all_yoy() -> None:
 
 
 def export_margin_mix_csv() -> None:
+    assert_write_allowed(MARGIN_MIX_CSV)
     conn = _db()
     try:
         rows = conn.execute('SELECT d, listed, otc, ratio, yoy FROM margin_mix ORDER BY d').fetchall()
@@ -663,9 +674,11 @@ def _save_seed_csv(name: str, pts: List[Dict[str, Any]]) -> Optional[str]:
     if not name or not pts:
         return
     ordered = _validated_seed_points(pts)
-    os.makedirs(SEED_DIR, exist_ok=True)
     path = _seed_path(name)
+    assert_write_allowed(path)
+    os.makedirs(SEED_DIR, exist_ok=True)
     tmp = f'{path}.{os.getpid()}.{threading.get_ident()}.tmp'
+    assert_write_allowed(tmp)
     try:
         with open(tmp, 'w', newline='', encoding='utf-8') as f:
             w = csv.writer(f)
@@ -1078,6 +1091,7 @@ def _seed_snapshot(spec: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
 def _remove_quietly(path: str) -> None:
     """清暫存檔：Windows 上被防毒／索引鎖住時 os.remove 會拋 PermissionError，
     在 finally 裡拋出會蓋掉真正的錯誤，讓呼叫端報錯成因不對。清不掉就留給下次。"""
+    assert_write_allowed(path)
     try:
         if os.path.exists(path):
             os.remove(path)
@@ -1091,7 +1105,9 @@ def _save_seed_source(spec: Dict[str, Any], digest: Optional[str] = None) -> Non
         with open(path, 'rb') as f:
             digest = hashlib.sha256(f.read()).hexdigest()
     source_path = path + '.source.json'
+    assert_write_allowed(source_path)
     tmp = f'{source_path}.{os.getpid()}.{threading.get_ident()}.tmp'
+    assert_write_allowed(tmp)
     try:
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump({**_seed_identity(spec), 'sha256': digest}, f, sort_keys=True)
@@ -1119,11 +1135,13 @@ def _backup_seed(name: str) -> None:
         content = f.read()
     digest = hashlib.sha256(content).hexdigest()
     backup = path + '.unverified.' + digest + '.bak'
+    assert_write_allowed(backup)
     if os.path.isfile(backup):
         with open(backup, 'rb') as f:
             if hashlib.sha256(f.read()).hexdigest() == digest:
                 return
     tmp = f'{backup}.{os.getpid()}.{threading.get_ident()}.tmp'
+    assert_write_allowed(tmp)
     try:
         with open(tmp, 'wb') as f:
             f.write(content)
@@ -1762,6 +1780,8 @@ def refresh_all(dense: bool = False, density: Optional[str] = None,
 
 
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立 Macro 更新；請使用受管後端工作。')
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['scrape-cbc', 'backfill-mix', 'demo', 'export-mix', 'seed-us', 'refresh'])

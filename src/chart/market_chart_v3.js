@@ -512,6 +512,21 @@
     const id = btn.dataset.chartId || (window.S && S.sym) || '';
     const def = resolve(id);
     if (!def) return;
+    const loadSeq = window.__loadSeq;
+    const task = {};
+    btn._marketRefreshTask = task;
+    function current() {
+      return btn._marketRefreshTask === task && loadSeq === window.__loadSeq &&
+        typeof S !== 'undefined' && S.sym === def.id;
+    }
+    function release() {
+      if (btn._marketRefreshTask !== task) return;
+      delete btn._marketRefreshTask;
+      if (btn.dataset.chartId === def.id) {
+        btn.disabled = false;
+        btn.textContent = '↻ 更新資料';
+      }
+    }
     const density = (document.getElementById('market-chart-density') || {}).value || getDensity();
     setDensity(density);
     const densMeta = DENSITY_PRESETS.find(p => p.key === density) || DENSITY_PRESETS[1];
@@ -528,6 +543,7 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ full: true }), cache: 'no-store'
         });
+        if (!current()) { release(); return; }
         btn.textContent = '已啟動回補';
       } else {
         const r = await fetch(serverBase() + '/macro/refresh/' + encodeURIComponent(def.id), {
@@ -541,6 +557,7 @@
           cache: 'no-store',
         });
         const j = await r.json().catch(() => ({}));
+        if (!current()) { release(); return; }
         if (!r.ok || (j && j.ok === false)) {
           throw new Error((j && j.error) || ('HTTP ' + r.status));
         }
@@ -555,20 +572,21 @@
         }
       }
       setTimeout(() => {
-        load(def.id, { silent: true }).finally(() => {
-          const b = document.getElementById('market-chart-refresh');
-          if (b) {
-            b.disabled = false;
-            b.textContent = '↻ 更新資料';
-          }
-        });
+        if (!current()) { release(); return; }
+        load(def.id, { silent: true }).finally(release);
       }, 600);
     } catch (e) {
       WARN('refresh failed', e);
+      if (!current()) { release(); return; }
       btn.textContent = '失敗';
       btn.disabled = false;
       if (typeof setStat === 'function') setStat('更新失敗 · ' + (e && e.message ? e.message : e));
-      setTimeout(() => { if (btn) btn.textContent = prev || '↻ 更新資料'; }, 2500);
+      setTimeout(() => {
+        if (btn._marketRefreshTask === task) {
+          release();
+          if (loadSeq === window.__loadSeq && btn.dataset.chartId === def.id) btn.textContent = prev || '↻ 更新資料';
+        }
+      }, 2500);
     }
   }
 
@@ -1640,6 +1658,7 @@
         return true;
       } catch (e) {
         WARN('multi fetch failed', url, e);
+        if (myLoad !== window.__loadSeq) return false;
         try {
           const loading = document.getElementById('chart-loading');
           if (loading) { loading.style.display = 'flex'; loading.textContent = '載入失敗'; }
@@ -1658,6 +1677,7 @@
       raw = await r.json();
     } catch (e) {
       WARN('fetch failed', url, e);
+      if (myLoad !== window.__loadSeq) return false;
       try {
         const loading = document.getElementById('chart-loading');
         if (loading) { loading.style.display = 'flex'; loading.textContent = '載入失敗'; }

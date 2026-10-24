@@ -7,6 +7,11 @@ import math
 import re
 import sqlite3
 from contextlib import closing
+
+if __package__:
+    from .runtime_storage import assert_write_allowed
+else:
+    from runtime_storage import assert_write_allowed
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -253,6 +258,7 @@ def refresh_actions(db, symbol, begin, end, fetch, check=lambda: None):
                        PARSER_VERSION, encoded(payload))
                 evidence.append((row, receipt_id))
     check()
+    assert_write_allowed(db, must_exist=True)
     with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute('BEGIN IMMEDIATE')
         check()

@@ -10,6 +10,7 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
+import importlib.util
 
 import datastore
 import job_queue
@@ -18,11 +19,39 @@ import stock_signals as ss
 from atomic_store import atomic_write_json, load_json
 import 每日個股留存 as daily
 from 台股交易參考 import session, instrument
+from data_paths import binding_for, log_path
+from runtime_storage import assert_write_allowed
 
 ROOT = Path(__file__).resolve().parents[1]
 JOB = 'stock-research-maintenance'
 REPORT_JOB = 'stock-evidence-report'
 _thread = None
+_source_module_lock = threading.Lock()
+
+
+def _run_source_update(argv, *, parent_run_id, trace_output):
+    """Use the existing updater in this writer process, without environment grants."""
+    assert_write_allowed(Path(datastore.DB_PATH), must_exist=True)
+    module_name = '_st_research_source_update'
+    with _source_module_lock:
+        module = sys.modules.get(module_name)
+        if module is None:
+            spec = importlib.util.spec_from_file_location(module_name, ROOT / 'scripts/個股研究資料更新.py')
+            if spec is None or spec.loader is None:
+                raise RuntimeError('研究來源更新程式無法載入')
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            try:
+                spec.loader.exec_module(module)
+            except Exception:
+                sys.modules.pop(module_name, None)
+                raise
+    deadline = time.monotonic() + 10800
+    result = module.run_update(argv, parent_run_id=parent_run_id, trace_output=trace_output,
+                               deadline_monotonic=deadline)
+    if time.monotonic() >= deadline:
+        raise TimeoutError('研究來源更新逾時')
+    return result
 
 
 def schedule_status():
@@ -150,12 +179,16 @@ def run(*, enable_daily=False, download_sources=False, now=None):
     now = now or datetime.now(ss._TZ['TW'])
     run_id = uuid.uuid4().hex
     state = {'runId': run_id, 'status': 'running', 'startedAt': now.isoformat(), 'steps': [], 'externalCalls': 0}
-    trace_path = state_path.parent.parent / 'logs' / 'stock_research_maintenance.jsonl'
+    bound = binding_for()
+    trace_path = (log_path('stock_research_maintenance.jsonl', code_root=state_path.parent.parent)
+                  if bound.mode == 'legacy' else log_path('stock_research_maintenance.jsonl', binding=bound))
+    assert_write_allowed(trace_path)
     trace_path.parent.mkdir(parents=True, exist_ok=True)
 
     def save(event, **details):
         state['updatedAt'] = datetime.now(ss._TZ['TW']).isoformat()
         atomic_write_json(str(state_path), state, backup=True)
+        assert_write_allowed(trace_path)
         with trace_path.open('a', encoding='utf-8') as handle:
             handle.write(json.dumps({'at': state['updatedAt'], 'runId': run_id, 'event': event, **details}, ensure_ascii=False) + '\n')
 
@@ -188,13 +221,18 @@ def run(*, enable_daily=False, download_sources=False, now=None):
                 logfile = trace_path.parent / ('stock_research_source_' + run_id + '.log')
                 command = [sys.executable, '-B', str(ROOT / 'scripts/個股研究資料更新.py'),
                            '--start', str(start), '--end', str(now.date()), '--data-dir', str(data), '--adjustments']
+                assert_write_allowed(logfile)
                 with logfile.open('w', encoding='utf-8') as handle:
-                    done = subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, timeout=10800,
-                        env={**os.environ, 'PYTHONUTF8': '1', 'PYTHONDONTWRITEBYTECODE': '1', 'ST_RESEARCH_PARENT_RUN': run_id})
-                if done.returncode not in (0, 1):
+                    if bound.mode != 'legacy':
+                        return_code = _run_source_update(command[3:], parent_run_id=run_id, trace_output=handle)
+                    else:
+                        done = subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT, timeout=10800,
+                            env={**os.environ, 'PYTHONUTF8': '1', 'PYTHONDONTWRITEBYTECODE': '1', 'ST_RESEARCH_PARENT_RUN': run_id})
+                        return_code = done.returncode
+                if return_code not in (0, 1):
                     raise RuntimeError('資料補齊程序未正常結束')
-                return {'status': 'completed' if done.returncode == 0 else 'partial',
-                        'reason': '來源補齊完成' if done.returncode == 0 else '部分來源未取得，保留缺漏並繼續檢查覆蓋'}
+                return {'status': 'completed' if return_code == 0 else 'partial',
+                        'reason': '來源補齊完成' if return_code == 0 else '部分來源未取得，保留缺漏並繼續檢查覆蓋'}
             step('補齊既有大盤、上市籌碼與還原來源', sources)
         step('檢查本機資料覆蓋', inventory)
         if enable_daily:

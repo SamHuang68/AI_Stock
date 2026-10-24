@@ -9,10 +9,13 @@ from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
+from runtime_paths import BINDING, runtime_data, guard_write
 
 TZ8 = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "data"
+# 舊模式維持原本的「本檔旁的 data」：測試把 server/ 複製到暫存目錄執行，若改用 runtime_paths 自己所在的目錄，
+# 狀態會寫進真實的 wavedeck/data 並在測試之間互相汙染。外置與 fixture 模式才走共用的資料根。
+DATA = ROOT / "data" if BINDING.mode == "legacy" else runtime_data()
 STATE_PATH = DATA / "runtime_state.json"
 
 VALID_STATES = ("Idle", "Arming", "InPosition", "Reducing", "Halted", "Flat")
@@ -142,6 +145,7 @@ def _default_state() -> dict[str, Any]:
 class Runtime:
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        guard_write(DATA)
         DATA.mkdir(parents=True, exist_ok=True)
         self._state = self._load()
 
@@ -149,17 +153,25 @@ class Runtime:
         if STATE_PATH.is_file():
             try:
                 raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+                if BINDING.mode == "external" and not isinstance(raw, dict):
+                    raise ValueError("外置 WaveDeck 狀態必須是既有 JSON 物件。")
                 base = _default_state()
                 base.update(raw if isinstance(raw, dict) else {})
                 return base
             except Exception:
+                if BINDING.mode == "external":
+                    raise
                 pass
+        if BINDING.mode == "external":
+            raise RuntimeError("外置 WaveDeck 狀態遺失；不建立空白狀態。")
         return _default_state()
 
     def save(self) -> None:
         with self._lock:
             self._state["updated_at"] = now_iso()
             tmp = STATE_PATH.with_suffix(".tmp")
+            guard_write(STATE_PATH)
+            guard_write(tmp)
             tmp.write_text(json.dumps(self._state, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp.replace(STATE_PATH)
 

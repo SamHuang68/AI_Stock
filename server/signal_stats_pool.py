@@ -35,9 +35,11 @@ except ImportError:
     import stock_signals as ss
     from atomic_store import StoreCorruptError, atomic_write_json, load_json
 
+import data_paths
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CACHE_FILE = os.path.join(_BASE, 'data', 'stock_signal_pooled_stats.json')
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
+CACHE_FILE = str(data_paths.data_path('stock_signal_pooled_stats.json', code_root=_BASE))
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 MIN_SYMBOLS = 5
 # 合併樣本的門檻比單檔（20）嚴格：隨機漫步資料在 n≈20 時上漲比例誤差約 ±22 個百分點
 POOLED_MIN_SAMPLE = 100

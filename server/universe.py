@@ -25,7 +25,9 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-CACHE = os.path.join(_BASE, 'data', 'universe.json')
+import data_paths
+
+CACHE = str(data_paths.data_path('universe.json', code_root=_BASE))
 _TW_CODE = re.compile(r'^[0-9]{4}[0-9A-Z]{0,2}$')   # 2330 / 0050 / 00631L / 020000…
 _US_SYM = re.compile(r'^[A-Z][A-Z0-9.\-]{0,7}$')
 
@@ -95,7 +97,7 @@ def fetch_tw():
          ('CompanyName', 'SecuritiesCompanyName', '公司名稱', '公司簡稱', 'Name', '名稱'))
     # ETF 目錄(權威 ETF 清單;含 00xxx/00xxxL,STOCK_DAY_ALL 不一定有)
     try:
-        with open(os.path.join(_BASE, 'data', 'etf_catalog.json'), encoding='utf-8') as f:
+        with open(data_paths.data_path('etf_catalog.json', code_root=_BASE), encoding='utf-8') as f:
             cat = json.load(f)
         for grp in cat.get('categories', []):
             for e in grp.get('etfs', []):
@@ -349,6 +351,8 @@ def load():
 
 
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立股票宇集更新；請使用受管後端工作。')
     d = build()
     c = d['counts']
     print(f"universe: TW {c['tw']} 檔 · US {c['us']} 檔 · meta {c.get('twmeta', 0)} → {CACHE}")

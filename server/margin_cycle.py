@@ -34,8 +34,11 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+import data_paths
+from runtime_storage import assert_write_allowed
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, 'data')
+DATA = str(data_paths.data_root(code_root=ROOT))
 DB_PATH = os.path.join(DATA, 'margin_cycle.db')
 SYMBOL = '__TW_MARGIN_CYCLE__'
 TZ_TPE = timezone(timedelta(hours=8))
@@ -127,6 +130,7 @@ def _tanh_map(x: float, center: float, scale: float) -> float:
 
 
 def _db() -> sqlite3.Connection:
+    assert_write_allowed(DB_PATH, must_exist=True)
     os.makedirs(DATA, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
@@ -653,6 +657,8 @@ def fundamental_payload(sym: str = SYMBOL) -> Dict[str, Any]:
 
 
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立融資更新；請使用受管後端工作。')
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument('--backfill', action='store_true')

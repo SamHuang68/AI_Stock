@@ -1,3 +1,86 @@
+## 2026-10-24 單一資料根候選分支的三組缺陷修正（ST-R1、ST-R2、ST-R3）
+
+- 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`（origin/main）；分支 `claude/runtime-unification-fixes`，疊在 Codex 的 `review/runtime-unification`（`f3f7ebda5017d01c059abf5be71b4b2f0822921f`）之上。**本分支是單一資料根架構的候選，不是已驗收的版本，不可合併、不可發布。**
+- 背景：Codex 交接單 `Documents\Codex\2026-10-23\task-2\ST-Claude-Handoff.md`（2026-10-24）列出該分支三組仍未修的缺陷，當時因審查限制未能套用；Sam 2026-10-24 指示「照建議執行」，由 Claude 複核並修正。Claude 獨立核對過三項描述與程式碼相符。
+- **ST-R1（發布單檔被當目錄遍歷）**：
+  - 問題：`runtime_release_policy.assert_safe_tree` 在名稱與祖先連結檢查後，對一般檔案仍呼叫 `os.walk(..., onerror=fail)`，Windows 拋 `NotADirectoryError [WinError 267]`。呼叫端 `private_web_release._copy_item` 是所有發布共用的複製路徑（基準 `442b908` 沒有這個呼叫），所以連**舊模式**的 stage、promote 也會被擋。
+  - 修正：名稱與祖先連結檢查之後，`root.is_file()` 直接回傳。受保護名稱與 junction 的拒絕仍在前面，反向案例（單一受保護檔仍被拒）通過。
+- **ST-R2（gateway／host 輸出路徑）**：
+  - 問題：gateway 只取得 auth 檔的寫入權；稽核紀錄、客戶端追蹤、啟動追蹤、PID 檔，以及 host 的三個日誌與 PID 檔，路徑來自設定與環境變數，沒有確認不碰受保護的資料根／復原根、也不是硬連結別名。需要本機設定誤指或別名才會發生，沒有遠端提權。
+  - 修正：非舊模式時，在任何探測、建目錄或寫入之前檢查所有輸出：與受保護根雙向不重疊，並沿用 `data_paths.assert_no_links`（符號連結、junction、硬連結、非正規拼寫）。gateway 新增 `_pid_path`、`_assert_gateway_outputs`；host 新增 `_host_output_paths`、`_assert_host_outputs`。舊模式不受影響。
+- **ST-R3（ETF 清單只在匯入時載入）**：
+  - 問題：外部模式下 ETF 更新在長駐後端內同程序執行，`ETFS = load_catalog()` 只在匯入時執行一次，修改 `etf_catalog.json` 後要重啟才生效；舊模式每輪是新程序，沒有此問題。
+  - 修正：`run()` 每輪開頭重新讀一份清單，整輪（預期數、最低門檻、待補代號、逐檔抓取）用同一份快照。
+  - 測試 fixture：`test_runtime_workers.setUp` 的 `patch.dict(os.environ, clear=True)` 清掉 Windows 家目錄變數，7 案在 `Path.home()` 出錯；只保留 `HOME`、`USERPROFILE`、`HOMEDRIVE`、`HOMEPATH` 四個，不帶入其他環境。
+- **ST-R4（新發現：WaveDeck 測試隔離被破壞，交接單未列）**：
+  - 問題：Codex 因 Sam 豁免而沒驗 WaveDeck。分支把 `wavedeck/server/state.py` 的 `DATA` 改成 `runtime_paths.runtime_data()`，舊模式回傳 `runtime_paths` 自己所在目錄的 `data`；但測試把 `server/` 複製到暫存目錄執行，仍匯入真實的 `runtime_paths`，狀態於是寫進**真實**的 `wavedeck/data` 並在測試之間互相汙染，WaveDeck 測試從 main 的 129 個全過變成 47 個錯誤（46 個是「委託尚未核對，請先完成核對再切換策略」）。
+  - 修正：`state.py` 舊模式維持「本檔旁的 data」（與 main 完全相同），外置與 fixture 模式才走共用資料根；`config.py` 的秘密檔路徑舊模式同樣跟著 `DATA`。另一個子程序測試（`test_真實服務匯入入口先取得單例…`）的夾具補複製 `runtime_paths.py` 與 `data_paths.py`、`runtime_storage.py`、`daemon_lock.py`。
+  - 結果：WaveDeck 148 個案例全過（main 為 129 個，差額是分支新增與先前合併的案例）。跑完後真實 `wavedeck/data` 仍出現狀態檔，main 的副本跑同一套測試也一樣，是原本就有的行為。
+  - 這是正式使用的風險點：若有人在**正式主工作樹**跑這個分支的 WaveDeck 測試，會改寫執行中的 WaveDeck 狀態；修正前尤其如此。
+- **ST-R5（新發現：Windows 暫存目錄 8.3 短檔名導致 39 個新架構測試在 CI 失敗）**：
+  - 問題：手動完整驗證（run 40052323841，對 `94297a5`）在 GitHub Windows 失敗 39 個，全部在 `test_runtime_storage`、`test_runtime_consumers`、`test_runtime_workers`、`test_runtime_secrets`，錯誤是 `runtime paths must use their canonical spelling, not filesystem aliases`。runner 的暫存目錄是 8.3 短檔名（`C:\Users\RUNNER~1\…`），新架構的資料根檢查**刻意**要求正規拼寫、拒絕別名。我本機一般暫存路徑跑全過，所以第一輪完整測試沒有發現。
+  - 判斷：產品拒絕檔案系統別名是對的，是測試夾具沒有把暫存路徑展開；啟動器測試本來就用 `.resolve()`。另有一個跨磁碟 `os.path.relpath`（CI 的 checkout 在 D 槽、暫存在 C 槽）。
+  - 修正：6 個測試檔的暫存根改用 `resolve()` 或 `os.path.realpath`（storage、consumers、workers、secrets、WaveDeck 的 runtime_binding 與 runtime_launcher），`relpath` 加 `start=`。不改產品。
+  - 重現與驗證：本機建立有 8.3 短名的目錄並把 `TEMP` 指過去重現（修正前 38 個失敗），修正後這 4 個模組 49 個案例與 WaveDeck 148 個案例在短檔名與一般暫存路徑下都全過。Windows CI 因「Unit tests」失敗，後面的 WaveDeck、JS、瀏覽器步驟被跳過、沒有結果，需重新觸發完整驗證。
+- **第二意見（Codex，隔離封包、跨供應商，2026-10-24）**：範圍為相對 `f3f7ebd` 的 16 個檔案差異；結論 `significant-issues`、完整度 `insufficient`（只看到差異，看不到完整檔案），依規則不算完成審查。三項發現逐項對照程式碼：
+  - **host 在安全檢查前就覆寫 PID 檔（高）：同意，是我 R2 修正的真實缺口。** `main()` 在呼叫 `run()` 之前就建立 PID 目錄並寫入，而我的檢查只放在 `run()`；PID 檔若是受保護檔案的硬連結，會先被截斷。我的測試只測了 `run()`。修正：`main()` 取得綁定後先呼叫 `_assert_host_outputs`；新增直接呼叫 `main()` 的拒絕案例，舊程式失敗。
+  - **ETF 以修改時間與大小判斷目錄有沒有變不夠（中）：同意。** 等長內容加時間戳相同會漏判，且「先載入再取時間戳」之間檔案若更新會被標成新版。修正：改用 SHA-256，清單與雜湊來自同一次讀取；讀取失敗（雜湊為 None）時沿用現有清單、不退回 fallback。新增「等長內容且修改時間改回原值」與「檔案損毀或消失」兩個案例，舊程式都失敗。
+  - **驗證計畫自身沒有落在任何案例的 `changes`（中）：不同意。** 計畫檢查入口（`scripts/變更驗證.py --check`）本來就把 `.github/驗證計畫.json` 排除在變更對應之外，現在與先前所有 PR 一樣通過；把它塞進案例反而會讓計畫的指紋隨自己改變。
+  - 兩個未決問題：ETF 更新能否並行啟動我沒有完整驗證（`etf_api` 的 `_tracker_lock` 保護狀態更新，是否同時擋住並行啟動未確認），所以採保守設計：全域清單只在一輪開頭重新指定、整輪用同一份；若兩輪真的並行，後啟動者換清單時前一輪的後續讀取可能讀到新清單，這個風險未排除；路徑通過預檢後到實際開啟之間被換成連結（檢查時間與使用時間之差）屬已知限制，目前靠 writer lease 與目錄權限，不在本次修正範圍，記在此處。
+  - 修正後未再送複審。
+- **ST-R6（計畫版 CI 在 Windows 的偶發失敗：時序競爭，非新功能壞掉）**：
+  - 現象：#266 計畫版 CI（`a510021`）Windows 的「主站測試模組 1/12」失敗一個案例 `test_Pulse更新佇列` 的 `test_terminal_write_failure_retries_receipt_without_rebuilding`：`'IntegrityError: 注入工作收據失敗' is not None`；同一個 SHA 的手動完整驗證與我的本機完整重跑（2149 案例）都通過，本機單案例 25 次、整個模組 6 次、main 單案例 25 次也全過。
+  - 根因：`pulse_updates._finish` 在資料庫提交後工作即顯示 `succeeded`，**接著才**寫診斷紀錄（`_trace`），**之後**才把 `workerError` 清成 None；測試每 10 毫秒輪詢到 `succeeded` 就立刻斷言 `workerError` 為 None，中間沒有等待。寫檔慢的機器會落在這個空檔。這個競爭在 main 上同樣存在，不是分支引入的。
+  - 驗證：本機把 `_trace` 人為拖慢 0.3 秒，舊測試重現與 CI 完全相同的失敗訊息，新測試通過。
+  - 修正：只改測試。契約是「重試成功後 `workerError` 會被清掉」，改成最多等 3 秒讓它變成 None，斷言本身不變、不放寬；不改產品程式。
+- **ETF 目錄欄位型別驗證（Codex 的修復，Claude 審查後整合）**：
+  - 來源：Codex 在自己的隔離工作樹（`runtime-verification-c56`）基於本分支 `c56d543` 做的最小修復，提交 `e88f2d8da2def6d4d0506d71815ece253a590eb0`，交接單 `Documents\Codex\2026-10-23\task-2\ST-ETF-Catalog-Fix-Handoff.md`。我只取它的產品檔 `server/etf_delta_tracker.py` 與新測試 `tests/test_etf_catalog_validation.py`；驗證計畫由我的產生器重新產生、本段由我撰寫，維持單一寫入者。
+  - 問題：目錄裡的欄位型別錯誤（例如 `code` 是整數）會在 `_catalog_from` 拋出未預期例外（原缺陷：`int` 沒有 `.strip`），而 loader 的 `except Exception` 把它吞成「退回 fallback」。
+  - 修正：`load_catalog_with_digest` 在同一次讀取內先驗證結構（根物件與 `categories`、類別與 `etfs`、每個 ETF 的 `code`／`enabled`／`name`／`market` 型別），通過才產生雜湊；不合法回 `None` 雜湊，`run()` 因此沿用最後一份有效清單；例外縮為 `OSError／ValueError`，未預期的錯誤（如 `RuntimeError`）仍會傳出；診斷只記錯誤類別，不輸出目錄內容或路徑。
+  - 政策變化（需要知道）：過去目錄裡不合法的列會被略過，現在**任何一列不合法就整份目錄無效**，沿用上一份有效清單，只在輸出留一行紀錄。我核對過現有 `data/etf_catalog.json` 226 筆全部符合新規則；網頁端儲存入口 `/etf-catalog` 只驗證 `categories` 是陣列，UI 送出的是抓下來後切換 `enabled` 的目錄，所以不合法列只會來自手動編輯或其他 API 用戶端。
+  - 沒有改變：合法的「全部停用」仍採預設十檔；HTTP 儲存入口沒有加驗證，不能宣稱 HTTP 已拒絕非法內容。
+  - 我的獨立驗證：Codex 的新測試 3 案在 `c56d543` 的產品程式上失敗（8 個失敗＋6 個錯誤觀察，同一測試的子情境），整合後通過；加上 `test_etf_delta_tracker`、`test_ETF更新防再發`、`test_runtime_workers`（含我先前「等長內容仍重載」與「損毀沿用舊清單」）、`test_etf_paths`、`test_etf_api`、`test_etf_snapshot_health` 共 64 案全過。未重跑整套 Python（變更只在一個產品檔，由計畫版 CI 的主站分塊涵蓋）。
+- 驗證（Python 3.12，與 CI 相同）：
+  - R1：`test_runtime_package_policy` 9 案通過，含原本紅燈的 `test_regular_file_is_checked_without_directory_traversal`。
+  - R2：`test_shared_backend_launcher` 12 案通過，含原本 3 案共 28 個失敗觀察（gateway 2 案、host 1 案的 4 個子案例）。
+  - R3：`test_runtime_workers` 11 案通過；新增「兩輪之間改清單，第二輪看到新清單」案例，舊程式失敗（清單停在首次載入的 10 檔）。
+  - **完整套件**：`unittest discover -s tests`，2146 案例通過、8 個跳過、0 失敗（Python 3.12）。第一輪 12 個沒過，其中 6 個 ETF 追蹤器測試是 R3 初版（每輪無條件重讀）造成，已改成「目錄檔案修改時間或大小有變才重讀」；6 個發布測試是替身沒跟上產品（假 `_run` 未處理 `git ls-tree`、需複製真實 `runtime_release_policy.py`），已補。
+  - 沒有重跑 JS、瀏覽器與 WaveDeck 測試：本次只改 Python，Codex 的 a47220e 矩陣中這些項目已通過（WaveDeck 專屬驗證依 Sam 豁免）。
+- 沒有做：沒有搬正式資料、沒有停服務、沒有刪備份、沒有部署；WaveDeck 專屬驗證依 Sam 先前豁免未跑；沒有通讀分支其餘約 6000 行。
+- 發布狀態：未合併、未發布。
+
+---
+
+## 2026-10-23 單一資料根架構隔離候選（未驗證、尚有阻塞）
+
+- 基底為已封存原修復`b42ee9dea07e57a718c01c474285d41b58dff774`，整合分支`review/runtime-unification`；VERSION維持5.0。新增explicit binding、資料身分與切換收據、ST/WD namespace lease、consumer路徑、發布copy排除及Local共用入口核對；legacy保持原安裝路徑，不會自動啟用新根或建立空正式庫。
+- 本機來源：core `e8209c5c08b59d44387887b407727ac6245469c7`、consumer `9dd8ccfc9e91baadf50a7d08c04287196165ecf4`、persistence `55f2151b85a3efd985d1e1dc97787a90783de1ee`、release `908bf381371f024758266fd914102595480181bf`、WD `e865087c0431eb2bc643ad2eda4c20efe8dd9450`。各差異在原封存之外整合；沒有tracked data變更。
+- 必須保留日Ksource tradeDate、嚴格較早有效K昨收、缺價整組回退及canonical headline事故契約；未變更台指期歷史結算價口徑。新架構將另跑驗證，不引用舊測試通過作新架構證據。
+- 已知未完成：WD legacy單例鎖前guard與舊測試副本依賴接線，以及fixture WD預設資源鎖namespace修正，兩筆新補丁被自動審查拒絕，未套用或代套。部分舊WD測試尚無安全隔離，必須明列blocked。另獨立排程CLI的log/外送邊界待補驗。
+- 正式Local與PrivateWeb能力不同，新的共用入口會拒絕不相容切換；合作式deadline不等同原子程序hard kill，見`runtime-storage.md`。真資料差異、停寫切換、秘密設定及備份清理未處理。
+- 本段為未測本機候選；新測試數與限制待實測後另附條目。未push、PR、合併、部署、建立ZIP、停止正式服務或搬動正式資料。
+
+---
+
+## 2026-10-23 日 K 時間與昨收事故回歸補強（未驗證）
+
+- 基底：`282c3e7575db522e0a6a76951d98e1c69c0fb3e1`；隔離分支 `review/dayk-regression`。
+- 依 Sam 提醒追溯 PR #217、#219，新增固定事故日期、隔日取得、主機時區、來源順序與總經舊回覆的測試；沿用既有官方真值 fixture 與正式函式，不改產品、行情公式、資料或台指期結算價政策。
+- 歷史完整 SHA、時間契約、合成案例界線與主控 gate 要求見 [日 K 回歸契約](dayk-regression-contract.md)。
+- 驗證與發布：作者未執行測試，由主控統一 gate 並另交獨立 reviewer；尚無新增通過證據，未推送、未合併、未發布。實作 SHA 以本段所在提交為準，整合 SHA 待主控補記。
+
+---
+
+## 2026-10-23 完整審查後的設定呈現與角色標頭加固
+
+- 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`；隔離分支 `review/fixes-442b908`。Sam 已授權本輪審查後直接修復；未改 canonical 資料或正式服務。
+- 修正：gateway 以不分大小寫方式丟棄用戶端 `X-ST-Gateway-Role`，只傳一個已驗證角色；警報設定與規則以 HTML escape 呈現文字／屬性，保留原始表單值。既有路由授權及人工設定語義不變。
+- 驗證：正式 gateway 的 loopback 回歸確認三種大小寫角色標頭只剩一個 reader；Chromium 全離線表單驗證確認 inert markup 不建立額外元素／屬性，既有新增規則案例仍通過。測試誤用不允許的 `/quote` 曾得到正確 403，改測既有 `/quote-batch` 後通過，沒有放寬 allowlist。
+- 安全界線：這是 P3 加固，未宣稱已確認匿名外洩或提權；未讀取或遷移任何使用者秘密，webhook 儲存整併未執行。
+- 發布狀態：只有本機隔離修復，未合併、未推送、未發布。全套修復驗證與本機提交 SHA 待本輪整合完成後補記。
+
+---
+
 ## 2026-10-23 整併大盤 8D 與台指期 8D（交接單第 9 節第 6 項）
 
 - 基底：`6945c039cb275264544e9a5dc5bd25701f4c9bcb`（origin/main）；分支 `claude/consolidate-chart-8d`。實作與合併 SHA 待 PR 合併後補記。
@@ -2182,3 +2265,35 @@ CI 換行修正提交 `207a0fb442a367f626639b6457645218e0f7cca9` 的 Ubuntu／Wi
 已取得：21 項來源與路由單元、25 組標頭契約、完整頁面分鐘操作與三尺寸檢查；候選真實來源取得兩標的當日分鐘，27 個資料檔保全。經一位同供應商隔離唯讀審查，無 Required 發現；固定案例盤別終點已校正。失敗來源仍沿用既有 60 秒快取，分鐘不保證即時，未供日線回測使用。
 
 此段建立時為本機候選，尚未提交／發布。詳細根因、能力對帳與局部證據見 `docs/當日分時修復.md`；後續完整實作／合併 SHA、CI 與實際兩站發布證據見 `C:/Users/Sam/AI-Workspace/docs/stock-terminal/當日分時修復/發布紀錄.md`。未以本機案例替代部署驗收。
+## 2026-10-24 全專案審查修復驗證完成（本機未發布）
+
+- 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`；Python 受測提交 `34e13db27b35dcd94bfccdd973117ee384be85dd`；前端、日 K 補強與文件受測提交 `42243b9d6b0f560feb258fa78f04671a2879b74e`。後者相對前者僅增加測試與文件，產品沒有混版。
+- 已修確認的 16 項 P2：切股統計競態、週線混入日棒、總經遲到錯誤／延遲刷新、交易日缺口與修訂警示、報酬期間配對、隔夜缺值邊界、損毀 JSONL 阻啟動、bus 保存序列、WaveDeck 初始失敗恢復／新鮮建議／紙上模式還原／MD 開頁、Space 控制、venv 程序辨識、PS5.1 中文入口。另修三項測試品質及兩項 P3 加固；保留急停政策與未知程序拒絕保護。
+- 獨立複核補齊隔夜基準不足降級、舊版紙上價格清除、日曆失敗提示、資料品質計數；驗證另找出 HTTP fixture 缺日曆及 Windows JSONL 重複壓縮換行，修正後受影響 27 案通過。
+- 完整主站 discover 2058：2035 passed、0 failed、1 live skipped、22 blocked（21 ZIP＋1 缺 pyflakes；其中4個 opt-in 啟動器另以隔離真程序通過）；WaveDeck 133/133、JS 70/70、browser 16/16、Python 語法403/403、PowerShell12/12、compileall／載入排序／HTML建置3/3。PS5.1 與 PS7 均解析11個產品入口並執行新增檢查器。
+- 日 K 阻擋回歸通過：PR219 固定事故快照、取得日不替代來源時間、同台北交易日官方校正、跨日／台指期反向、歷史 OHLCV 保全。週線只限制追加日棒，保留非 intraday 分類；台指期歷史結算價口徑仍暫緩。完整 browser 讀本輪 HTML，SHA256 `56220be429800a4e7105d52435d84fd3b3c1079c2fa63ec3f4b21190c15a596e`。
+- 證據：本機 `task-2/fix-evidence`，完整主站 gate `run-20261024T001314-56d65658`、WaveDeck `run-20261024T001314-5f9ec93d`、靜態/JS `run-20261024T002158-c3ec7705`、browser `run-20261024T002159-412d66e4` 均 exit0。首批targeted gate 因建置改動過寬輸入清單內的HTML而exit1；個別程序通過，原收據限制保留，未覆寫為成功。
+- 環境：Windows、Python3.14.3、Node24.14、Playwright1.62.1，沿用tzdata2025.3，與CI／需求版本差異另列。未安裝套件、執行實盤／外送／LinuxCI；未承諾零缺陷。
+- 2026-10-23 16:26:22Z 唯讀回查 canonical 與遠端 main 仍為442b908；原六個data修改與SQLite/lock未追蹤狀態保留。實際資料、秘密、服務未改。
+- 發布狀態：本機隔離提交，未push、PR、合併、ZIP或發布。使用者後續授權的單一資料根架構另行實作及驗證，不包含於此里程碑。
+
+---
+
+# 2026-10-23 單一資料根整合補驗（未發布，仍有阻塞）
+
+- 基底：27567eca0bc15e5f6ef708973f3c71eef582851f；原修復封存 b42ee9dea07e57a718c01c474285d41b58dff774 保留。
+- 補正非 legacy override 模組匯入副作用與四個 standalone 排程／報表入口，來源 8c0ed16d4dbdccf91f5a79e2d0049102d317e246。外置既有憑證僅在有效 ST writer lease 下允許原位置的兩個精確檔名及 atomic 附屬檔；沒有遷移或接觸真實秘密。
+- consumer 十二案及憑證四案小型隔離回歸 16/16 通過；首輪失敗證據保留。來源 54561283e0fc5b8907ef2a2d3b0c1f96521504df 修正 release/health 測試替身，保留尚未修復產品的三個負向回歸。
+- ETF 同程序清單快取、worker 測試清空環境的 HOME 缺失，以及 gateway/host 輸出路徑防護修補被自動審核拒絕，未套用、未重試；候選不是可發布版本。後續完整主站結果以新證據為準，不能沿用封存前通過數。
+- 使用者豁免後續 WaveDeck 專屬驗證；既有變更與已完成 15/15 結果保留，剩餘項目標 user-waived。增加獨立 ST writer 競爭驗收入口，不執行 WaveDeck 部分。
+- 日 K 計算與歷史結算價暫緩契約保持；最終候選需重新跑必要真值回歸。未 push、合碼、部署、停止正式服務、搬資料或刪備份。
+
+# 2026-10-23 主站架構驗證後測試接線補正（產品仍受阻，未發布）
+
+- 受測產品基底 a47220e11c02b4555141cac8541ad16c69b37c90；本次僅修改測試與本紀錄，不改產品。發布檢查對普通檔案呼叫 os.walk 的一行修正亦遭拒，未套用，與 ETF、gateway 未修項一同保留。
+- 修正三合一選股 AST fixture 載入正式 data_paths import、研究更新 lazy import 對應測試、虛構 SHA 的唯讀 ls-tree 替身；沒有補出正式模組不存在的符號。llm_gate 的靜默例外已由 2 減至 1，基準同步收緊。
+- 整合 c90e6804aa6d65b15884a765426b91cbc38a7484 的單檔案例、OS reparse fixture 及唯讀證據重用斷言。只補驗這些受影響案例，不重跑整套；新普通檔案案例預期揭露仍未修復的產品失敗。
+- 日 K 必要 JS、瀏覽器與十一個官方前收 Python 案例已通過；獨立靜態 readback 保持日期/昨收/歷史 OHLCV 契約。ST fixture 真實 writer 競爭通過，沒有啟動 WaveDeck。
+- 範圍失誤如實記錄：先前豁免篩選漏掉中文 WD 瀏覽器檔及混合啟動測試的 WaveDeck 分支，分別已通過與出現 WAVE-PIN 失敗；保留原結果，停止後續 WD 測試與修復，不算主站通過。
+- 未遷移正式資料、未停止正式服務、未處理真實秘密、未刪備份、未 ZIP、未 push／部署。最後結果、各案狀態與五筆拒絕見本機獨立階段報告，不宣稱新架構完成。
+

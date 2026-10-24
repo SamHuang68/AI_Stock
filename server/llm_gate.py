@@ -13,8 +13,15 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+if __package__:
+    from . import data_paths
+    from .runtime_storage import assert_write_allowed
+else:
+    import data_paths
+    from runtime_storage import assert_write_allowed
+
 ROOT = Path(__file__).resolve().parents[1]
-GATE_PATH = Path(os.environ.get('LLM_GATE_PATH') or (ROOT / 'data' / 'llm_gate.json'))
+GATE_PATH = data_paths.data_path('llm_gate.json', code_root=ROOT, override_env='LLM_GATE_PATH')
 
 _lock = threading.RLock()
 
@@ -38,12 +45,16 @@ def _read() -> dict[str, Any]:
 
 
 def _write(obj: dict[str, Any]) -> None:
+    assert_write_allowed(GATE_PATH)
     try:
         GATE_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = GATE_PATH.with_suffix('.tmp')
+        assert_write_allowed(tmp)
         tmp.write_text(json.dumps(obj, ensure_ascii=False), encoding='utf-8')
         tmp.replace(GATE_PATH)
     except Exception:
+        if data_paths.binding_for().mode != 'legacy':
+            raise
         pass
 
 

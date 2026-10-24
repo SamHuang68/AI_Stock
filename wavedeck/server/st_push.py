@@ -12,7 +12,9 @@ from typing import Any, Optional
 
 from .state import RUNTIME
 
-ST_URL = os.environ.get("ST_URL", "http://127.0.0.1:18432").rstrip("/")
+from runtime_paths import BINDING, backend_url
+
+ST_URL = backend_url()
 _push_lock = threading.Lock()
 _last_sig = ""
 
@@ -126,6 +128,8 @@ def push_to_st(
 ) -> bool:
     """POST /bridge/wavedeck. Dedupes identical signatures unless force."""
     global _last_sig
+    if BINDING.mode == "fixture":
+        return False
     s = snap or RUNTIME.snapshot()
     sig = _signature(s)
     with _push_lock:
@@ -148,6 +152,8 @@ def push_to_st(
 
 
 def push_async(snap: Optional[dict[str, Any]] = None, reason: str = "", force: bool = False) -> None:
+    if BINDING.mode == "fixture":
+        return
     threading.Thread(
         target=push_to_st,
         kwargs={"snap": snap, "reason": reason, "force": force},

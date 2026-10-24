@@ -262,7 +262,7 @@ class 發布身分測試(unittest.TestCase):
         self.assertEqual(result["releaseError"], "尚未建立發布收據")
 
     def test_有效收據通過且程式變更後拒絕(self):
-        content = {"VERSION": "0.1.21", "run.py": "# 測試入口\n",
+        content = {"VERSION": "0.1.21", "run.py": "# 測試入口\n", "runtime_paths.py": "# 測試資料綁定入口\n",
                    "web/index.html": "<!doctype html><title>測試</title>",
                    "web/js/deck.js": "// 測試腳本\n", "web/css/deck.css": "/* 測試樣式 */",
                    "server/固定.py": "# 測試模組\n"}

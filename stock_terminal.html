@@ -917,7 +917,8 @@ async function loadSym(sym, mkt, silent) {
     const _rmp = _meta.regularMarketPrice;
     const _dailyIvl = (rdef.interval === '1d' || rdef.interval === '1wk');
     const _num = v => (v != null && isFinite(v) && v > 0) ? v : null;
-    if (_dailyIvl && _rmt && _num(_rmp)
+    // 週棒時間是週期起點；與當日報價相差數日，不代表缺少一根日 K。
+    if (rdef.interval === '1d' && _rmt && _num(_rmp)
         && _last && _last.time && (_rmt - _last.time) > 20 * 3600) {
       // 昨收 = 前一根日K的收盤(_last.close)。
       // 嚴禁用 meta.chartPreviousClose：那是「請求區間起點」前一日的收盤

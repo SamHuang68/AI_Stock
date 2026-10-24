@@ -23,8 +23,10 @@ from contextlib import closing, nullcontext, contextmanager
 from pathlib import Path
 if __package__:
     from . import 日線來源收據 as source_provenance
+    from . import data_paths, runtime_storage
 else:
     import 日線來源收據 as source_provenance
+    import data_paths, runtime_storage
 
 # 進程內全域寫入鎖
 _db_write_lock = threading.Lock()
@@ -35,7 +37,7 @@ if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_BASE, 'data', 'market.db')
+DB_PATH = str(data_paths.data_path('market.db', code_root=_BASE))
 
 SCHEMA_VERSION = 3
 SCHEMA = """
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS meta(
 
 def get_conn(path=None):
     target = os.fspath(path or DB_PATH)
+    runtime_storage.assert_write_allowed(target, must_exist=True)
     os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
     conn = sqlite3.connect(target, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL')     # 並發讀寫
@@ -88,6 +91,7 @@ def _backup_before_market_key_migration(conn, path=None, suffix='.pre-market-key
     """Create one recoverable SQLite backup before the destructive schema swap."""
     target_path = os.fspath(path or DB_PATH)
     backup_path = target_path + suffix
+    runtime_storage.assert_write_allowed(backup_path)
     if os.path.exists(backup_path):
         return backup_path
     parent = os.path.dirname(os.path.abspath(target_path))
@@ -690,4 +694,6 @@ def _cli():
               'backfill-many "a,b,c" [TW|US] [range] | query SYM [N] | stats')
 
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立資料庫 CLI；請使用受管後端工作。')
     _cli()

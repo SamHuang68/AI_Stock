@@ -9,6 +9,7 @@ Set-StrictMode -Version Latest
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $ScriptRoot '..'))
+& (Join-Path $ScriptRoot 'assert_standalone_runtime.ps1') -CodeRoot $RepoRoot
 $PinPath = Join-Path $RepoRoot 'data\stock_python.path'
 
 function Test-StockPython([string]$Candidate) {

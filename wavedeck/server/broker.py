@@ -13,20 +13,22 @@ from typing import Any
 
 from .config import load_config
 from .state import ROOT
+from runtime_paths import BINDING, guard_write, registered_txt_dir
 
 
 def _txt_dir() -> Path:
     cfg = (load_config().get("broker") or {})
-    rel = str(cfg.get("txt_dir") or "data/master")
-    p = Path(rel)
-    if not p.is_absolute():
-        p = ROOT / p
-    return p
+    return registered_txt_dir(cfg)
 
 
 def _file(name_key: str, default: str) -> Path:
     cfg = load_config().get("broker") or {}
-    return _txt_dir() / str(cfg.get(name_key) or default)
+    filename = str(cfg.get(name_key) or default)
+    if BINDING.mode != "legacy" and (Path(filename).name != filename or filename in (".", "..") or ":" in filename):
+        raise ValueError("TXT fixture 檔名不得包含目錄、磁碟機或相對路徑。")
+    path = _txt_dir() / filename
+    guard_write(path)
+    return path
 
 
 def _parse_lots(text: str, symbol: str | None = None) -> int | None:
@@ -100,6 +102,7 @@ def write_order_signal(action: str, lots: int, price: float, symbol: str = "TXF"
 def write_invalidation_txt(price: float, side: str = "below", symbol: str = "TXF") -> Path:
     """Side-channel for 下單大師／外部盯盤：失效價（軟停損參考）。"""
     fp = _txt_dir() / "invalidation.txt"
+    guard_write(fp)
     fp.parent.mkdir(parents=True, exist_ok=True)
     fp.write_text(
         f"{symbol} {str(side or 'below')} {float(price):.0f}\n",
@@ -209,7 +212,9 @@ class TxtMasterBroker:
 
     def _tracking(self, symbol):
         safe = re.sub(r"[^A-Za-z0-9_-]", "_", symbol)
-        return _txt_dir() / f"委託追蹤_{safe}.json"
+        path = _txt_dir() / f"委託追蹤_{safe}.json"
+        guard_write(path)
+        return path
 
     def _load(self, state):
         symbol = str(state.get("symbol") or "TXF")
@@ -229,6 +234,7 @@ class TxtMasterBroker:
         path = self._tracking(execution["symbol"])
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
+        guard_write(temporary)
         temporary.write_text(json.dumps(execution, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(path)
 

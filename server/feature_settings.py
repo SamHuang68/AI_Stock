@@ -12,6 +12,10 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 
 
 FEATURE_KEYS = (
@@ -53,8 +57,7 @@ def _truthy(value: str | None) -> bool:
 
 
 def _local_override_path(base_dir: str | Path | None = None) -> Path:
-    root = Path(base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return root / 'data' / 'feature_flags.local.json'
+    return data_paths.data_path('feature_flags.local.json', code_root=_project_root(base_dir))
 
 
 def _read_local_overrides(base_dir: str | Path | None = None) -> dict[str, bool]:

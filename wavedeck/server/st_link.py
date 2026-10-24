@@ -24,7 +24,9 @@ from . import audit
 from .state import RUNTIME, now_iso
 from .st_push import push_async
 
-ST_URL = os.environ.get("ST_URL", "http://127.0.0.1:18432").rstrip("/")
+from runtime_paths import BINDING, backend_url
+
+ST_URL = backend_url()
 PING_SEC = float(os.environ.get("WD_ST_HEARTBEAT_SEC", "5"))
 # Soft age: attempt WD←ST pull before hard fail-safe
 OVERLAY_PULL_SEC = float(os.environ.get("WD_ST_OVERLAY_PULL_SEC", "45"))
@@ -430,6 +432,8 @@ def _loop() -> None:
 
 def start() -> None:
     global _thread
+    if BINDING.mode == "fixture":
+        return
     if _thread and _thread.is_alive():
         return
     _stop.clear()

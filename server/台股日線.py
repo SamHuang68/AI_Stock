@@ -8,6 +8,11 @@ import math
 import re
 import sqlite3
 from contextlib import closing
+
+if __package__:
+    from .runtime_storage import assert_write_allowed
+else:
+    from runtime_storage import assert_write_allowed
 import sys
 import time
 import uuid
@@ -126,6 +131,7 @@ def calendar(year: int, fetch=get_json) -> tuple[set[date], set[date]]:
 def stored_calendar(db: Path, year: int, fetch=get_json) -> tuple[set[date], set[date]]:
     """當年度每七日重核；過去年度沿用已核對版本，不刷新快取時間。"""
     now = datetime.now(TZ)
+    assert_write_allowed(db, must_exist=True)
     with closing(sqlite3.connect(db)) as conn:
         row = conn.execute('SELECT closed,opened,refreshed_at FROM calendar_years WHERE year=?', (year,)).fetchone()
     if row and (year < now.year or now - datetime.fromisoformat(row[2]) <= timedelta(days=7)):
@@ -147,6 +153,7 @@ def latest_session(now: datetime, closed: set[date], opened: set[date]) -> date:
 
 
 def save_calendar(db: Path, year: int, closed: set[date], opened: set[date]) -> None:
+    assert_write_allowed(db, must_exist=True)
     with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute('INSERT OR REPLACE INTO calendar_years VALUES(?,?,?,?)',
                      (year, json.dumps(sorted(d.isoformat() for d in closed)), json.dumps(sorted(d.isoformat() for d in opened)), datetime.now(timezone.utc).isoformat()))
@@ -171,6 +178,7 @@ def reconcile_sessions(db: Path, begin: date, end: date, fetch=get_json) -> set[
         next_month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
         month_end = next_month - timedelta(days=1)
         complete_month = month_end < end
+        assert_write_allowed(db, must_exist=True)
         with closing(sqlite3.connect(db)) as conn:
             cached = conn.execute('SELECT observed_through,dates FROM session_months WHERE month=?', (month.strftime('%Y-%m'),)).fetchone()
             expected_end = conn.execute('SELECT MAX(session_date) FROM market_sessions WHERE session_date>=? AND session_date<? AND session_date<=?', (month.isoformat(), next_month.isoformat(), end.isoformat())).fetchone()[0]
@@ -195,6 +203,7 @@ def reconcile_sessions(db: Path, begin: date, end: date, fetch=get_json) -> set[
         # 已結束月份的官方全月成交日清單也證實月末休市日；當月仍只
         # 涵蓋最後實際成交日，不能把尚未公布的最新交易日推定為休市。
         through = month_end if complete_month else max(dates)
+        assert_write_allowed(db, must_exist=True)
         with closing(sqlite3.connect(db)) as conn, conn:
             conn.execute('DELETE FROM market_sessions WHERE session_date BETWEEN ? AND ?', (month.isoformat(), through.isoformat()))
             conn.executemany('INSERT OR REPLACE INTO market_sessions VALUES(?,?)', [(d.isoformat(), 'TWSE實際成交日') for d in dates])
@@ -285,6 +294,7 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
             cancelled = True
             raise
     def save():
+        assert_write_allowed(db, must_exist=True)
         with closing(sqlite3.connect(db, timeout=30)) as conn, conn:
             conn.execute('INSERT OR REPLACE INTO daily_update_state VALUES(1,?)', (json.dumps(state, ensure_ascii=False),))
     try:
@@ -299,6 +309,7 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
         opened |= previous_opened
         target = latest_session(now, closed, opened)
         state['expectedSession'] = target.isoformat()
+        assert_write_allowed(db, must_exist=True)
         with closing(sqlite3.connect(db)) as conn, conn:
             imported = {(r[0], r[1]) for r in conn.execute('SELECT exchange,session_date FROM daily_imports')}
         # 預設只取最近完整交易日；明示起日最多 31 日，不啟動全歷史掃描。
@@ -323,6 +334,7 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
                 continue
             if day < confirmed_through and day not in actual:
                 continue
+            assert_write_allowed(db, must_exist=True)
             with closing(sqlite3.connect(db)) as conn, conn:
                 conn.execute('INSERT OR REPLACE INTO market_sessions VALUES(?,?)', (day.isoformat(), 'TWSE開休市'))
             for exchange in ('TWSE', 'TPEX'):
@@ -346,10 +358,12 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
                 save()
                 if fetch is get_json:
                     time.sleep(0.4)
+        assert_write_allowed(db, must_exist=True)
         with closing(sqlite3.connect(db)) as conn, conn:
             latest = dict(conn.execute('SELECT exchange,MAX(session_date) FROM daily_imports GROUP BY exchange').fetchall())
         state['latestSessions'] = latest
         # 已建立的研究股票每日延長公司行動核對區間，無完整核對則保持舊涵蓋日期。
+        assert_write_allowed(db, must_exist=True)
         with closing(sqlite3.connect(db)) as conn, conn:
             research = conn.execute("SELECT symbol,end_date FROM action_coverage WHERE market='TW'").fetchall()
         for symbol, end in research:
@@ -432,6 +446,7 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
         while month <= target:
             check()
             next_month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+            assert_write_allowed(db, must_exist=True)
             with closing(sqlite3.connect(db)) as conn:
                 expected = {r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date>=? AND session_date<? AND session_date<=?', (month.isoformat(), next_month.isoformat(), target.isoformat()))}
                 quality = quality_summary(conn, symbol, expected, board='TWSE')
@@ -473,6 +488,7 @@ def seed_research(db: Path, symbol: str = '2330', years: int = 3, *, fetch=get_j
                 time.sleep(0.4)
         check()
         actions = refresh_actions(db, symbol, start, target, fetch, check)
+        assert_write_allowed(db, must_exist=True)
         with closing(sqlite3.connect(db)) as conn:
             conn.execute('BEGIN')
             expected = [r[0] for r in conn.execute('SELECT session_date FROM market_sessions WHERE session_date BETWEEN ? AND ? ORDER BY session_date', (start.isoformat(), target.isoformat()))]
@@ -494,6 +510,7 @@ def main() -> int:
     parser.add_argument('--seed-research', action='store_true')
     parser.add_argument('--refresh-existing', action='store_true', help='重新核對指定區間已匯入日期')
     args = parser.parse_args()
+    assert_write_allowed(args.database, must_exist=True)
     results = [seed_research(args.database) if args.seed_research else run_update(args.database, start=args.start, refresh_existing=args.refresh_existing)]
     print(json.dumps(results, ensure_ascii=False, indent=2))
     return 0 if all(result['ok'] for result in results) else 1

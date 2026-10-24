@@ -5,9 +5,11 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -27,7 +29,9 @@ def stage(source, commit):
     for relative in release.REQUIRED_RELEASE_FILES:
         write(tree / relative)
     for relative in ('scripts/local_release.py', 'scripts/start_local.ps1',
-                     'scripts/private_web_release.py', 'server/daemon_lock.py'):
+                     'scripts/private_web_release.py', 'scripts/runtime_release_policy.py',
+                     'server/daemon_lock.py', 'server/data_paths.py', 'server/runtime_storage.py',
+                     'runtime_storage_capability.json'):
         (tree / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, tree / relative)
     write(tree / 'data/public.csv', '公開種子')
@@ -404,19 +408,25 @@ class LocalReleaseTests(unittest.TestCase):
     def test_遇連結目錄必須在下降列舉前拒絕(self):
         linked = self.original / 'data/junction_fixture'
         write(linked / '不可列舉.txt')
-        real_link = local.is_link
+        real_lstat = Path.lstat
         real_scan = local.os.scandir
         observed = []
+        def lstat(path):
+            if path == linked:
+                return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+            return real_lstat(path)
         def scan(path):
             observed.append(Path(path))
             if Path(path) == linked:
                 raise AssertionError('不應下降列舉 junction 內容')
             return real_scan(path)
-        with patch.object(local, 'is_link', side_effect=lambda path: Path(path) == linked or real_link(path)), \
+        # 在作業系統屬性層模擬 junction，涵蓋備份前新增的共用路徑檢查。
+        with patch.object(Path, 'lstat', lstat), \
              patch.object(local.os, 'scandir', side_effect=scan):
-            with self.assertRaisesRegex(ValueError, '不接受連結'):
+            with self.assertRaisesRegex(RuntimeError, 'link'):
                 local.backup_data(self.original / 'data', self.install, self.commit, '測試連結')
         self.assertNotIn(linked, observed)
+        self.assertFalse((self.install / 'backups').exists())
 
     def test_不同安裝目錄不得互相包含(self):
         with self.assertRaises(ValueError):

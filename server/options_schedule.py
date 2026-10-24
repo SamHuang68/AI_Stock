@@ -27,7 +27,8 @@ _thread = None
 
 
 def _data_dir():
-    return Path(datastore.DB_PATH).parent
+    from data_paths import data_root, is_external
+    return data_root() if is_external() else Path(datastore.DB_PATH).parent
 
 
 def enabled():

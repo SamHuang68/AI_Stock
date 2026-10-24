@@ -54,6 +54,24 @@ if ($env:LOCALAPPDATA -and -not ($Worktree -or $Pull -or $UpdateOnly -or $Rebuil
   }
 }
 
+# Production binding is only consumed by the registered shared-client launcher.
+# Never let -Worktree/-Pull bypass that boundary and start a second writer.
+if ($env:ST_DATA_BINDING -or $env:ST_DATA_ROOT -or $env:ST_RUNTIME_ROLE) {
+  if (-not $Worktree -or $env:ST_RUNTIME_ROLE -cne 'fixture' -or $env:ST_DATA_BINDING) {
+    throw 'ST-RUNTIME-GUARD: 外置正式資料只能由已登記共用入口使用；開發工作樹須使用獨立 fixture。'
+  }
+  $fixturePin = Join-Path $Root 'data\stock_python.path'
+  if (-not (Test-Path -LiteralPath $fixturePin -PathType Leaf)) {
+    throw 'ST-RUNTIME-GUARD: fixture 檢查需要既有 Python pin；未建立 pin 或啟動服務。'
+  }
+  $fixturePython = (Get-Content -LiteralPath $fixturePin -Raw -Encoding UTF8).Trim()
+  if (-not [IO.Path]::IsPathRooted($fixturePython) -or -not (Test-Path -LiteralPath $fixturePython -PathType Leaf)) {
+    throw 'ST-RUNTIME-GUARD: fixture Python pin 無效。'
+  }
+  & $fixturePython -B (Join-Path $Root 'server\data_paths.py') describe --code-root $Root --role fixture | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'ST-RUNTIME-GUARD: fixture 資料根驗證失敗。' }
+}
+
 $TipBranch = 'cursor/st51-docs-ux-on-tip-3497'
 $TipFile = Join-Path $Root 'TIP_BRANCH'
 if (Test-Path $TipFile) {
@@ -291,7 +309,8 @@ function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$Ow
         if ([int]$process.ParentProcessId -eq $ExpectedParent) {
           $commandLine = [string]$process.CommandLine
         } elseif ([string]$process.Name -eq 'python.exe') {
-          # Windows venv 會改寫 argv[0]；核對各自釘選執行檔及相同伺服器引數，保留父鏈／時間條件。
+          # Windows venv 的 base 子程序可能保留 pin 的 argv[0]；執行檔身分另由 CIM 核對。
+          # 只接受 pin/base 兩種完整命令，並保留 CMD → pin → base 的父鏈與時間條件。
           $proxy = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction Stop
           $proxyTicks = Get-ProcessStartTicks ([int]$proxy.ProcessId)
           $serverArguments = '-u "' + (Join-Path $OwnerRoot 'server\server.py') + '"'
@@ -300,7 +319,9 @@ function Write-DevServerReceipt([int]$PortNum, [string]$ReceiptPath, [string]$Ow
           if ($ExpectedPython -and ([string]$proxy.ExecutablePath -eq $ExpectedPython) -and
               [string]$proxy.Name -eq 'python.exe' -and [int]$proxy.ParentProcessId -eq $ExpectedParent -and
               ([string]$proxy.CommandLine -cmatch $pinCommand) -and
-              ([string]$process.CommandLine -cmatch $baseCommand) -and
+              ([string]$process.ExecutablePath -eq $ExpectedBasePython) -and
+              (([string]$process.CommandLine -cmatch $baseCommand) -or
+               ([string]$process.CommandLine -cmatch $pinCommand)) -and
               $null -ne $proxyTicks -and $launchTicks -le $proxyTicks -and $proxyTicks -le $ticks) {
             $commandLine = [string]$process.CommandLine
           }

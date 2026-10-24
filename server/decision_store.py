@@ -8,6 +8,10 @@ import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
+if __package__:
+    from .runtime_storage import assert_write_allowed
+else:
+    from runtime_storage import assert_write_allowed
 
 
 def freeze(value):
@@ -19,6 +23,7 @@ def encode(value):
 
 
 def connect(path):
+    assert_write_allowed(path, must_exist=True)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
     conn.execute('PRAGMA journal_mode=WAL')

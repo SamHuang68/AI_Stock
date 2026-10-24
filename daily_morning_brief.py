@@ -83,6 +83,10 @@ def _c(p):
 
 
 def main():
+    from data_paths import binding_for
+    if binding_for().mode != 'legacy':
+        print('綁定資料模式不允許獨立寄送晨報；未讀取來源或啟動外送。', file=sys.stderr)
+        return 2
     date = datetime.now().strftime('%Y-%m-%d')
     rows = []
     comp = wsum = 0.0

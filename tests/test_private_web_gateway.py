@@ -136,6 +136,24 @@ def _request(url: str, *, method: str = "GET", token: str | None = None,
 
 
 class PrivateWebGatewayTests(unittest.TestCase):
+    def test_proxy_replaces_all_case_variants_of_client_role_header(self):
+        address = urlsplit(self.base)
+        connection = http.client.HTTPConnection(address.hostname, address.port, timeout=5)
+        try:
+            connection.putrequest('GET', '/quote-batch?syms=2330.TW')
+            connection.putheader('Authorization', 'Bearer reader-secret')
+            for name in ('x-st-gateway-role', 'X-St-Gateway-Role', 'X-ST-Gateway-Role'):
+                connection.putheader(name, 'owner')
+            connection.endheaders()
+            response = connection.getresponse()
+            response.read()
+            self.assertEqual(response.status, 200)
+        finally:
+            connection.close()
+        roles = [(key, value) for key, value in UpstreamHandler.seen[-1]['headers'].items()
+                 if key.lower() == 'x-st-gateway-role']
+        self.assertEqual(roles, [('X-ST-Gateway-Role', 'reader')])
+
     def test_private_alert_status_is_owner_only(self):
         for path in ('/alert/status', '/watch/status'):
             before = len(UpstreamHandler.seen)

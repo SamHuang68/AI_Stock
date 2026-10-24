@@ -13,7 +13,7 @@
     "server/etf_api.py": 1,
     "server/etf_delta_tracker.py": 2,
     "server/http_client.py": 4,
-    "server/llm_gate.py": 2,
+    "server/llm_gate.py": 1,
     "server/macro_track.py": 21,
     "server/margin_cycle.py": 2,
     "server/margin_ratio.py": 10,
@@ -38,6 +38,6 @@
     "server/tw_index_charts.py": 6,
     "server/universe.py": 1,
     "server/watch_daemon.py": 2,
-    "server/wavedeck_bus.py": 12
+    "server/wavedeck_bus.py": 11
   }
 }

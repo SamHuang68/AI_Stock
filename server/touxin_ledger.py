@@ -22,9 +22,16 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-LEDGER_DIR = os.path.join(_BASE, 'data', 'touxin_ledger')
+if __package__:
+    from . import data_paths
+    from .runtime_storage import assert_write_allowed
+else:
+    import data_paths
+    from runtime_storage import assert_write_allowed
+
+LEDGER_DIR = str(data_paths.data_path('touxin_ledger', code_root=_BASE))
 DB_PATH = os.path.join(LEDGER_DIR, 'touxin_ledger.db')
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 
 SCHEMA_VERSION = 1
 _WRITE_LOCK = threading.Lock()
@@ -104,14 +111,20 @@ def _finite_number(value: Any, field: str, *, allow_negative: bool = True) -> fl
     return number
 
 
-def _ledger_db_path(base_dir: str | os.PathLike[str] | None = None) -> str:
+def _ledger_db_path(base_dir: str | os.PathLike[str] | None = None, *,
+                    data_root: str | os.PathLike[str] | None = None) -> str:
+    if data_root is not None:
+        return str(data_paths.data_path('touxin_ledger/touxin_ledger.db', code_root=base_dir,
+                   override=os.path.join(os.fspath(data_root), 'touxin_ledger', 'touxin_ledger.db')))
     if base_dir is None:
         return DB_PATH
-    return os.path.join(os.fspath(base_dir), 'data', 'touxin_ledger', 'touxin_ledger.db')
+    return str(data_paths.data_path('touxin_ledger/touxin_ledger.db', code_root=base_dir))
 
 
-def get_conn(base_dir: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
-    db_path = _ledger_db_path(base_dir)
+def get_conn(base_dir: str | os.PathLike[str] | None = None, *,
+             data_root: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
+    db_path = _ledger_db_path(base_dir, data_root=data_root)
+    assert_write_allowed(db_path, must_exist=True)
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
@@ -120,9 +133,10 @@ def get_conn(base_dir: str | os.PathLike[str] | None = None) -> sqlite3.Connecti
     return conn
 
 
-def init_db(base_dir: str | os.PathLike[str] | None = None) -> None:
+def init_db(base_dir: str | os.PathLike[str] | None = None, *,
+            data_root: str | os.PathLike[str] | None = None) -> None:
     with _WRITE_LOCK:
-        with closing(get_conn(base_dir)) as conn:
+        with closing(get_conn(base_dir, data_root=data_root)) as conn:
             with conn:
                 conn.executescript(_SCHEMA)
                 conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
@@ -224,9 +238,10 @@ def append_rows(
     *,
     base_dir: str | os.PathLike[str] | None = None,
     default_ingested_at: str | None = None,
+    data_root: str | os.PathLike[str] | None = None,
 ) -> int:
     """Append ledger rows; duplicate primary keys are ignored."""
-    init_db(base_dir)
+    init_db(base_dir, data_root=data_root)
     normalized = [
         normalize_row(row, default_ingested_at=default_ingested_at)
         for row in rows
@@ -235,7 +250,7 @@ def append_rows(
         return 0
     inserted = 0
     with _WRITE_LOCK:
-        with closing(get_conn(base_dir)) as conn:
+        with closing(get_conn(base_dir, data_root=data_root)) as conn:
             with conn:
                 for row in normalized:
                     cur = conn.execute(

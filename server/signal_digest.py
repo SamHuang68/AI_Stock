@@ -30,8 +30,13 @@ try:
 except Exception:  # pragma: no cover
     alert_daemon = None
 
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATE_FILE = os.path.join(_BASE, 'data', 'stock_signal_push_state.json')
+STATE_FILE = str(data_paths.data_path('stock_signal_push_state.json', code_root=_BASE))
 CONFIG_KEY = 'stock_signal_push'
 POLL_KEY = 'stock_signal_poll_seconds'
 AI_DIGEST_KEY = 'stock_signal_ai_digest'

@@ -47,6 +47,12 @@
 
   let cfg = null, rules = [], readError = null, refreshId = 0, ruleWritePending = false;
 
+  function escapeHTML(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
   const COMP_INDS = [['close', '收盤'], ['sma20', 'SMA20'], ['sma60', 'SMA60'], ['rsi14', 'RSI'],
   ['bbL', '布林下軌'], ['bbU', '布林上軌'], ['volRatio', '量比'], ['high20', '20日高']];
   function compCondRow(idx) {
@@ -141,34 +147,34 @@
       <div class="ap-toggle" style="margin-top:8px"><input type="checkbox" id="ap-market-signal" ${cfg.market_signal_enabled ? 'checked' : ''}>
       <b>推送跨市場前兆雷達的狀態轉換</b></div>
       <div style="color:#64748b;font-size:10px;margin:3px 0 7px">僅推送戒備／確認／生效／衝突等邊緣事件；目前為 Shadow observation，不是買賣或槓桿指令。</div>
-      <label>輪詢秒數</label><input id="ap-poll" type="number" value="${cfg.poll_seconds || 60}" min="15">
+      <label>輪詢秒數</label><input id="ap-poll" type="number" value="${escapeHTML(cfg.poll_seconds || 60)}" min="15">
     </section>
     <section>
       <div class="ap-toggle"><input type="checkbox" id="ap-tg-en" ${tg.enabled ? 'checked' : ''}><b>Telegram</b>
       <span style="color:#64748b">（@BotFather 建 bot 取 token，傳訊息給 bot 後用 getUpdates 拿 chat_id）</span></div>
       <label>Bot Token</label><input id="ap-tg-token" placeholder="${tg.bot_token ? '已設定 (留空不改)' : '123456:ABC...'}">
-      <label>Chat ID</label><input id="ap-tg-chat" value="${tg.chat_id || ''}">
+      <label>Chat ID</label><input id="ap-tg-chat" value="${escapeHTML(tg.chat_id || '')}">
     </section>
     <section>
       <div class="ap-toggle"><input type="checkbox" id="ap-em-en" ${em.enabled ? 'checked' : ''}><b>Email (SMTP)</b>
       <span style="color:#64748b">（Gmail 用應用程式密碼）</span></div>
-      <div class="row"><div><label>SMTP Host</label><input id="ap-em-host" value="${em.smtp_host || 'smtp.gmail.com'}"></div>
-      <div><label>Port</label><input id="ap-em-port" type="number" value="${em.smtp_port || 587}"></div></div>
-      <label>帳號</label><input id="ap-em-user" value="${em.user || ''}">
+      <div class="row"><div><label>SMTP Host</label><input id="ap-em-host" value="${escapeHTML(em.smtp_host || 'smtp.gmail.com')}"></div>
+      <div><label>Port</label><input id="ap-em-port" type="number" value="${escapeHTML(em.smtp_port || 587)}"></div></div>
+      <label>帳號</label><input id="ap-em-user" value="${escapeHTML(em.user || '')}">
       <label>應用程式密碼</label><input id="ap-em-pw" type="password" placeholder="${em.app_password ? '已設定 (留空不改)' : ''}">
-      <label>收件者</label><input id="ap-em-to" value="${em.to || ''}">
+      <label>收件者</label><input id="ap-em-to" value="${escapeHTML(em.to || '')}">
     </section>
     <section>
       <div class="ap-toggle"><input type="checkbox" id="ap-wh-en" ${(cfg.webhook || {}).enabled ? 'checked' : ''}><b>Webhook</b>
       <span style="color:#64748b">（Discord/Slack/自架；POST JSON {text,content}）</span></div>
-      <label>Webhook URL</label><input id="ap-wh-url" value="${(cfg.webhook || {}).url || ''}" placeholder="https://discord.com/api/webhooks/...">
+      <label>Webhook URL</label><input id="ap-wh-url" value="${escapeHTML((cfg.webhook || {}).url || '')}" placeholder="https://discord.com/api/webhooks/...">
     </section>
     <section>
       <b>複合警示</b> <span style="color:#64748b;font-size:10px">多條件 AND/OR，後端日線評估</span>
       <table><thead><tr><th>代號</th><th>邏輯</th><th>條件</th><th></th></tr></thead>
       <tbody>${rules.map((r, i) => r.type === 'composite' ? `<tr>
-        <td>${r.sym}</td><td>${(r.combine || 'AND')}</td>
-        <td style="font-size:10px">${(r.conditions || []).map(c => `${c.left}${({ gt: '>', lt: '<', gte: '≥', lte: '≤' }[c.op] || c.op)}${c.right}`).join(' · ')}</td>
+        <td>${escapeHTML(r.sym)}</td><td>${escapeHTML(r.combine || 'AND')}</td>
+        <td style="font-size:10px">${(r.conditions || []).map(c => escapeHTML(`${c.left}${({ gt: '>', lt: '<', gte: '≥', lte: '≤' }[c.op] || c.op)}${c.right}`)).join(' · ')}</td>
         <td><button class="sec" data-del="${i}" style="padding:2px 6px">✕</button></td></tr>` : '').join('')}</tbody></table>
       <div class="row" style="margin-top:6px">
         <div><input id="ap-c-sym" placeholder="代號 2330"></div>
@@ -182,9 +188,9 @@
       <b>價格警報規則</b>
       <table><thead><tr><th>代號</th><th>市場</th><th>類型</th><th>價位／門檻</th><th>備註</th><th></th></tr></thead>
       <tbody id="ap-rules">${rules.map((r, i) => r.type === 'composite' ? '' : `<tr>
-        <td>${r.sym || ''}</td><td>${r.market || 'TW'}</td>
+        <td>${escapeHTML(r.sym || '')}</td><td>${escapeHTML(r.market || 'TW')}</td>
         <td>${ruleTypeLabel(r)}</td>
-        <td>${ruleTarget(r)}</td><td>${r.note || ''}</td>
+        <td>${escapeHTML(ruleTarget(r))}</td><td>${escapeHTML(r.note || '')}</td>
         <td><button class="sec" data-del="${i}" style="padding:2px 6px">✕</button></td></tr>`).join('')}</tbody></table>
       <div class="row" style="margin-top:6px">
         <div><input id="ap-r-sym" placeholder="代號 2330"></div>

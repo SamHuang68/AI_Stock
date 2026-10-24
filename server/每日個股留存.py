@@ -4,6 +4,11 @@ import json
 import sqlite3
 import zlib
 from contextlib import closing
+
+if __package__:
+    from .runtime_storage import assert_write_allowed
+else:
+    from runtime_storage import assert_write_allowed
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -94,6 +99,7 @@ def enable(path, now=None):
     now = now or datetime.now(ss._TZ['TW'])
     if now.tzinfo is None:
         raise ValueError('啟用時間必須含時區')
+    assert_write_allowed(path, must_exist=True)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(path)) as conn, conn:
         conn.executescript('''
@@ -185,6 +191,7 @@ def capture(path, series, benchmark, chips=None, now=None):
         counts.update(status='waiting', reason='尚未到收盤留存時間；14:00 後檢查當日日線')
     version = engine_digest()
     activated = datetime.fromisoformat(cfg['activatedAt']).astimezone(ss._TZ['TW']).date().isoformat()
+    assert_write_allowed(path, must_exist=True)
     with closing(sqlite3.connect(path, timeout=30)) as conn, conn:
         _chip_schema(conn)
         for symbol, raw in series:

@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
@@ -60,9 +61,44 @@ class OvernightIntradayTest(unittest.TestCase):
         self.assertLess(max(abs(row['overnight']) for row in rows), 0.02)
 
     def test_missing_open_is_rejected_not_imputed(self):
-        normalized = oi.normalize_yahoo_chart(yahoo_payload(missing_open=90), 'MU')
+        payload = yahoo_payload(missing_open=170, end=datetime(2026, 10, 22, 20, tzinfo=timezone.utc))
+        normalized = oi.normalize_yahoo_chart(payload, 'MU')
         self.assertTrue(any(row['reason'] == 'missing_or_nonpositive_adjusted_ohlc' for row in normalized['rejected']))
-        self.assertEqual(len(normalized['rows']), 179)
+        self.assertEqual(len(normalized['rows']), 180)
+        missing, following = normalized['rows'][170:172]
+        self.assertIsNone(missing['open'])
+        self.assertIsNotNone(missing['close'])
+        derived = {row['date']: row for row in oi.derive_session_returns(normalized['rows'])}
+        self.assertNotIn(missing['date'], derived)
+        self.assertEqual(derived[following['date']]['previousDate'], missing['date'])
+        self.assertAlmostEqual(derived[following['date']]['overnight'], 0.003, places=12)
+        self.assertEqual(len(derived), 178)
+
+    def test_missing_close_preserves_boundary_instead_of_bridging_sessions(self):
+        payload = yahoo_payload(end=datetime(2026, 10, 22, 20, tzinfo=timezone.utc))
+        payload['chart']['result'][0]['indicators']['quote'][0]['close'][170] = None
+        normalized = oi.normalize_yahoo_chart(payload, 'MU')
+        self.assertIsNone(normalized['rows'][170]['close'])
+        derived = {row['date']: row for row in oi.derive_session_returns(normalized['rows'])}
+        self.assertNotIn(normalized['rows'][170]['date'], derived)
+        self.assertNotIn(normalized['rows'][171]['date'], derived)
+        self.assertEqual(derived[normalized['rows'][172]['date']]['previousDate'], normalized['rows'][171]['date'])
+        self.assertEqual(len(derived), 177)
+
+    def test_relative_returns_keep_previous_date_guard_after_missing_open(self):
+        end = datetime(2026, 10, 22, 20, tzinfo=timezone.utc)
+        member = oi.normalize_yahoo_chart(yahoo_payload(missing_open=170, end=end), 'MU')['rows']
+        benchmark = oi.normalize_yahoo_chart(yahoo_payload(symbol='^SOX', end=end), '^SOX')['rows']
+        member_returns = oi.derive_session_returns(member)
+        aligned = oi.residualize(member_returns, oi.derive_session_returns(benchmark))
+        self.assertEqual(len(aligned), 178)
+        self.assertTrue(all(abs(row['overnight']) < 1e-12 for row in aligned))
+        # A genuinely absent benchmark date changes the next return's start;
+        # the existing previousDate guard must still exclude that pair.
+        benchmark.pop(170)
+        mismatched = oi.residualize(member_returns, oi.derive_session_returns(benchmark))
+        self.assertNotIn(member[171]['date'], {row['date'] for row in mismatched})
+        self.assertEqual(len(mismatched), 177)
 
     def test_mismatched_arrays_fail_closed(self):
         payload = yahoo_payload()
@@ -108,6 +144,65 @@ class OvernightIntradayTest(unittest.TestCase):
         insufficient = oi.build_snapshot(('US',), fetcher=fetcher)
         self.assertFalse(insufficient['ok'])
         self.assertEqual(insufficient['markets'][0]['status'], 'insufficient')
+
+    def test_benchmark_with_enough_rows_but_too_few_returns_is_insufficient(self):
+        end = datetime(2026, 10, 22, 20, tzinfo=timezone.utc)
+        for missing_field, valid_returns in (('open', 79), ('close', 78)):
+            with self.subTest(missing_field=missing_field):
+                benchmark = yahoo_payload(symbol='^SOX', count=81, end=end)
+                benchmark['chart']['result'][0]['indicators']['quote'][0][missing_field][40] = None
+                normalized = oi.normalize_yahoo_chart(benchmark, '^SOX')
+                self.assertEqual(len(normalized['rows']), 81)
+                with self.assertRaisesRegex(ValueError, f'insufficient valid session returns: {valid_returns}'):
+                    oi.derive_session_returns(normalized['rows'])
+                snapshot = oi.build_snapshot(('US',), fetcher=lambda symbol:
+                    benchmark if symbol == '^SOX' else yahoo_payload(symbol=symbol, end=end))
+                self.assertFalse(snapshot['ok'])
+                market = snapshot['markets'][0]
+                self.assertEqual(market['status'], 'insufficient')
+                self.assertEqual(market['quality']['warnings'], ['benchmark_unavailable'])
+                self.assertEqual(market['errors'], [{'symbol': '^SOX',
+                    'error': f'insufficient valid session returns: {valid_returns}'}])
+
+    def test_benchmark_return_gap_does_not_block_the_other_market(self):
+        end = datetime(2026, 10, 22, 20, tzinfo=timezone.utc)
+
+        def fetcher(symbol):
+            is_tw = symbol == '^TWII' or symbol.endswith(('.TW', '.TWO'))
+            return yahoo_payload(symbol=symbol, end=end,
+                                 timezone_name='Asia/Taipei' if is_tw else 'America/New_York',
+                                 count=81 if symbol == '^TWII' else 180,
+                                 missing_open=40 if symbol == '^TWII' else None)
+
+        snapshot = oi.get_snapshot('all', force=True, fetcher=fetcher)
+        self.assertTrue(snapshot['ok'])
+        self.assertEqual(snapshot['quality']['status'], 'mixed')
+        markets = {row['market']: row for row in snapshot['markets']}
+        self.assertEqual(markets['TW']['status'], 'insufficient')
+        self.assertEqual(markets['US']['status'], 'ready')
+        self.assertEqual(len(markets['US']['members']), 4)
+        self.assertEqual([row['marketScope'] for row in snapshot['evidence']], ['US'])
+
+    def test_benchmark_return_gap_preserves_last_valid_cache_as_stale(self):
+        end = datetime(2026, 10, 22, 20, tzinfo=timezone.utc)
+        valid = oi.build_snapshot(('US',), fetcher=lambda symbol: yahoo_payload(symbol=symbol, end=end))
+        with oi._CACHE_LOCK:
+            oi._CACHE['US'] = (0.0, valid)
+
+        def fetcher(symbol):
+            return yahoo_payload(symbol=symbol, end=end,
+                                 count=81 if symbol == '^SOX' else 180,
+                                 missing_open=40 if symbol == '^SOX' else None)
+
+        with patch.object(oi, '_fetch_yahoo_payload', side_effect=fetcher):
+            stale = oi.get_snapshot('US', force=True)
+        self.assertTrue(stale['ok'])
+        self.assertEqual(stale['quality']['status'], 'stale')
+        self.assertEqual(stale['quality']['warnings'], ['REFRESH_FAILED_LAST_VALID_PRESERVED'])
+        self.assertTrue(stale['cache']['stale'])
+        self.assertEqual(stale['markets'], valid['markets'])
+        with oi._CACHE_LOCK:
+            self.assertIs(oi._CACHE['US'][1], valid)
 
     def test_tw_basket_requires_four_of_five_members(self):
         failures = {'8299.TWO'}

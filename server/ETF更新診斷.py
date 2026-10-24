@@ -7,6 +7,7 @@ import uuid
 
 import etf_paths
 from atomic_store import atomic_write_json
+from runtime_storage import assert_write_allowed
 
 
 def run_directory():
@@ -27,6 +28,7 @@ class UpdateTrace:
         self.run_id = uuid.UUID(str(run_id)).hex if run_id else uuid.uuid4().hex
         self.started = time.time()
         self.directory = run_directory()
+        assert_write_allowed(self.directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
         atomic_write_json(report_path(self.run_id), {
@@ -36,6 +38,7 @@ class UpdateTrace:
         }, backup=False)
 
     def record(self, event, **fields):
+        assert_write_allowed(self.directory / (self.run_id + '.jsonl'))
         row = {'timestamp': dt.datetime.now(dt.timezone.utc).isoformat(),
                'component': 'etf_tracker', 'runId': self.run_id, 'event': event, **fields}
         with self.lock, (self.directory / (self.run_id + '.jsonl')).open('a', encoding='utf-8') as handle:

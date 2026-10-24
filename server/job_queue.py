@@ -188,8 +188,9 @@ class DurableJobQueue:
     """有界、持久、單一工作者；讀取不建表、不恢復、不啟動。"""
     def __init__(self, db_path=None, *, capacity=16, retain=100,
                  clock=time.time, monotonic=time.monotonic):
-        self.db_path = os.path.abspath(db_path or os.environ.get('ST_UPDATE_JOBS_DB') or
-                                       Path(__file__).resolve().parents[1] / 'data/update_jobs.sqlite3')
+        from data_paths import data_path
+        self.db_path = os.path.abspath(data_path('update_jobs.sqlite3', override=db_path,
+                                                override_env='ST_UPDATE_JOBS_DB'))
         self.capacity, self.retain = max(1, int(capacity)), max(10, int(retain))
         self.clock, self.monotonic = clock, monotonic
         self._handlers = {}
@@ -208,6 +209,8 @@ class DurableJobQueue:
             self._handlers[kind] = (fn, int(priority), float(timeout))
 
     def _connect(self):
+        from runtime_storage import assert_write_allowed
+        assert_write_allowed(self.db_path, must_exist=True)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row

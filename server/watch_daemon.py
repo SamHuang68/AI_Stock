@@ -28,10 +28,13 @@ except Exception as e:
     alert_daemon = None
     print('[watch] alert_daemon import failed:', e)
 
+import data_paths
+from runtime_storage import assert_write_allowed
+
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RULES_FILE = os.path.join(_BASE, 'data', 'watch_rules.json')
-STATE_FILE = os.path.join(_BASE, 'data', 'watch_state.json')
-LOG_DIR = os.path.join(_BASE, 'logs', 'watch')
+RULES_FILE = str(data_paths.data_path('watch_rules.json', code_root=_BASE))
+STATE_FILE = str(data_paths.data_path('watch_state.json', code_root=_BASE))
+LOG_DIR = str(data_paths.log_path('watch', code_root=_BASE))
 _state = {'thread': None, 'stop': False, 'last_run': None, 'fired': []}
 
 
@@ -61,6 +64,7 @@ def _save_state(s):
 
 def _log(text):
     try:
+        assert_write_allowed(LOG_DIR)
         os.makedirs(LOG_DIR, exist_ok=True)
         fn = os.path.join(LOG_DIR, 'watch_' + datetime.now().strftime('%Y-%m') + '.log')
         with open(fn, 'a', encoding='utf-8') as f:
@@ -347,6 +351,8 @@ def status():
 
 
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立 WATCH 檢查；請使用受管後端工作。')
     print('watch_daemon one-shot check')
     check_once()
     print(json.dumps(status(), ensure_ascii=False, indent=2))

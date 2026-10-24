@@ -82,6 +82,19 @@ $python = [string]$config.python
 if (-not [IO.Path]::IsPathRooted($python) -or -not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw '本機安裝沒有有效的絕對 Python 路徑。'
 }
+if ($config.storageMode -eq 'external' -or $config.dataBinding -or
+    $env:ST_DATA_BINDING -or $env:ST_DATA_ROOT -or $env:ST_RUNTIME_ROLE) {
+    # Shared mode is read-only and returns before receipts, locks, sync or spawn.
+    $shared = Invoke-LocalRelease $python $InstallRoot 'shared-status'
+    if ($shared.storageMode -ne 'external' -or $shared.runtimeRole -ne 'client') {
+        throw '共用後端身分核對失敗；未啟動第二個後端。'
+    }
+    if (-not ($NoBrowser -or $CheckOnly)) { Start-Process ([string]$shared.publicUrl + '/#pulse') }
+    return
+}
+if ($config.storageMode -and $config.storageMode -ne 'legacy') {
+    throw '未知資料模式；未啟動後端。'
+}
 $baseDir = Join-Path $InstallRoot 'current'
 $receiptPath = Join-Path $InstallRoot 'local_process.json'
 if ($CheckOnly) {

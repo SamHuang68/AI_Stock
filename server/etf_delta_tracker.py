@@ -17,6 +17,7 @@
   python etf_delta_tracker.py --backfill 5
 """
 
+import hashlib
 import os
 import re
 import ssl
@@ -50,28 +51,58 @@ _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode    = ssl.CERT_NONE
 
 # ── 路徑 ──────────────────────────────────────────────────────────
+import data_paths
+
 SCRIPT_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CATALOG_FILE = os.path.join(SCRIPT_DIR, 'data', 'etf_catalog.json')
+CATALOG_FILE = str(data_paths.data_path('etf_catalog.json', code_root=SCRIPT_DIR))
 
 # ── ETFS 觀測池：從 etf_catalog.json 動態載入 enabled=true 的 ETF ─
 def load_catalog():
     """讀取 etf_catalog.json，回傳 dict {code: (display_code, name)}.
     若找不到 catalog 或讀取失敗，fallback 回原本 hardcoded 的 10 檔。"""
+    return load_catalog_with_digest()[0]
+
+
+def load_catalog_with_digest():
+    """回傳同次讀取的清單及 SHA；讀取或結構無效時以 None 保留既有清單。"""
     if not os.path.isfile(CATALOG_FILE):
-        print(f'[WARN] {CATALOG_FILE} 不存在，使用 fallback 10 檔主動 ETF')
-        return _FALLBACK_ETFS
+        print('[WARN] ETF catalog 不存在；保留既有清單，首次載入使用預設。')
+        return _FALLBACK_ETFS, None
     try:
-        with open(CATALOG_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f'[ERR] 讀取 {CATALOG_FILE} 失敗：{e}，使用 fallback')
-        return _FALLBACK_ETFS
+        with open(CATALOG_FILE, 'rb') as f:
+            raw = f.read()
+        data = json.loads(raw.decode('utf-8'))
+        catalog = _catalog_from(data)
+        digest = hashlib.sha256(raw).hexdigest()
+    except (OSError, ValueError) as e:
+        # Catalog values, parser excerpts and local paths may contain private
+        # information. Log only the error class, never the submitted content.
+        print(f'[ERR] ETF catalog 讀取／結構無效（{type(e).__name__}）；保留既有清單，首次載入使用預設。')
+        return _FALLBACK_ETFS, None
+    return catalog, digest
+
+
+def _catalog_from(data):
+    # Validate the consumed schema before publishing either the list or digest.
+    # Optional fields retain existing defaults; unrelated metadata is ignored.
+    if not isinstance(data, dict) or not isinstance(data.get('categories'), list):
+        raise ValueError('catalog categories must be an array')
     out = {}
-    for cat in data.get('categories', []):
+    for cat in data['categories']:
+        if not isinstance(cat, dict) or not isinstance(cat.get('etfs', []), list):
+            raise ValueError('catalog category must contain an ETF array')
         for etf in cat.get('etfs', []):
-            if (etf.get('enabled') and etf.get('code')
-                    and str(etf.get('market') or 'TW').upper() == 'TW'):
-                code = etf['code'].strip().upper()
+            if not isinstance(etf, dict):
+                raise ValueError('catalog ETF must be an object')
+            code = etf.get('code')
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError('catalog ETF code must be a nonempty string')
+            if not isinstance(etf.get('enabled', False), bool):
+                raise ValueError('catalog ETF enabled must be a boolean')
+            if any(key in etf and not isinstance(etf[key], str) for key in ('name', 'market')):
+                raise ValueError('catalog ETF name and market must be strings')
+            if etf.get('enabled') and (etf.get('market') or 'TW').upper() == 'TW':
+                code = code.strip().upper()
                 name = etf.get('name', code)
                 out[code] = (code, name)
     if not out:
@@ -92,7 +123,7 @@ _FALLBACK_ETFS = {
     '00984A': ('00984A', '主動安聯台灣高息'),
 }
 
-ETFS = load_catalog()
+ETFS, _CATALOG_STAMP = load_catalog_with_digest()
 _request_context = threading.local()
 
 
@@ -100,6 +131,29 @@ def _source_event(event, **fields):
     trace = getattr(_request_context, 'trace', None)
     if trace:
         trace.record(event, code=getattr(_request_context, 'code', None), **fields)
+
+
+def _remaining(deadline_monotonic):
+    if deadline_monotonic is None:
+        return TIMEOUT
+    remaining = deadline_monotonic - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('ETF tracker deadline exceeded')
+    return remaining
+
+
+def _read_response(resp, deadline_monotonic):
+    if deadline_monotonic is None:
+        return resp.read()
+    chunks = []
+    read = getattr(resp, 'read1', None) or resp.read
+    while True:
+        _remaining(deadline_monotonic)
+        chunk = read(64 * 1024)
+        _remaining(deadline_monotonic)
+        if not chunk:
+            return b''.join(chunks)
+        chunks.append(chunk)
 
 # ── HTTP 標頭：模擬瀏覽器，加 Accept-Encoding 自動處理 gzip ──────
 HEADERS = {
@@ -119,12 +173,14 @@ def http_get(url: str, referer: str = '') -> str | None:
     headers = dict(HEADERS)
     if referer:
         headers['Referer'] = referer
+    deadline = getattr(_request_context, 'deadline', None)
     for attempt in range(RETRY_TIMES):
+        _remaining(deadline)
         started = time.monotonic()
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
-                raw = resp.read()
+            with urllib.request.urlopen(req, timeout=min(TIMEOUT, _remaining(deadline)), context=_SSL_CTX) as resp:
+                raw = _read_response(resp, deadline)
                 if resp.headers.get('Content-Encoding') == 'gzip':
                     raw = gzip.decompress(raw)
                 _source_event('source_response', url=url, attempt=attempt + 1,
@@ -142,11 +198,16 @@ def http_get(url: str, referer: str = '') -> str | None:
                           error=type(e).__name__)
             if e.code in (404, 410):
                 return None
-            time.sleep(RETRY_DELAY)
+            time.sleep(min(RETRY_DELAY, _remaining(deadline)))
+        except TimeoutError:
+            if deadline is not None and deadline <= time.monotonic():
+                raise
+            _source_event('source_error', url=url, attempt=attempt + 1, error='TimeoutError')
+            time.sleep(min(RETRY_DELAY, _remaining(deadline)))
         except Exception as exc:
             _source_event('source_error', url=url, attempt=attempt + 1,
                           error=type(exc).__name__)
-            time.sleep(RETRY_DELAY)
+            time.sleep(min(RETRY_DELAY, _remaining(deadline)))
     return None
 
 
@@ -360,18 +421,28 @@ def _previous_snapshot_etf_count(history_dir: str, out_file: str) -> int:
     return 0
 
 
-def run(target_date: datetime.date, *, run_id=None) -> bool:
+def run(target_date: datetime.date, *, run_id=None, deadline_monotonic=None) -> bool:
+    # 外部資料根模式下更新在長駐的後端程序內執行，模組只匯入一次；目錄內容（SHA-256，與清單來自同一次讀取）
+    # 自上次載入後有變就換新清單，整輪（預期數、最低門檻、待補代號、逐檔抓取）用同一份，否則修改
+    # etf_catalog.json 後要重啟後端才生效。內容沒變就沿用現有清單（既有測試與呼叫端會直接指定 ETFS）；
+    # 讀取失敗（雜湊為 None）時沿用現有清單，不退回 fallback。舊模式每輪是新程序，結果相同。
+    global ETFS, _CATALOG_STAMP
+    catalog, digest = load_catalog_with_digest()
+    if digest is not None and digest != _CATALOG_STAMP:
+        ETFS, _CATALOG_STAMP = catalog, digest
     trace = UpdateTrace(run_id or os.environ.get('ST_ETF_RUN_ID'))
     trace.record('command_received', targetDate=target_date.isoformat(), expectedCount=len(ETFS))
     try:
-        return _run(target_date, trace)
+        _remaining(deadline_monotonic)
+        return _run(target_date, trace, deadline_monotonic=deadline_monotonic)
     except Exception as exc:
-        trace.finish(accepted=False, state='error', targetDate=target_date.isoformat(),
+        trace.finish(accepted=False, state='timeout' if isinstance(exc, TimeoutError) else 'error', targetDate=target_date.isoformat(),
                      message='更新發生例外，原快照保留。', error=type(exc).__name__)
         raise
 
 
-def _run(target_date: datetime.date, trace) -> bool:
+def _run(target_date: datetime.date, trace, *, deadline_monotonic=None) -> bool:
+    _remaining(deadline_monotonic)
     history_dir = str(etf_paths.resolve_history_dir(create=True))
     date_str = target_date.strftime('%Y-%m-%d')
     out_file = os.path.join(history_dir, f'top10_active_etf_holdings_{date_str}.json')
@@ -430,7 +501,10 @@ def _run(target_date: datetime.date, trace) -> bool:
     def worker(item):
         etf_id, (display_code, name) = item
         _request_context.trace, _request_context.code = trace, display_code
+        _request_context.deadline = deadline_monotonic
+        _remaining(deadline_monotonic)
         holdings, data_date, source = fetch_one(etf_id, target_date)
+        _remaining(deadline_monotonic)
         trace.record('etf_result', code=display_code, providerDate=data_date, source=source,
                      rows=len(holdings or []), state='received' if holdings else 'no_parsed_holdings')
         if holdings:
@@ -491,6 +565,7 @@ def _run(target_date: datetime.date, trace) -> bool:
                         'rows': len(result[code]['holdings'])} for code in succeeded_codes},
     }
     trace.record('candidate_checked', **diagnostics)
+    _remaining(deadline_monotonic)
     if not candidate_acceptance.get('accepted'):
         trace.finish(accepted=False, state=candidate_acceptance['state'],
                      message='快照未通過驗收，沿用原資料；請查看拒絕原因與來源日期。', **diagnostics)
@@ -505,6 +580,7 @@ def _run(target_date: datetime.date, trace) -> bool:
         quarantine = out_file + ('.previous-' if retained else '.invalid-') + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
         shutil.copy2(out_file, quarantine)
         print(f'[{date_str}] 舊快照已保留：{quarantine}')
+    _remaining(deadline_monotonic)
     atomic_write_json(out_file, result, backup=False)
     trace.finish(accepted=True, state='updated', message='快照已更新；來源缺漏另列，不代表全部成功。',
                  **diagnostics)
@@ -523,6 +599,8 @@ def backfill(days: int) -> bool:
 
 # ── 入口 ──────────────────────────────────────────────────────────
 if __name__ == '__main__':
+    if data_paths.binding_for().mode != 'legacy':
+        raise SystemExit('外置資料模式不允許獨立 ETF 更新；請使用受管後端工作。')
     import argparse
     parser = argparse.ArgumentParser(description='台股主動ETF持股爬蟲 (MoneyDJ)')
     parser.add_argument('--date', help='指定日期 YYYY-MM-DD (預設今天)')

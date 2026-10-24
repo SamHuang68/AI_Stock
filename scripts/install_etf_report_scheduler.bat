@@ -1,6 +1,11 @@
 @echo off
 chcp 65001 > nul
 setlocal enabledelayedexpansion
+if defined ST_DATA_BINDING goto bound_runtime_refused
+if defined ST_DATA_ROOT goto bound_runtime_refused
+if defined ST_RUNTIME_ROLE goto bound_runtime_refused
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0assert_standalone_runtime.ps1" -CodeRoot "%~dp0.."
+if errorlevel 1 goto bound_runtime_refused
 cd /d "%~dp0.."
 
 echo ============================================
@@ -35,3 +40,9 @@ echo Manual run now:  Start-ScheduledTask -TaskName "Stock_ETF_Report_Email"
 echo Remove:          schtasks /delete /tn "Stock_ETF_Report_Email" /f
 echo.
 pause
+exit /b 0
+
+:bound_runtime_refused
+echo [REFUSED] Bound runtime: this standalone email task cannot be registered.
+echo Use the registered backend POST /etf-report/email when explicitly requested.
+exit /b 2

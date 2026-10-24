@@ -26,6 +26,14 @@ _WINDOWS_REPLACE_ATTEMPTS = 7
 _IS_WINDOWS = os.name == 'nt'
 
 
+def _assert_runtime_write(path: Path) -> None:
+    if __package__:
+        from .runtime_storage import assert_write_allowed
+    else:
+        from runtime_storage import assert_write_allowed
+    assert_write_allowed(path, namespace=None)
+
+
 def _path_lock(path: Path) -> threading.RLock:
     key = str(path.resolve()).lower()
     with _guard:
@@ -69,6 +77,8 @@ def _replace_with_retry(source: Path, target: Path) -> None:
     an otherwise atomic ``os.replace`` fail with WinError 5 or 32.  Retrying only
     those Windows errors preserves fail-fast behavior for real filesystem faults.
     """
+    _assert_runtime_write(source)
+    _assert_runtime_write(target)
     attempts = _WINDOWS_REPLACE_ATTEMPTS if _IS_WINDOWS else 1
     for attempt in range(attempts):
         try:
@@ -105,6 +115,7 @@ def atomic_write_bytes(
     private: bool = False,
 ) -> None:
     target = Path(path)
+    _assert_runtime_write(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     lock = _path_lock(target)
     with lock:
@@ -192,6 +203,9 @@ def load_json(
                 raise StoreCorruptError(
                     f'{target.name} is corrupt; backup unavailable or invalid'
                 ) from backup_error
+            # Recovery mutates both the primary and its quarantine copy.
+            # Check ownership before selecting or creating either output.
+            _assert_runtime_write(target)
             stamp = time.strftime('%Y%m%d-%H%M%S')
             quarantine = target.with_name(f'{target.name}.corrupt-{stamp}')
             suffix = 1

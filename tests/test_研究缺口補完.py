@@ -33,7 +33,8 @@ class ResearchGapTests(unittest.TestCase):
         rows = [(int((end-timedelta(days=i)).timestamp()), 100, 101, 99, 100, 10) for i in reversed(range(150))]
         for now in (datetime(2026, 9, 28, 15, tzinfo=ss._TZ['TW']), datetime(2026, 9, 29, 1, tzinfo=ss._TZ['TW'])):
             with patch.object(routes, '_datastore', return_value=ds), patch.object(ds, 'get_bars', return_value=rows), \
-                    patch.object(routes, '_fetch_remote') as fetch, patch.object(ds, 'upsert_bars') as write:
+                    patch.object(routes, '_fetch_remote') as fetch, patch.object(ds, 'upsert_bars') as write, \
+                    patch.object(ds, 'source_revision_status', return_value={'count': 0}):
                 result = routes.load_bars('2330', 'TW', now=now)
             self.assertEqual(result['staleDays'], 0)
             self.assertFalse(result['provisional'])
@@ -58,7 +59,8 @@ class ResearchGapTests(unittest.TestCase):
         rows = [(int((now-timedelta(days=i)).timestamp()), 100, 101, 99, 100, 10) for i in reversed(range(1, 151))]
         routes.clear_cache()
         with patch.object(routes, '_datastore', return_value=ds), patch.object(ds, 'get_bars', return_value=rows), \
-                patch.object(routes, '_fetch_remote') as fetch:
+                patch.object(routes, '_fetch_remote') as fetch, \
+                patch.object(ds, 'source_revision_status', return_value={'count': 0}):
             result = routes.load_bars('2330', 'TW', now=now)
         self.assertIsNone(result['staleDays'])
         self.assertIn('新鮮度待確認', result['error'])

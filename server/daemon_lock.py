@@ -15,12 +15,25 @@ _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 
 
 def acquire_daemon_lock(
-    name: str, *, lock_dir: Path | None = None
+    name: str, *, lock_dir: Path | None = None, _bootstrap: bool = False
 ) -> BinaryIO | None:
     """Return an open locked handle, or None when another process owns it."""
     if not _SAFE_NAME.fullmatch(name):
         raise ValueError("invalid daemon lock name")
-    directory = lock_dir or DEFAULT_LOCK_DIR
+    if _bootstrap:
+        if lock_dir is None:
+            raise ValueError('bootstrap requires an explicit lock directory')
+        directory = Path(lock_dir)
+    else:
+        try:
+            from .runtime_storage import runtime_lock_dir, assert_write_allowed, is_fast_ai_resource_lock, assert_fast_ai_resource_lock_allowed
+        except ImportError:
+            from runtime_storage import runtime_lock_dir, assert_write_allowed, is_fast_ai_resource_lock, assert_fast_ai_resource_lock_allowed
+        directory = Path(lock_dir) if lock_dir is not None else runtime_lock_dir()
+        if is_fast_ai_resource_lock(name, directory):
+            assert_fast_ai_resource_lock_allowed(name, directory)
+        else:
+            assert_write_allowed(directory / f'{name}.lock', namespace=None)
     directory.mkdir(parents=True, exist_ok=True)
     handle = (directory / f"{name}.lock").open("a+b")
     try:

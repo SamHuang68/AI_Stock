@@ -4,6 +4,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
+
+if __package__:
+    from .runtime_storage import assert_write_allowed
+else:
+    from runtime_storage import assert_write_allowed
 from datetime import datetime, time
 from pathlib import Path
 
@@ -36,6 +41,7 @@ def append_observation(db: str | Path, result: dict, observed_at: datetime) -> b
     if observed_at.astimezone(TZ) < datetime.combine(datetime.fromisoformat(day).date(), time(18), TZ):
         return False
     payload = json.dumps(latest, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    assert_write_allowed(db, must_exist=True)
     with closing(sqlite3.connect(db, timeout=30)) as conn, conn:
         conn.execute(SCHEMA)
         cursor = conn.execute('''INSERT OR IGNORE INTO breakout_observations
@@ -59,6 +65,7 @@ def record_daily(db: str | Path, *, now: datetime | None = None, observed_at: da
     except ImportError:
         from 突破觀察 import report
     now = now or datetime.now(TZ)
+    assert_write_allowed(db, must_exist=True)
     with closing(sqlite3.connect(db, timeout=30)) as conn:
         symbols = [r[0] for r in conn.execute("SELECT symbol FROM action_coverage WHERE market='TW' ORDER BY symbol")]
     added, failures = 0, []

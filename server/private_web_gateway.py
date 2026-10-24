@@ -1379,6 +1379,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
 
     def _gateway_health(self) -> None:
         upstream_ok = False
+        runtime = None
         try:
             conn = http.client.HTTPConnection(
                 self.settings.upstream_host,
@@ -1387,9 +1388,21 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             )
             conn.request("GET", "/health/live", headers={"Connection": "close"})
             response = conn.getresponse()
-            response.read(4096)
+            raw = response.read(4096)
             upstream_ok = response.status == 200
             conn.close()
+            if upstream_ok:
+                try:
+                    live = json.loads(raw.decode('utf-8'))
+                    identity = live.get('dataRootId') if isinstance(live, dict) else None
+                    if (live.get('storageMode') == 'external' and live.get('runtimeRole') == 'backend'
+                            and type(live.get('capabilityVersion')) is int
+                            and live['capabilityVersion'] > 0 and str(uuid.UUID(identity)) == identity
+                            and re.fullmatch(r'[0-9a-f]{40}', live.get('runtimeCommit', ''))):
+                        runtime = {key: live[key] for key in ('dataRootId', 'storageMode',
+                                   'runtimeRole', 'capabilityVersion', 'runtimeCommit')}
+                except (ValueError, TypeError, AttributeError):
+                    pass
         except OSError:
             pass
         payload = {
@@ -1400,6 +1413,9 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         }
         if self.settings.instance_id:
             payload["instance"] = self.settings.instance_id
+        if runtime is not None:
+            payload['runtime'] = runtime
+        payload['capabilities'] = {'wavedeck': False, 'remoteTrading': False}
         self._json(200, payload)
 
     def _gateway_routes(self, role: str) -> None:
@@ -1454,6 +1470,7 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             "x-forwarded-for",
             "x-forwarded-host",
             "x-forwarded-proto",
+            "x-st-gateway-role",
         }
         for key, value in self.headers.items():
             if key.lower() not in blocked:
@@ -1721,8 +1738,53 @@ def create_server(settings: Settings | None = None) -> PrivateWebServer:
     return PrivateWebServer((active.listen_host, active.listen_port), Handler, active)
 
 
-def main() -> None:
-    settings = Settings.load()
+def _pid_path() -> Path:
+    pid_path = Path(os.environ.get("ST_WEB_PID_PATH", str(ROOT / "data" / "private_web_gateway.pid")))
+    return pid_path if pid_path.is_absolute() else ROOT / pid_path
+
+
+def _assert_gateway_outputs(binding, settings) -> None:
+    """外部資料根模式下，gateway 所有會寫入的檔案都不得碰到受保護的資料根或復原根，也不得是硬連結別名。
+
+    gateway 只取得 auth 檔的寫入權（見 bootstrap_gateway_auth）；稽核紀錄、客戶端追蹤、啟動追蹤與 PID 檔
+    的路徑來自設定與環境變數，若被誤指到正式資料、或與正式檔案是硬連結，append／截斷會改到不屬於它的資料。
+    必須在任何探測或寫入之前檢查（審查 ST-R2）。"""
+    from data_paths import assert_no_links, protected_roots
+    protected = tuple(Path(os.path.realpath(root)) for root in protected_roots(binding))
+    outputs = (settings.access_request_path, settings.audit_path, settings.client_trace_path,
+               STARTUP_TRACE, _pid_path())
+    for output in outputs:
+        path = Path(output).absolute()
+        real = Path(os.path.realpath(path))
+        for root in protected:
+            if real == root or root in real.parents or real in root.parents:
+                raise RuntimeError('gateway output overlaps a protected runtime/recovery root')
+        assert_no_links(path)
+
+
+def _gateway_auth_bootstrap(settings):
+    binding_path = ROOT.parent / 'runtime_binding.json'
+    manifest_path = ROOT / '.private_web_release.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig')) if manifest_path.is_file() else {}
+    explicit = (binding_path.exists() or manifest.get('storageBinding', {}).get('storageMode') == 'external'
+                or any(name in os.environ for name in ('ST_DATA_BINDING', 'ST_DATA_ROOT', 'ST_RUNTIME_ROLE')))
+    if not explicit:
+        return None
+    from data_paths import resolve_binding, validate_binding, validate_release_capability
+    from runtime_storage import bootstrap_gateway_auth
+    env = dict(os.environ)
+    if env.get('ST_RUNTIME_ROLE') not in (None, '', 'client'):
+        raise RuntimeError('gateway cannot inherit the business writer role')
+    env['ST_RUNTIME_ROLE'] = 'client'
+    binding = validate_binding(resolve_binding(code_root=ROOT, environ=env,
+        installation_binding=binding_path if binding_path.exists() else None), expected_role='client')
+    validate_release_capability(ROOT, binding)
+    if binding.mode != 'legacy':
+        _assert_gateway_outputs(binding, settings)
+    return bootstrap_gateway_auth(binding, writable_file=settings.access_request_path)
+
+
+def _serve_gateway(settings) -> None:
     startup_id = settings.instance_id or uuid.uuid4().hex
     bind_started = time.monotonic()
     _startup_event(
@@ -1764,13 +1826,7 @@ def main() -> None:
         pid=os.getpid(),
         elapsedMs=round((time.monotonic() - bind_started) * 1000),
     )
-    pid_value = os.environ.get(
-        "ST_WEB_PID_PATH",
-        str(ROOT / "data" / "private_web_gateway.pid"),
-    )
-    pid_path = Path(pid_value)
-    if not pid_path.is_absolute():
-        pid_path = ROOT / pid_path
+    pid_path = _pid_path()
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()) + "\n", encoding="ascii")
     print(
@@ -1785,6 +1841,16 @@ def main() -> None:
     finally:
         server.server_close()
         pid_path.unlink(missing_ok=True)
+
+
+def main() -> None:
+    settings = Settings.load()
+    lease = _gateway_auth_bootstrap(settings)
+    try:
+        _serve_gateway(settings)
+    finally:
+        if lease is not None:
+            lease.close()
 
 
 if __name__ == "__main__":

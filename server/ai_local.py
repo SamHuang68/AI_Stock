@@ -26,9 +26,20 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
 
+if __package__:
+    from . import data_paths
+    from .runtime_storage import assert_write_allowed
+else:
+    import data_paths
+    from runtime_storage import assert_write_allowed
+
 ROOT = Path(__file__).resolve().parents[1]
 HOST_LABEL = (os.environ.get("ST_AI_HOST_LABEL") or "EVO-T1").strip()[:48]
-TRACE_PATH = Path(os.environ.get("ST_AI_TRACE_PATH") or str(ROOT / "logs" / "ai_runtime_trace.jsonl"))
+_TRACE_OVERRIDE = os.environ.get('ST_AI_TRACE_PATH')
+if _TRACE_OVERRIDE and data_paths.binding_for(code_root=ROOT).mode == 'legacy':
+    _TRACE_OVERRIDE = str(ROOT / _TRACE_OVERRIDE)
+TRACE_PATH = data_paths.log_path('ai_runtime_trace.jsonl', code_root=ROOT, override=_TRACE_OVERRIDE,
+                                 override_env=None if _TRACE_OVERRIDE else 'ST_AI_TRACE_PATH')
 
 
 def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -254,8 +265,9 @@ def _trace(event: str, *, request_id: str, mode: str, **details: object) -> None
         "mode": str(mode)[:16],
         **allowed,
     }
+    path = TRACE_PATH if TRACE_PATH.is_absolute() else ROOT / TRACE_PATH
+    assert_write_allowed(path)
     try:
-        path = TRACE_PATH if TRACE_PATH.is_absolute() else ROOT / TRACE_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         with _TRACE_LOCK, path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")

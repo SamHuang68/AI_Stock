@@ -147,6 +147,8 @@ class HandlerTests(unittest.TestCase):
     def test_no_filters_reaches_enrichment_and_does_not_use_chart_period_start(self):
         tree = ast.parse((ROOT / 'server/server.py').read_text(encoding='utf-8'))
         method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == '_handle_screen3')
+        runtime_import = next(node for node in tree.body
+                              if isinstance(node, ast.ImportFrom) and node.module == 'data_paths')
         quote = {'chart': {'result': [{'timestamp': list(range(70)), 'meta': {},
                                       'indicators': {'quote': [{'close': [100] * 70}]}}]}}
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -157,7 +159,9 @@ class HandlerTests(unittest.TestCase):
                          'fetch_one': lambda *_: ('2330.TW', json.dumps(quote), False), '_yf_prevclose': previous,
                          '_openapi_lookup': mock.Mock(), '_mops_monthly_revenue': mock.Mock(),
                          'CHIP_HISTORY_PATH': '', '_BASE': str(ROOT), 'os': __import__('os')}
-            exec(compile(ast.Module(body=[method], type_ignores=[]), '<三合一端點>', 'exec'), namespace)
+            # Reuse the product's actual import declarations, never invent a
+            # helper absent from the full module when extracting this method.
+            exec(compile(ast.Module(body=[runtime_import, method], type_ignores=[]), '<三合一端點>', 'exec'), namespace)
             instance = mock.Mock()
             instance._calc_ind.return_value = {'close': 100, 'changePct': 0, 'rsi14': 50, 'volRatio': 1}
             with mock.patch.object(fields, 'enrich_results', side_effect=lambda rows, *_a, **_k: [{**r, **dict.fromkeys(fields.FIELDS)} for r in rows]) as enrich:

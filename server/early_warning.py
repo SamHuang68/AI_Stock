@@ -29,7 +29,10 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DB_PATH = os.path.join(_BASE, 'data', 'market_signals.db')
+import data_paths
+from runtime_storage import assert_write_allowed
+
+DB_PATH = str(data_paths.data_path('market_signals.db', code_root=_BASE))
 CONTRACT_VERSION = 3
 ENGINE_VERSION = 'st-market-precursor/v2'
 POLICY_VERSION = 'shadow-lifecycle/2026-09-v2'
@@ -973,6 +976,7 @@ def _empty_prospective(status: str = 'empty', error: str | None = None) -> dict[
 
 
 def _init_db(path: str = DB_PATH) -> None:
+    assert_write_allowed(path, must_exist=True)
     folder = os.path.dirname(os.path.abspath(path))
     if folder:
         os.makedirs(folder, exist_ok=True)

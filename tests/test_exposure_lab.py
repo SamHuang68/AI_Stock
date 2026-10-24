@@ -213,6 +213,35 @@ class ExposureLabTest(unittest.TestCase):
         self.assertIsNone(metrics['empiricalCostGapAnnualPct'])
         self.assertEqual(metrics['quality'], 'tracking_only_unadjusted_product')
 
+    def test_leverage_samples_require_matching_start_and_end_dates(self):
+        underlying = benchmark_contract(days=150)
+        product_rows, product_level = [], 100.0
+        for index, row in enumerate(underlying['rows']):
+            if index:
+                previous = underlying['rows'][index - 1]['totalReturnIndex']
+                product_level *= 1.0 + 2.0 * (row['totalReturnIndex'] / previous - 1.0)
+            product_rows.append({'date': row['date'], 'close': product_level})
+        # A missing observation invalidates its return and the following return's
+        # mismatched start. Neither source may pair a two-session return with one.
+        for missing_source in ('product', 'underlying'):
+            for basis in ('total_return', 'price_close_unadjusted'):
+                with self.subTest(missing_source=missing_source, basis=basis):
+                    products = [row for i, row in enumerate(product_rows)
+                                if missing_source != 'product' or i != 50]
+                    benchmark = {**underlying, 'rows': [row for i, row in enumerate(underlying['rows'])
+                                 if missing_source != 'underlying' or i != 50]}
+                    metrics = exposure_lab._daily_leverage_metrics(
+                        {'rows': products, 'returnBasis': basis}, benchmark, 2.0)
+                    self.assertEqual(metrics['sampleDays'], 147)
+                    self.assertEqual(metrics['rollingBeta'], 2.0)
+                    self.assertEqual(metrics['trackingResidualAnnualPct'], 0.0)
+                    self.assertEqual(metrics['sampleStart'], underlying['rows'][1]['date'])
+                    self.assertEqual(metrics['sampleEnd'], underlying['rows'][-1]['date'])
+                    if basis == 'total_return':
+                        self.assertEqual(metrics['empiricalCostGapAnnualPct'], 0.0)
+                    else:
+                        self.assertIsNone(metrics['empiricalCostGapAnnualPct'])
+
 
 if __name__ == '__main__':
     unittest.main()

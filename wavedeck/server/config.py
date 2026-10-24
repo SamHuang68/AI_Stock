@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from .state import DATA
+from runtime_paths import BINDING, ROOT, guard_write, registered_txt_dir
 
 CONFIG_PATH = DATA / "wavedeck_config.json"
-SECRETS_PATH = DATA / "wavedeck_secrets.json"
+# 秘密檔留在程式旁的 data（憑證相容）；舊模式與原本一致，跟著 state.DATA
+SECRETS_PATH = (DATA if BINDING.mode == "legacy" else ROOT / "data") / "wavedeck_secrets.json"
 
 _DEFAULT = {
     "provider": "heuristic",  # heuristic | ollama | openai
@@ -53,38 +55,50 @@ _DEFAULT = {
 }
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _read_json(path: Path, *, required: bool = False) -> dict[str, Any]:
     if not path.is_file():
+        if required:
+            raise RuntimeError("外置 WaveDeck 設定遺失；不建立預設設定。")
         return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
+        if required and not isinstance(raw, dict):
+            raise ValueError("外置 WaveDeck 設定必須是既有 JSON 物件。")
         return raw if isinstance(raw, dict) else {}
     except Exception:
+        if required:
+            raise
         return {}
 
 
 def load_config() -> dict[str, Any]:
+    guard_write(DATA)
     DATA.mkdir(parents=True, exist_ok=True)
     cfg = deepcopy(_DEFAULT)
-    disk = _read_json(CONFIG_PATH)
+    disk = _read_json(CONFIG_PATH, required=BINDING.mode == "external")
     for k, v in disk.items():
         if isinstance(v, dict) and isinstance(cfg.get(k), dict):
             cfg[k].update(v)
         else:
             cfg[k] = v
+    if BINDING.mode != "legacy" and (cfg.get("mode") == "live" or (cfg.get("broker") or {}).get("kind") in {"txt", "txt_master", "master"}):
+        registered_txt_dir(cfg.get("broker") or {})
     if not CONFIG_PATH.is_file():
         save_config(cfg)
     return cfg
 
 
 def save_config(cfg: dict[str, Any]) -> None:
+    if cfg.get("mode") == "live" or (cfg.get("broker") or {}).get("kind") in {"txt", "txt_master", "master"}:
+        registered_txt_dir(cfg.get("broker") or {})
+    guard_write(CONFIG_PATH)
     DATA.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_secrets() -> dict[str, Any]:
     """Optional local secrets file — never commit."""
-    sec = _read_json(SECRETS_PATH)
+    sec = {} if BINDING.mode == "fixture" else _read_json(SECRETS_PATH)
     # Env wins
     if os.environ.get("OPENAI_API_KEY"):
         sec["openai_api_key"] = os.environ["OPENAI_API_KEY"]
@@ -112,6 +126,8 @@ def set_mode(mode: str) -> dict[str, Any]:
     if want not in ("paper", "live"):
         raise ValueError("mode must be paper|live")
     cfg = load_config()
+    if want == "live":
+        registered_txt_dir(cfg.get("broker") or {})
     cfg["mode"] = want
     # live → 下單大師 TXT；paper → 模擬盤
     if want == "live":

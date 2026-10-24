@@ -34,9 +34,18 @@ if __name__ == "__main__":
 _lock_helpers = runpy.run_path(str(ROOT / "server" / "daemon_lock.py"))
 acquire_daemon_lock = _lock_helpers["acquire_daemon_lock"]
 release_daemon_lock = _lock_helpers["release_daemon_lock"]
+_policy = runpy.run_path(str(ROOT / "scripts" / "runtime_release_policy.py"))
+assert_safe_tree = _policy['assert_safe_tree']
+assert_safe_member = _policy['assert_safe_member']
+assert_disjoint = _policy['assert_disjoint']
 
 PRESERVE_NAMES = {"data", "logs"}
 REQUIRED_RELEASE_FILES = {
+    "scripts/assert_standalone_runtime.ps1",
+    "scripts/runtime_release_policy.py",
+    "server/data_paths.py",
+    "server/runtime_storage.py",
+    "runtime_storage_capability.json",
     "START_PRIVATE_WEB_HOST.cmd",
     "STOP_PRIVATE_WEB.cmd",
     "server/server.py",
@@ -81,6 +90,50 @@ PRIVATE_RELEASE_EXCLUDES = {"wavedeck", "START_WAVEDECK.cmd", "START_ALL.cmd"}
 MANIFEST_NAME = ".private_web_release.json"
 TRANSITION_NAME = ".private_web_transition.json"
 VALIDATION_RECEIPT_NAME = ".發布驗證收據.json"
+
+
+def storage_helpers() -> dict:
+    # Pure stdlib resolver, loaded from this sealed revision, never a PATH import.
+    return runpy.run_path(str(ROOT / 'server' / 'data_paths.py'))
+
+
+def _release_binding(install_root: Path):
+    """Read explicit managed binding; never infer external mode from data layout."""
+    config_path = Path(install_root) / 'runtime_binding.json'
+    explicit = config_path.exists() or any(name in os.environ for name in
+                                          ('ST_DATA_ROOT', 'ST_RUNTIME_ROLE', 'ST_DATA_BINDING'))
+    if not explicit:
+        active = _read_manifest(Path(install_root) / 'current' / MANIFEST_NAME)
+        if active.get('storageBinding', {}).get('storageMode') == 'external':
+            raise RuntimeError('external installation binding is missing; legacy fallback refused')
+        return None
+    helpers = storage_helpers()
+    env = dict(os.environ)
+    if config_path.exists():
+        env.setdefault('ST_RUNTIME_ROLE', 'backend')
+    binding = helpers['resolve_binding'](code_root=Path(install_root) / 'current', environ=env,
+                 installation_binding=config_path if config_path.exists() else None)
+    return helpers['validate_binding'](binding, check_code_root=False)
+
+
+def _binding_receipt(binding) -> dict:
+    if binding is None or binding.mode == 'legacy':
+        return {'storageMode': 'legacy'}
+    return {'storageMode': binding.mode, 'dataRootId': binding.data_root_id,
+            'capabilityVersion': binding.capability_version}
+
+
+def _release_preflight(install_root: Path, *paths: Path, release_tree=None):
+    assert_safe_member(Path(install_root).as_posix())
+    binding = _release_binding(install_root)
+    if binding is not None and binding.mode == 'external':
+        helpers = storage_helpers()
+        assert_disjoint((install_root, *paths), helpers['protected_roots'](binding))
+        if release_tree is not None:
+            helpers['validate_release_capability'](release_tree, binding)
+    for path in paths:
+        assert_safe_tree(path)
+    return binding
 
 
 def _validation_helpers(root: Path | None = None) -> dict:
@@ -170,6 +223,7 @@ def _content_hashes(root: Path, *, include_runtime: bool = False,
     """程式清單逐檔核對；資料種子另列，執行期資料不屬於程式雜湊。"""
     if _is_link(root):
         raise RuntimeError(f"發布目錄不可使用連結：{root}")
+    assert_safe_tree(root)
     result = {}
     for path in _tree_entries(root, skip_runtime=not include_runtime):
         relative = path.relative_to(root)
@@ -208,9 +262,11 @@ def _is_regenerable_cache(path: Path, root: Path) -> bool:
 
 @contextmanager
 def _release_lock(install_root: Path) -> Iterator[None]:
-    if _is_link(install_root / '.locks'):
-        raise RuntimeError('發布鎖目錄不可使用連結')
-    handle = acquire_daemon_lock("private-web-release", lock_dir=install_root / ".locks")
+    _release_preflight(install_root)
+    _policy['assert_no_links'](install_root / '.locks' / 'private-web-release.lock')
+    # Fixed administrative lock only, after disjoint/no-link preflight. This
+    # grants no runtime writer lease and cannot be selected through CLI/env.
+    handle = acquire_daemon_lock("private-web-release", lock_dir=install_root / ".locks", _bootstrap=True)
     if handle is None:
         raise RuntimeError("另一個發布或回復程序正在執行，尚未變更目前版本")
     try:
@@ -220,6 +276,7 @@ def _release_lock(install_root: Path) -> Iterator[None]:
 
 
 def _validate_integrity(root: Path, manifest: dict) -> None:
+    assert_safe_tree(root)
     commit = manifest.get("commit", "")
     release_id = manifest.get("releaseId", "")
     if (not isinstance(commit, str) or len(commit) != 40
@@ -286,9 +343,13 @@ def _recover_transition(install_root: Path) -> None:
     if not journal.exists():
         return
     state = _read_manifest(journal)
+    binding = _release_preflight(install_root)
+    if state.get('storageBinding', {'storageMode': 'legacy'}) != _binding_receipt(binding):
+        raise RuntimeError('release transition binding changed; recovery refused')
     candidate = _transition_path(install_root, state.get("candidate"))
     previous = _transition_path(install_root, state.get("previous"))
     current = install_root / "current"
+    _release_preflight(install_root, current, candidate, previous)
     if current.exists() and not candidate.exists():
         # 候選目錄已完成改名；中斷發生於移除交易紀錄之前。
         if _program_hashes(current) != state.get("candidateContentSha256"):
@@ -337,6 +398,12 @@ def _switch_tree(install_root: Path, candidate: Path, previous: Path,
                  *, seed_source: Path | None = None) -> None:
     current = install_root / "current"
     journal = install_root / TRANSITION_NAME
+    binding = _release_preflight(install_root, current, candidate, previous, release_tree=candidate)
+    # External business data never becomes a release seed or a code backup.
+    if binding is not None and binding.mode == 'external':
+        seed_source = None
+    if seed_source is not None:
+        assert_safe_tree(seed_source)
     if (not _within(candidate, install_root) or not _within(previous, install_root)
             or _is_link(candidate) or _is_link(current) or _is_link(previous.parent) or previous.exists()
             or any(_is_link(current / name) for name in PRESERVE_NAMES)):
@@ -359,6 +426,7 @@ def _switch_tree(install_root: Path, candidate: Path, previous: Path,
                         added_directories.add(directory.as_posix())
     _write_json(journal, {
         "candidate": candidate.relative_to(install_root).as_posix(),
+        "storageBinding": _binding_receipt(binding),
         "previous": previous.relative_to(install_root).as_posix(),
         "hadCurrent": current.exists(),
         "originalPreserved": sorted(name for name in PRESERVE_NAMES if (current / name).exists()),
@@ -401,6 +469,7 @@ def default_install_root() -> Path:
 
 
 def safe_install_root(path: Path) -> Path:
+    _policy['assert_no_links'](path.expanduser())
     resolved = path.expanduser().resolve()
     drive_root = Path(resolved.anchor).resolve()
     forbidden = {drive_root, Path.home().resolve(), ROOT.resolve()}
@@ -441,10 +510,19 @@ def _git_archive_argv(archive_path: Path, commit: str) -> list[str]:
     ]
 
 
+def _validate_git_archive_members(commit: str) -> None:
+    result = _run(['git', 'ls-tree', '-r', '--name-only', '-z', commit], cwd=ROOT, capture=True)
+    for name in result.stdout.split('\0'):
+        if name:
+            assert_safe_member(name)
+
+
 def _safe_extract(archive_path: Path, target: Path) -> None:
+    assert_safe_tree(target)
     with zipfile.ZipFile(archive_path, "r") as archive:
         seen = set()
         for info in archive.infolist():
+            assert_safe_member(info.filename)
             pure = PurePosixPath(info.filename)
             key = info.filename.rstrip('/').casefold()
             if (pure.is_absolute() or ".." in pure.parts or "\\" in info.filename
@@ -470,6 +548,7 @@ def _restore_preserved_from_archive(archive_path: Path, target: Path) -> None:
     with zipfile.ZipFile(archive_path, "r") as archive:
         preserved_members = []
         for info in archive.infolist():
+            assert_safe_member(info.filename)
             pure = PurePosixPath(info.filename)
             if pure.is_absolute() or ".." in pure.parts:
                 raise RuntimeError(f"unsafe archive member: {info.filename}")
@@ -478,6 +557,7 @@ def _restore_preserved_from_archive(archive_path: Path, target: Path) -> None:
 
         for name in sorted(PRESERVE_NAMES):
             destination = (resolved_target / name).resolve()
+            assert_safe_tree(destination)
             try:
                 destination.relative_to(resolved_target)
             except ValueError as exc:
@@ -506,6 +586,7 @@ def _validate_release(path: Path) -> None:
 
 
 def _strip_private_release_extras(path: Path) -> None:
+    assert_safe_tree(path)
     for name in PRIVATE_RELEASE_EXCLUDES:
         target = path / name
         if target.is_dir():
@@ -515,6 +596,7 @@ def _strip_private_release_extras(path: Path) -> None:
 
 
 def _remove_bytecode(tree: Path) -> None:
+    assert_safe_tree(tree)
     for path in sorted(tree.rglob("*"), reverse=True):
         if path.suffix.lower() in {".pyc", ".pyo"} or path.name.casefold() == "__pycache__":
             _remove_managed(path, tree)
@@ -538,6 +620,7 @@ def stage_release(
 def _stage_release(install_root: Path, *, ref: str, python: str, run_tests: bool,
                    validation_plan: Path | None = None, evidence_dir: Path | None = None) -> Path:
     commit, release_id = resolve_commit(ref)
+    _validate_git_archive_members(commit)
     releases = install_root / "releases"
     if _is_link(releases):
         raise RuntimeError('暫存版本根目錄不可使用連結')
@@ -636,6 +719,7 @@ def _within(child: Path, parent: Path) -> bool:
 
 
 def _remove_managed(path: Path, install_root: Path) -> None:
+    _release_preflight(install_root, path)
     if not _within(path, install_root):
         raise ValueError(f"refusing to remove path outside install root: {path}")
     if path.is_dir() and not path.is_symlink():
@@ -645,6 +729,8 @@ def _remove_managed(path: Path, install_root: Path) -> None:
 
 
 def _copy_item(source: Path, target: Path) -> None:
+    assert_safe_tree(source)
+    assert_safe_member(target.as_posix())
     if source.is_dir():
         shutil.copytree(source, target)
     else:
@@ -723,6 +809,7 @@ def _promote_release(install_root: Path, *, release_id: str) -> Path:
     release = install_root / "releases" / release_id.lower()
     if not release.is_dir() or not _within(release, install_root / "releases"):
         raise FileNotFoundError(f"staged release not found: {release_id}")
+    binding = _release_preflight(install_root, release, install_root / 'current', release_tree=release)
     _validate_release(release)
     release_manifest = _read_manifest(release / ".private_web_release.json")
     if release_manifest.get("tests") != "passed":
@@ -752,6 +839,7 @@ def _promote_release(install_root: Path, *, release_id: str) -> Path:
         _copy_local_settings(current, candidate, old_manifest, release_manifest, install_root)
         active_manifest = dict(release_manifest)
         active_manifest.update(
+            storageBinding=_binding_receipt(binding),
             promotedAt=datetime.now(timezone.utc).isoformat(),
             promotionId=uuid.uuid4().hex,
             managedTopLevel=sorted(new_managed),
@@ -780,6 +868,7 @@ def _rollback_release(install_root: Path) -> Path:
     current = install_root / "current"
     manifest = _read_manifest(current / MANIFEST_NAME)
     previous = _transition_path(install_root, manifest.get("previousDirectory"))
+    binding = _release_preflight(install_root, current, previous, release_tree=previous)
     if not _within(previous, install_root / "backups") or not previous.is_dir():
         raise RuntimeError("找不到可回復的前版目錄")
     if _program_hashes(previous) != manifest.get("previousContentSha256"):
@@ -797,6 +886,10 @@ def _rollback_release(install_root: Path) -> Path:
             raise RuntimeError('前版複製內容不符，尚未切換版本')
         _copy_local_settings(current, candidate, manifest,
                              _read_manifest(previous / MANIFEST_NAME), install_root)
+        # Keep the active storage contract when rolling back compatible code.
+        restored_manifest = _read_manifest(candidate / MANIFEST_NAME)
+        restored_manifest['storageBinding'] = _binding_receipt(binding)
+        _write_json(candidate / MANIFEST_NAME, restored_manifest)
         _switch_tree(install_root, candidate, failed)
     finally:
         if candidate.exists() and not (install_root / TRANSITION_NAME).exists():
