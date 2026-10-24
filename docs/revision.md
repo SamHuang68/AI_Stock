@@ -28,6 +28,11 @@
   - **驗證計畫自身沒有落在任何案例的 `changes`（中）：不同意。** 計畫檢查入口（`scripts/變更驗證.py --check`）本來就把 `.github/驗證計畫.json` 排除在變更對應之外，現在與先前所有 PR 一樣通過；把它塞進案例反而會讓計畫的指紋隨自己改變。
   - 兩個未決問題：ETF 更新能否並行啟動我沒有完整驗證（`etf_api` 的 `_tracker_lock` 保護狀態更新，是否同時擋住並行啟動未確認），所以採保守設計：全域清單只在一輪開頭重新指定、整輪用同一份；若兩輪真的並行，後啟動者換清單時前一輪的後續讀取可能讀到新清單，這個風險未排除；路徑通過預檢後到實際開啟之間被換成連結（檢查時間與使用時間之差）屬已知限制，目前靠 writer lease 與目錄權限，不在本次修正範圍，記在此處。
   - 修正後未再送複審。
+- **ST-R6（計畫版 CI 在 Windows 的偶發失敗：時序競爭，非新功能壞掉）**：
+  - 現象：#266 計畫版 CI（`a510021`）Windows 的「主站測試模組 1/12」失敗一個案例 `test_Pulse更新佇列` 的 `test_terminal_write_failure_retries_receipt_without_rebuilding`：`'IntegrityError: 注入工作收據失敗' is not None`；同一個 SHA 的手動完整驗證與我的本機完整重跑（2149 案例）都通過，本機單案例 25 次、整個模組 6 次、main 單案例 25 次也全過。
+  - 根因：`pulse_updates._finish` 在資料庫提交後工作即顯示 `succeeded`，**接著才**寫診斷紀錄（`_trace`），**之後**才把 `workerError` 清成 None；測試每 10 毫秒輪詢到 `succeeded` 就立刻斷言 `workerError` 為 None，中間沒有等待。寫檔慢的機器會落在這個空檔。這個競爭在 main 上同樣存在，不是分支引入的。
+  - 驗證：本機把 `_trace` 人為拖慢 0.3 秒，舊測試重現與 CI 完全相同的失敗訊息，新測試通過。
+  - 修正：只改測試。契約是「重試成功後 `workerError` 會被清掉」，改成最多等 3 秒讓它變成 None，斷言本身不變、不放寬；不改產品程式。
 - 驗證（Python 3.12，與 CI 相同）：
   - R1：`test_runtime_package_policy` 9 案通過，含原本紅燈的 `test_regular_file_is_checked_without_directory_traversal`。
   - R2：`test_shared_backend_launcher` 12 案通過，含原本 3 案共 28 個失敗觀察（gateway 2 案、host 1 案的 4 個子案例）。

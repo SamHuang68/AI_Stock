@@ -318,6 +318,11 @@ class PulseUpdatesTest(unittest.TestCase):
         self.unblock_update()
         self.wait_job(queue, job_id, 'succeeded')
         self.assertEqual(seen, [job_id])
+        # 工作在資料庫提交後即顯示 succeeded，worker 接著才寫診斷紀錄並清掉 workerError；寫檔慢的機器
+        # （GitHub Windows runner）會落在這個空檔。契約是「重試成功後 workerError 會被清掉」，所以等它變成 None。
+        deadline = time.monotonic() + 3
+        while queue.status()['workerError'] is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
         self.assertIsNone(queue.status()['workerError'])
 
     def test_claim_failure_keeps_worker_alive_and_recovers_queued_job(self):
