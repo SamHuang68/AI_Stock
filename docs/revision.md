@@ -17,6 +17,11 @@
   - 修正：`state.py` 舊模式維持「本檔旁的 data」（與 main 完全相同），外置與 fixture 模式才走共用資料根；`config.py` 的秘密檔路徑舊模式同樣跟著 `DATA`。另一個子程序測試（`test_真實服務匯入入口先取得單例…`）的夾具補複製 `runtime_paths.py` 與 `data_paths.py`、`runtime_storage.py`、`daemon_lock.py`。
   - 結果：WaveDeck 148 個案例全過（main 為 129 個，差額是分支新增與先前合併的案例）。跑完後真實 `wavedeck/data` 仍出現狀態檔，main 的副本跑同一套測試也一樣，是原本就有的行為。
   - 這是正式使用的風險點：若有人在**正式主工作樹**跑這個分支的 WaveDeck 測試，會改寫執行中的 WaveDeck 狀態；修正前尤其如此。
+- **ST-R5（新發現：Windows 暫存目錄 8.3 短檔名導致 39 個新架構測試在 CI 失敗）**：
+  - 問題：手動完整驗證（run 40052323841，對 `94297a5`）在 GitHub Windows 失敗 39 個，全部在 `test_runtime_storage`、`test_runtime_consumers`、`test_runtime_workers`、`test_runtime_secrets`，錯誤是 `runtime paths must use their canonical spelling, not filesystem aliases`。runner 的暫存目錄是 8.3 短檔名（`C:\Users\RUNNER~1\…`），新架構的資料根檢查**刻意**要求正規拼寫、拒絕別名。我本機一般暫存路徑跑全過，所以第一輪完整測試沒有發現。
+  - 判斷：產品拒絕檔案系統別名是對的，是測試夾具沒有把暫存路徑展開；啟動器測試本來就用 `.resolve()`。另有一個跨磁碟 `os.path.relpath`（CI 的 checkout 在 D 槽、暫存在 C 槽）。
+  - 修正：6 個測試檔的暫存根改用 `resolve()` 或 `os.path.realpath`（storage、consumers、workers、secrets、WaveDeck 的 runtime_binding 與 runtime_launcher），`relpath` 加 `start=`。不改產品。
+  - 重現與驗證：本機建立有 8.3 短名的目錄並把 `TEMP` 指過去重現（修正前 38 個失敗），修正後這 4 個模組 49 個案例與 WaveDeck 148 個案例在短檔名與一般暫存路徑下都全過。Windows CI 因「Unit tests」失敗，後面的 WaveDeck、JS、瀏覽器步驟被跳過、沒有結果，需重新觸發完整驗證。
 - 驗證（Python 3.12，與 CI 相同）：
   - R1：`test_runtime_package_policy` 9 案通過，含原本紅燈的 `test_regular_file_is_checked_without_directory_traversal`。
   - R2：`test_shared_backend_launcher` 12 案通過，含原本 3 案共 28 個失敗觀察（gateway 2 案、host 1 案的 4 個子案例）。
