@@ -12,6 +12,11 @@
   - 問題：外部模式下 ETF 更新在長駐後端內同程序執行，`ETFS = load_catalog()` 只在匯入時執行一次，修改 `etf_catalog.json` 後要重啟才生效；舊模式每輪是新程序，沒有此問題。
   - 修正：`run()` 每輪開頭重新讀一份清單，整輪（預期數、最低門檻、待補代號、逐檔抓取）用同一份快照。
   - 測試 fixture：`test_runtime_workers.setUp` 的 `patch.dict(os.environ, clear=True)` 清掉 Windows 家目錄變數，7 案在 `Path.home()` 出錯；只保留 `HOME`、`USERPROFILE`、`HOMEDRIVE`、`HOMEPATH` 四個，不帶入其他環境。
+- **ST-R4（新發現：WaveDeck 測試隔離被破壞，交接單未列）**：
+  - 問題：Codex 因 Sam 豁免而沒驗 WaveDeck。分支把 `wavedeck/server/state.py` 的 `DATA` 改成 `runtime_paths.runtime_data()`，舊模式回傳 `runtime_paths` 自己所在目錄的 `data`；但測試把 `server/` 複製到暫存目錄執行，仍匯入真實的 `runtime_paths`，狀態於是寫進**真實**的 `wavedeck/data` 並在測試之間互相汙染，WaveDeck 測試從 main 的 129 個全過變成 47 個錯誤（46 個是「委託尚未核對，請先完成核對再切換策略」）。
+  - 修正：`state.py` 舊模式維持「本檔旁的 data」（與 main 完全相同），外置與 fixture 模式才走共用資料根；`config.py` 的秘密檔路徑舊模式同樣跟著 `DATA`。另一個子程序測試（`test_真實服務匯入入口先取得單例…`）的夾具補複製 `runtime_paths.py` 與 `data_paths.py`、`runtime_storage.py`、`daemon_lock.py`。
+  - 結果：WaveDeck 148 個案例全過（main 為 129 個，差額是分支新增與先前合併的案例）。跑完後真實 `wavedeck/data` 仍出現狀態檔，main 的副本跑同一套測試也一樣，是原本就有的行為。
+  - 這是正式使用的風險點：若有人在**正式主工作樹**跑這個分支的 WaveDeck 測試，會改寫執行中的 WaveDeck 狀態；修正前尤其如此。
 - 驗證（Python 3.12，與 CI 相同）：
   - R1：`test_runtime_package_policy` 9 案通過，含原本紅燈的 `test_regular_file_is_checked_without_directory_traversal`。
   - R2：`test_shared_backend_launcher` 12 案通過，含原本 3 案共 28 個失敗觀察（gateway 2 案、host 1 案的 4 個子案例）。

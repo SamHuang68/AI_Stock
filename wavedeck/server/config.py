@@ -12,7 +12,8 @@ from .state import DATA
 from runtime_paths import BINDING, ROOT, guard_write, registered_txt_dir
 
 CONFIG_PATH = DATA / "wavedeck_config.json"
-SECRETS_PATH = ROOT / "data" / "wavedeck_secrets.json"
+# 秘密檔留在程式旁的 data（憑證相容）；舊模式與原本一致，跟著 state.DATA
+SECRETS_PATH = (DATA if BINDING.mode == "legacy" else ROOT / "data") / "wavedeck_secrets.json"
 
 _DEFAULT = {
     "provider": "heuristic",  # heuristic | ollama | openai

@@ -13,7 +13,9 @@ from runtime_paths import BINDING, runtime_data, guard_write
 
 TZ8 = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parents[1]
-DATA = runtime_data()
+# 舊模式維持原本的「本檔旁的 data」：測試把 server/ 複製到暫存目錄執行，若改用 runtime_paths 自己所在的目錄，
+# 狀態會寫進真實的 wavedeck/data 並在測試之間互相汙染。外置與 fixture 模式才走共用的資料根。
+DATA = ROOT / "data" if BINDING.mode == "legacy" else runtime_data()
 STATE_PATH = DATA / "runtime_state.json"
 
 VALID_STATES = ("Idle", "Arming", "InPosition", "Reducing", "Halted", "Flat")

@@ -162,6 +162,12 @@ class 執行修正測試(unittest.TestCase):
         root = self.home / "服務入口"
         shutil.copytree(self.home / "server", root / "server", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         shutil.copyfile(Path(__file__).resolve().parents[1] / "VERSION", root / "VERSION")
+        # 入口現在經 runtime_paths 取得資料綁定：與正式配置相同，runtime_paths 在 WaveDeck 根目錄，
+        # 它依賴的 Stock Terminal 共用模組放在上一層的 server/（這個暫存目錄已有 WaveDeck 的 server 套件副本）
+        repo_wavedeck = Path(__file__).resolve().parents[1]
+        shutil.copyfile(repo_wavedeck / "runtime_paths.py", root / "runtime_paths.py")
+        for shared in ("data_paths.py", "runtime_storage.py", "daemon_lock.py"):
+            shutil.copyfile(repo_wavedeck.parent / "server" / shared, self.home / "server" / shared)
         lock_module = importlib.import_module(self.package + ".程序單例")
         directory = root / "data"
         child = r'''
