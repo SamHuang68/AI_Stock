@@ -3424,8 +3424,13 @@
         "wavedeck/web/js/deck.js"
       ],
       "inputs": [
+        "package-lock.json",
+        "package.json",
         "tests/WD策略執行_browser.cjs",
         "wavedeck/web/js/deck.js"
+      ],
+      "prepare": [
+        "browser"
       ]
     },
     {
@@ -3441,8 +3446,13 @@
         "tests/alert_rule_form_browser.cjs"
       ],
       "inputs": [
+        "package-lock.json",
+        "package.json",
         "stock_terminal_v2.html",
         "tests/alert_rule_form_browser.cjs"
+      ],
+      "prepare": [
+        "browser"
       ]
     },
     {
@@ -3624,7 +3634,12 @@
         "tests/wavedeck_reliability_browser.cjs"
       ],
       "inputs": [
+        "package-lock.json",
+        "package.json",
         "tests/wavedeck_reliability_browser.cjs"
+      ],
+      "prepare": [
+        "browser"
       ]
     },
     {
