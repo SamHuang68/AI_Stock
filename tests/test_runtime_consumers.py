@@ -20,6 +20,7 @@ PATH_ENV = ('ST_DATA_ROOT', 'ST_RUNTIME_ROLE', 'ST_DATA_BINDING', 'ST_UPDATE_JOB
 class RuntimeConsumerTests(unittest.TestCase):
     def run_consumer(self, body, *, fixture=True):
         with tempfile.TemporaryDirectory(prefix='st-consumers-') as directory:
+            directory = os.path.realpath(directory)  # 暫存目錄可能是 8.3 短檔名（GitHub Windows runner：RUNNER~1）；資料根須為正規拼寫
             root = Path(directory) / 'runtime'
             root.mkdir()
             (root / '.st-fixture.json').write_text(json.dumps({

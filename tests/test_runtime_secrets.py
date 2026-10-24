@@ -17,7 +17,7 @@ class RuntimeSecretTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())).resolve()  # 8.3 短檔名（RUNNER~1）須展開為正規拼寫
         self.code = self.root / 'managed-current'
         self.data = self.root / 'runtime'
         self.code.mkdir()

@@ -64,7 +64,7 @@ function Stop-Process { throw 'process termination forbidden' }
 class LauncherBindingTests(unittest.TestCase):
     def run_case(self, source):
         with tempfile.TemporaryDirectory(prefix="wd-binding-launcher-") as temporary:
-            install = Path(temporary)
+            install = Path(os.path.realpath(temporary))  # 8.3 短檔名（RUNNER~1）須展開為正規拼寫
             home = install / "current/wavedeck"
             home.mkdir(parents=True)
             (home / "run.py").write_text("# offline placeholder; must never run\n", encoding="utf-8")

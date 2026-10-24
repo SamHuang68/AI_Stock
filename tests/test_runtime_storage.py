@@ -19,7 +19,7 @@ class RuntimeStorageTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()  # 暫存目錄可能是 8.3 短檔名（GitHub Windows runner：RUNNER~1）；資料根須為正規拼寫
         self.code = self.root / 'managed-current'
         self.data = self.root / 'runtime'
         self.code.mkdir()
@@ -118,7 +118,7 @@ class RuntimeStorageTests(unittest.TestCase):
             paths.resolve_binding(code_root=self.code, environ={'ST_RUNTIME_ROLE': 'backend', 'ST_DATA_BINDING': str(self.binding_file)}, installation_binding=other)
         bound = self.binding()
         with self.assertRaises(paths.BindingError):
-            paths.data_path('market.db', binding=bound, override=os.path.relpath(self.data / 'market.db'))
+            paths.data_path('market.db', binding=bound, override=os.path.relpath(self.data / 'market.db', start=self.root))
         with self.assertRaises(paths.BindingError):
             paths.data_path('market.db', binding=bound, override=self.root / 'other.db')
         self.assertEqual(self.data / 'market.db', paths.data_path('market.db', binding=bound, override=self.data / 'market.db'))

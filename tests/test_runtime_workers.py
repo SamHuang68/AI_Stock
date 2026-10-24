@@ -45,7 +45,7 @@ class RuntimeWorkerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()  # 暫存目錄可能是 8.3 短檔名（GitHub Windows runner：RUNNER~1）；資料根須為正規拼寫
         self.data = self.root / 'fixture'
         self.data.mkdir()
         (self.data / data_paths.FIXTURE_FILE).write_text(json.dumps(

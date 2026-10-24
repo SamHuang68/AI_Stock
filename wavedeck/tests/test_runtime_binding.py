@@ -15,7 +15,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class RuntimeBindingTests(unittest.TestCase):
     def child(self, body):
-        with tempfile.TemporaryDirectory(prefix="wd-runtime-offline-") as folder:
+        with tempfile.TemporaryDirectory(prefix="wd-runtime-offline-") as raw_folder:
+            folder = os.path.realpath(raw_folder)  # 暫存目錄可能是 8.3 短檔名（RUNNER~1）；資料根須為正規拼寫
             env = {k: v for k, v in os.environ.items() if k not in {
                 "ST_DATA_BINDING", "ST_DATA_ROOT", "ST_RUNTIME_ROLE", "ST_URL",
                 "LLM_GATE_PATH", "ST_ETF_HISTORY_DIR", "ST_REPORTS_DIR", "ST_UPDATE_JOBS_DB",
