@@ -2,26 +2,25 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "abf4c98eb82d1d1a232b4565ec4a3791f001547f",
+  "baseCommit": "85564a1cc6474cf7e5bac6e4a90813d877067852",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
   ],
   "cases": [
     {
-      "id": "文件不含絕對使用者路徑",
+      "id": "movers 等待上限的時鐘邊界",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "timeoutSeconds": 300,
+      "reason": "測試以精確 <= 8.5 比較浮點等待值，時鐘靠近 2 的次方時偶發失敗；加容差並補邊界案例",
       "targets": [
-        "tests.test_dist_scrub"
+        "tests.test_review_regressions"
       ],
       "changes": [
-        "docs/revision.md"
+        "tests/test_review_regressions.py"
       ],
       "inputs": [
-        "docs/revision.md",
-        "tests/test_dist_scrub.py"
+        "tests/test_review_regressions.py"
       ]
     }
   ]
