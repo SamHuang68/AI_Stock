@@ -51,33 +51,17 @@
 
 ---
 
-## 2026-10-23 單一資料根架構隔離候選（未驗證、尚有阻塞）
+## 2026-10-25 條件期望卡片獨立出短期指標與長期指標
 
-- 基底為已封存原修復`b42ee9dea07e57a718c01c474285d41b58dff774`，整合分支`review/runtime-unification`；VERSION維持5.0。新增explicit binding、資料身分與切換收據、ST/WD namespace lease、consumer路徑、發布copy排除及Local共用入口核對；legacy保持原安裝路徑，不會自動啟用新根或建立空正式庫。
-- 本機來源：core `e8209c5c08b59d44387887b407727ac6245469c7`、consumer `9dd8ccfc9e91baadf50a7d08c04287196165ecf4`、persistence `55f2151b85a3efd985d1e1dc97787a90783de1ee`、release `908bf381371f024758266fd914102595480181bf`、WD `e865087c0431eb2bc643ad2eda4c20efe8dd9450`。各差異在原封存之外整合；沒有tracked data變更。
-- 必須保留日Ksource tradeDate、嚴格較早有效K昨收、缺價整組回退及canonical headline事故契約；未變更台指期歷史結算價口徑。新架構將另跑驗證，不引用舊測試通過作新架構證據。
-- 已知未完成：WD legacy單例鎖前guard與舊測試副本依賴接線，以及fixture WD預設資源鎖namespace修正，兩筆新補丁被自動審查拒絕，未套用或代套。部分舊WD測試尚無安全隔離，必須明列blocked。另獨立排程CLI的log/外送邊界待補驗。
-- 正式Local與PrivateWeb能力不同，新的共用入口會拒絕不相容切換；合作式deadline不等同原子程序hard kill，見`runtime-storage.md`。真資料差異、停寫切換、秘密設定及備份清理未處理。
-- 本段為未測本機候選；新測試數與限制待實測後另附條目。未push、PR、合併、部署、建立ZIP、停止正式服務或搬動正式資料。
-
----
-
-## 2026-10-23 日 K 時間與昨收事故回歸補強（未驗證）
-
-- 基底：`282c3e7575db522e0a6a76951d98e1c69c0fb3e1`；隔離分支 `review/dayk-regression`。
-- 依 Sam 提醒追溯 PR #217、#219，新增固定事故日期、隔日取得、主機時區、來源順序與總經舊回覆的測試；沿用既有官方真值 fixture 與正式函式，不改產品、行情公式、資料或台指期結算價政策。
-- 歷史完整 SHA、時間契約、合成案例界線與主控 gate 要求見 [日 K 回歸契約](dayk-regression-contract.md)。
-- 驗證與發布：作者未執行測試，由主控統一 gate 並另交獨立 reviewer；尚無新增通過證據，未推送、未合併、未發布。實作 SHA 以本段所在提交為準，整合 SHA 待主控補記。
-
----
-
-## 2026-10-23 完整審查後的設定呈現與角色標頭加固
-
-- 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`；隔離分支 `review/fixes-442b908`。Sam 已授權本輪審查後直接修復；未改 canonical 資料或正式服務。
-- 修正：gateway 以不分大小寫方式丟棄用戶端 `X-ST-Gateway-Role`，只傳一個已驗證角色；警報設定與規則以 HTML escape 呈現文字／屬性，保留原始表單值。既有路由授權及人工設定語義不變。
-- 驗證：正式 gateway 的 loopback 回歸確認三種大小寫角色標頭只剩一個 reader；Chromium 全離線表單驗證確認 inert markup 不建立額外元素／屬性，既有新增規則案例仍通過。測試誤用不允許的 `/quote` 曾得到正確 403，改測既有 `/quote-batch` 後通過，沒有放寬 allowlist。
-- 安全界線：這是 P3 加固，未宣稱已確認匿名外洩或提權；未讀取或遷移任何使用者秘密，webhook 儲存整併未執行。
-- 發布狀態：只有本機隔離修復，未合併、未推送、未發布。全套修復驗證與本機提交 SHA 待本輪整合完成後補記。
+- 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`（origin/main）；分支 `claude/ce-short-long-split`。實作與合併 SHA 待 PR 合併後補記。
+- 決定：Sam 2026-10-25「獨立出短期指標與長期指標(原來) 不做任何降級」。起因是時間序列洩漏對照檢查：20 日持有期的相鄰樣本高度重疊，`n >= 20` 對長期指標的獨立證據偏樂觀。
+- 查證：沿用同一來源 `conditional_expectation.build_card` 的 `horizons`（1／5／20）與前端 `conditional_expectation_v5.js`；沒有另建平行管線。
+- 修正（全部是新增，不刪不改既有欄位）：
+  - 後端每個持有期新增 `independentEvents`（互不重疊的事件數）；卡片新增 `horizonGroups`：`short` = T+1、T+5，`long` = T+20（原有指標），各自判定 `ready`／`invalidIf`。頂層 `horizons`、`invalidIf`、`status`、`minimumSample` 與 `n >= 20` 門檻完全不變。
+  - 前端同一張表分成「短期指標」「長期指標」兩段，T+1／T+5／T+20 全部保留，並新增「獨立事件」欄；任一段樣本未達門檻只標該段，不再拖累另一段的呈現。
+- 沒有降級：沒有任何持有期、欄位、門檻被移除或收緊，沒有資料因此被隱藏。是否要把「獨立事件」納入門檻是另一個需要 Sam 決定的取捨，本次沒做。
+- 驗證：`test_conditional_expectation`、`test_conditional_expectation_p1`、`test_shadow_multifactor` 共 35 案（含新增 3 案）通過；`conditional_expectation_v5_selftest.js`（新增短長期分組斷言）通過；`test_bundle_fresh`、`test_build_reproducibility` 通過。未做瀏覽器實機畫面確認。
+- 發布狀態：未合併、未發布。
 
 ---
 
@@ -2265,35 +2249,3 @@ CI 換行修正提交 `207a0fb442a367f626639b6457645218e0f7cca9` 的 Ubuntu／Wi
 已取得：21 項來源與路由單元、25 組標頭契約、完整頁面分鐘操作與三尺寸檢查；候選真實來源取得兩標的當日分鐘，27 個資料檔保全。經一位同供應商隔離唯讀審查，無 Required 發現；固定案例盤別終點已校正。失敗來源仍沿用既有 60 秒快取，分鐘不保證即時，未供日線回測使用。
 
 此段建立時為本機候選，尚未提交／發布。詳細根因、能力對帳與局部證據見 `docs/當日分時修復.md`；後續完整實作／合併 SHA、CI 與實際兩站發布證據見 `C:/Users/Sam/AI-Workspace/docs/stock-terminal/當日分時修復/發布紀錄.md`。未以本機案例替代部署驗收。
-## 2026-10-24 全專案審查修復驗證完成（本機未發布）
-
-- 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`；Python 受測提交 `34e13db27b35dcd94bfccdd973117ee384be85dd`；前端、日 K 補強與文件受測提交 `42243b9d6b0f560feb258fa78f04671a2879b74e`。後者相對前者僅增加測試與文件，產品沒有混版。
-- 已修確認的 16 項 P2：切股統計競態、週線混入日棒、總經遲到錯誤／延遲刷新、交易日缺口與修訂警示、報酬期間配對、隔夜缺值邊界、損毀 JSONL 阻啟動、bus 保存序列、WaveDeck 初始失敗恢復／新鮮建議／紙上模式還原／MD 開頁、Space 控制、venv 程序辨識、PS5.1 中文入口。另修三項測試品質及兩項 P3 加固；保留急停政策與未知程序拒絕保護。
-- 獨立複核補齊隔夜基準不足降級、舊版紙上價格清除、日曆失敗提示、資料品質計數；驗證另找出 HTTP fixture 缺日曆及 Windows JSONL 重複壓縮換行，修正後受影響 27 案通過。
-- 完整主站 discover 2058：2035 passed、0 failed、1 live skipped、22 blocked（21 ZIP＋1 缺 pyflakes；其中4個 opt-in 啟動器另以隔離真程序通過）；WaveDeck 133/133、JS 70/70、browser 16/16、Python 語法403/403、PowerShell12/12、compileall／載入排序／HTML建置3/3。PS5.1 與 PS7 均解析11個產品入口並執行新增檢查器。
-- 日 K 阻擋回歸通過：PR219 固定事故快照、取得日不替代來源時間、同台北交易日官方校正、跨日／台指期反向、歷史 OHLCV 保全。週線只限制追加日棒，保留非 intraday 分類；台指期歷史結算價口徑仍暫緩。完整 browser 讀本輪 HTML，SHA256 `56220be429800a4e7105d52435d84fd3b3c1079c2fa63ec3f4b21190c15a596e`。
-- 證據：本機 `task-2/fix-evidence`，完整主站 gate `run-20261024T001314-56d65658`、WaveDeck `run-20261024T001314-5f9ec93d`、靜態/JS `run-20261024T002158-c3ec7705`、browser `run-20261024T002159-412d66e4` 均 exit0。首批targeted gate 因建置改動過寬輸入清單內的HTML而exit1；個別程序通過，原收據限制保留，未覆寫為成功。
-- 環境：Windows、Python3.14.3、Node24.14、Playwright1.62.1，沿用tzdata2025.3，與CI／需求版本差異另列。未安裝套件、執行實盤／外送／LinuxCI；未承諾零缺陷。
-- 2026-10-23 16:26:22Z 唯讀回查 canonical 與遠端 main 仍為442b908；原六個data修改與SQLite/lock未追蹤狀態保留。實際資料、秘密、服務未改。
-- 發布狀態：本機隔離提交，未push、PR、合併、ZIP或發布。使用者後續授權的單一資料根架構另行實作及驗證，不包含於此里程碑。
-
----
-
-# 2026-10-23 單一資料根整合補驗（未發布，仍有阻塞）
-
-- 基底：27567eca0bc15e5f6ef708973f3c71eef582851f；原修復封存 b42ee9dea07e57a718c01c474285d41b58dff774 保留。
-- 補正非 legacy override 模組匯入副作用與四個 standalone 排程／報表入口，來源 8c0ed16d4dbdccf91f5a79e2d0049102d317e246。外置既有憑證僅在有效 ST writer lease 下允許原位置的兩個精確檔名及 atomic 附屬檔；沒有遷移或接觸真實秘密。
-- consumer 十二案及憑證四案小型隔離回歸 16/16 通過；首輪失敗證據保留。來源 54561283e0fc5b8907ef2a2d3b0c1f96521504df 修正 release/health 測試替身，保留尚未修復產品的三個負向回歸。
-- ETF 同程序清單快取、worker 測試清空環境的 HOME 缺失，以及 gateway/host 輸出路徑防護修補被自動審核拒絕，未套用、未重試；候選不是可發布版本。後續完整主站結果以新證據為準，不能沿用封存前通過數。
-- 使用者豁免後續 WaveDeck 專屬驗證；既有變更與已完成 15/15 結果保留，剩餘項目標 user-waived。增加獨立 ST writer 競爭驗收入口，不執行 WaveDeck 部分。
-- 日 K 計算與歷史結算價暫緩契約保持；最終候選需重新跑必要真值回歸。未 push、合碼、部署、停止正式服務、搬資料或刪備份。
-
-# 2026-10-23 主站架構驗證後測試接線補正（產品仍受阻，未發布）
-
-- 受測產品基底 a47220e11c02b4555141cac8541ad16c69b37c90；本次僅修改測試與本紀錄，不改產品。發布檢查對普通檔案呼叫 os.walk 的一行修正亦遭拒，未套用，與 ETF、gateway 未修項一同保留。
-- 修正三合一選股 AST fixture 載入正式 data_paths import、研究更新 lazy import 對應測試、虛構 SHA 的唯讀 ls-tree 替身；沒有補出正式模組不存在的符號。llm_gate 的靜默例外已由 2 減至 1，基準同步收緊。
-- 整合 c90e6804aa6d65b15884a765426b91cbc38a7484 的單檔案例、OS reparse fixture 及唯讀證據重用斷言。只補驗這些受影響案例，不重跑整套；新普通檔案案例預期揭露仍未修復的產品失敗。
-- 日 K 必要 JS、瀏覽器與十一個官方前收 Python 案例已通過；獨立靜態 readback 保持日期/昨收/歷史 OHLCV 契約。ST fixture 真實 writer 競爭通過，沒有啟動 WaveDeck。
-- 範圍失誤如實記錄：先前豁免篩選漏掉中文 WD 瀏覽器檔及混合啟動測試的 WaveDeck 分支，分別已通過與出現 WAVE-PIN 失敗；保留原結果，停止後續 WD 測試與修復，不算主站通過。
-- 未遷移正式資料、未停止正式服務、未處理真實秘密、未刪備份、未 ZIP、未 push／部署。最後結果、各案狀態與五筆拒絕見本機獨立階段報告，不宣稱新架構完成。
-

@@ -148,6 +148,41 @@ class ConditionalExpectationBinTests(unittest.TestCase):
         self.assertIsNotNone(stats['1']['winRate'])
         self.assertIsNotNone(stats['1']['maxDrawdownQ90Pct'])
 
+    def test_independent_events_count_non_overlapping_windows(self):
+        self.assertEqual(ce.independent_event_count([], 5), 0)
+        self.assertEqual(ce.independent_event_count(list(range(30)), 20), 2)
+        self.assertEqual(ce.independent_event_count(list(range(30)), 5), 6)
+        self.assertEqual(ce.independent_event_count(list(range(30)), 1), 30)
+
+    def test_horizon_groups_judge_short_and_long_independently(self):
+        def row(n):
+            return {'n': n}
+        gate = {'usable': True}
+        groups = ce.horizon_groups({'1': row(30), '5': row(25), '20': row(12)}, gate, has_bin=True)
+        self.assertEqual(groups['short']['horizons'], [1, 5])
+        self.assertTrue(groups['short']['ready'])
+        self.assertEqual(groups['long']['horizons'], [20])
+        self.assertFalse(groups['long']['ready'])
+        self.assertEqual(groups['long']['invalidIf'], ['n_below_minimum'])
+        expired = ce.horizon_groups({'1': row(30), '5': row(25), '20': row(30)}, {'usable': False}, has_bin=True)
+        self.assertFalse(expired['short']['ready'])
+        self.assertIn('asof_gate_expired', expired['long']['invalidIf'])
+
+    def test_aggregate_keeps_original_fields_and_adds_independent_events(self):
+        obs = [{
+            'barIndex': i,
+            'binId': 'b',
+            'outcomes': {'1': {'returnPct': 1.0, 'maxDrawdownPct': -0.5},
+                         '5': {'returnPct': 2.0, 'maxDrawdownPct': -1.0},
+                         '20': {'returnPct': 3.0, 'maxDrawdownPct': -2.0}},
+        } for i in range(25)]
+        stats = ce.aggregate_bin_stats(obs, 'b')
+        self.assertEqual(stats['20']['n'], 25)
+        self.assertTrue(stats['20']['ratesAvailable'])
+        self.assertEqual(stats['20']['independentEvents'], 2)
+        self.assertEqual(stats['5']['independentEvents'], 5)
+        self.assertEqual(stats['1']['independentEvents'], 25)
+
     def test_max_drawdown_q90_reports_the_adverse_tail_not_the_mildest_end(self):
         # 20 筆樣本：一半沒有回撤（0），其餘 −1 到 −10；90% 樣本不劣於的回撤應為尾端的負值。
         drawdowns = [0.0] * 10 + [-float(k) for k in range(1, 11)]

@@ -35,6 +35,8 @@ MODEL_VERSION = 'st-conditional-expectation/pit-v2'
 RETURN_CONVENTION = 'close_to_close_same_symbol'
 EPISTEMIC = 'CONDITIONAL'
 HORIZONS = (1, 5, 20)
+# 短期／長期指標分組：長期 = 原有 T+20；短期 = T+1、T+5。各組獨立判定是否可用，互不拖累。
+HORIZON_GROUPS = (('short', (1, 5)), ('long', (20,)))
 MIN_SAMPLE = 20
 MIN_OBSERVATION_BARS = 20
 CHIP_MAX_LAG_SESSIONS = 2
@@ -498,6 +500,7 @@ def collect_pit_observations(
         if not outcomes:
             continue
         observations.append({
+            'barIndex': idx,
             'sessionDate': session.isoformat(),
             'binId': state['binId'],
             'binModelId': state['binModelId'],
@@ -507,13 +510,26 @@ def collect_pit_observations(
     return observations
 
 
+def independent_event_count(bar_indexes: list[int], horizon: int) -> int:
+    """不重疊事件數：相鄰觀測的持有期互相重疊，只算間隔 >= horizon 根 K 棒者（貪婪）。"""
+    count = 0
+    last: int | None = None
+    for idx in sorted(bar_indexes):
+        if last is None or idx - last >= horizon:
+            count += 1
+            last = idx
+    return count
+
+
 def aggregate_horizon_stats(
     returns: list[float],
     drawdowns: list[float],
+    independent_events: int | None = None,
 ) -> dict[str, Any]:
     n = len(returns)
     qualified = n >= MIN_SAMPLE
     return {
+        'independentEvents': independent_events if independent_events is not None else n,
         'medianReturnPct': round(_median(returns), 4) if qualified else None,
         'winRate': round(sum(1 for value in returns if value > 0) / n, 4) if qualified else None,
         'n': n,
@@ -543,7 +559,13 @@ def aggregate_bin_stats(
             for row in matched
             if key in row.get('outcomes', {})
         ]
-        horizons[key] = aggregate_horizon_stats(returns, drawdowns)
+        indexes = [
+            int(row['barIndex'])
+            for row in matched
+            if key in row.get('outcomes', {}) and row.get('barIndex') is not None
+        ]
+        events = independent_event_count(indexes, horizon) if len(indexes) == len(returns) else None
+        horizons[key] = aggregate_horizon_stats(returns, drawdowns, events)
     return horizons
 
 
@@ -555,6 +577,7 @@ def _empty_horizons() -> dict[str, Any]:
             'n': 0,
             'maxDrawdownQ90Pct': None,
             'ratesAvailable': False,
+            'independentEvents': 0,
         }
         for h in HORIZONS
     }
@@ -613,6 +636,30 @@ def _invalid_if(gate: dict[str, Any], horizons: dict[str, dict[str, Any]], *, ha
     return invalid
 
 
+def horizon_groups(
+    horizons: dict[str, dict[str, Any]],
+    gate: dict[str, Any],
+    *,
+    has_bin: bool,
+) -> dict[str, dict[str, Any]]:
+    """短期（T+1、T+5）與長期（T+20）各自判定；頂層 horizons／invalidIf 維持原樣。"""
+    groups: dict[str, dict[str, Any]] = {}
+    for name, members in HORIZON_GROUPS:
+        invalid: list[str] = []
+        if not gate.get('usable'):
+            invalid.append('asof_gate_expired')
+        if not has_bin:
+            invalid.append('insufficient_bar_history')
+        if any((horizons.get(str(h)) or {}).get('n', 0) < MIN_SAMPLE for h in members):
+            invalid.append('n_below_minimum')
+        groups[name] = {
+            'horizons': list(members),
+            'invalidIf': invalid,
+            'ready': not invalid,
+        }
+    return groups
+
+
 def build_card(
     symbol: str,
     *,
@@ -661,6 +708,7 @@ def build_card(
         'binLabel': state.get('binLabel'),
         'features': state.get('features') or {},
         'horizons': horizons,
+        'horizonGroups': horizon_groups(horizons, gate, has_bin=has_bin),
         'minimumSample': MIN_SAMPLE,
         'invalidIf': invalid_if,
         'asOfGate': gate,
