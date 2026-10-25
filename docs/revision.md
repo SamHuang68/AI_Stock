@@ -1,3 +1,14 @@
+## 2026-10-25 補記 abf4c98 發布狀態（含 #267）
+
+- 基底：`abf4c98eb82d1d1a232b4565ec4a3791f001547f`（origin/main）；分支 `claude/revision-abf4c98-release`。
+- 發布：Sam 2026-10-25「發布 #267 到正式站」。發布版為 `abf4c98eb82d1d1a232b4565ec4a3791f001547f`（含 #264、#265、#267、#268），release id `abf4c98eb82d`；前一版 `292a2d9cee84a24e764f5ee4c3c195393d818fc8`。
+- 流程：stage `tests: passed`（使用 #267 的驗證計畫）→ 停正式站與孤兒後端 → 停止後備份 14 個 SQLite（完整性 ok）→ promote（`data/` 前後皆 321 項）→ 啟動排程與本機。
+- 實測：本機 18432 與正式後端 18435 的 `runtimeCommit` 皆為 `abf4c98…`，閘道 `isolated-host`；兩端 `market.db` `quick_check` ok；本機 `/selftest` 21／21；`/sectors?mkt=TW` 兩端 56 列；兩端提供的 `conditional_expectation_v5.js` 含 `data-ce-group`。
+- 未驗證：條件期望旗標在兩端皆關閉（`DISABLED`），新欄位與畫面分段未在實機觀察；瀏覽器實機畫面、手機尺寸、閘道／Tailscale 端版本。
+- 詳細紀錄（不在 Git 內）：`AI-Workspace/docs/stock-terminal/release-abf4c98/發布紀錄.md`。
+
+---
+
 ## 2026-10-25 補記 #267 合併狀態（條件期望短期／長期指標）
 
 - 基底：`663eadc0cfc85a25c2745679311794b7fab76cba`（origin/main）；分支 `claude/revision-267-status`。
