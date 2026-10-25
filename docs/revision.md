@@ -51,6 +51,20 @@
 
 ---
 
+## 2026-10-25 修正 movers 等待上限測試在 Windows CI 偶發失敗
+
+- 基底：`85564a1cc6474cf7e5bac6e4a90813d877067852`（origin/main）；分支 `claude/fix-movers-clock-flake`。實作與合併 SHA 待 PR 合併後補記。
+- 現象：PR #269 的 Windows CI 中 `test_movers_bounds_sector_worker_and_does_not_adopt_late_classification`（`tests/test_review_regressions.py`）失敗一次，同一提交重跑通過；本機單獨重跑 400 次、整個模組連跑 120 輪皆 0 次失敗。
+- Error Type：測試以精確 `<= 8.5` 比較浮點等待值（測試問題；生產行為不受影響）。
+- 根因：`_fetch_day_movers` 的等待上限是 `source_deadline - time.monotonic()`，其中 `source_deadline = monotonic() + 8.5`。當 `monotonic()` 的值距離 2 的次方不到約 8.5 秒時，`m + 8.5` 跨過二進位級距而少一位精度，相減後略大於 8.5（實測 `8.500000000000057`、`8.500000000014552`）。GitHub 的 Windows 虛擬機剛開機，`monotonic` 只有數百到一千多秒，落在 512／1024 附近的機會遠大於本機（開機數天），所以只在 CI 偶發。
+- 重現：把 `time.monotonic` 固定為不同值再執行該案：距 2 的次方 8.5 秒內的值（例如 508.8766、1020.8766、2044.8766、131068.8766、262140.8766）會失敗，其餘值（482、503、1015 以前、131042、262114 等）全部通過。
+- 修正：該斷言加 `1e-6` 浮點容差並在失敗時帶出實際等待值；新增 `test_movers_join_bound_holds_when_clock_is_just_below_a_power_of_two`，在四個邊界時鐘值下重跑同一情境。生產程式不變（多出的 1e-10 秒對等待沒有實質影響）。
+- 驗證：新案在舊斷言下失敗（顯示實際值）、在新斷言下通過；整個 `tests.test_review_regressions` 65 案通過。
+- 同類掃描：以 grep 搜尋 `tests/`、`wavedeck/tests/` 中「`monotonic() + 常數` 搭配比較斷言」的寫法，以及同檔對 timeout／wait／deadline 的 `<=` 精確比較，都沒有其他同型寫法；這只是文字層級的搜尋，沒有逐一閱讀所有測試。
+- 發布狀態：未合併、未發布；只改測試，不涉及發布。
+
+---
+
 ## 2026-10-25 補記 abf4c98 發布狀態（含 #267）
 
 - 基底：`abf4c98eb82d1d1a232b4565ec4a3791f001547f`（origin/main）；分支 `claude/revision-abf4c98-release`。

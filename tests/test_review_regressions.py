@@ -1155,6 +1155,16 @@ class ReviewRegressions(unittest.TestCase):
         self.assertEqual(result['gainers'], [])
 
     def test_movers_bounds_sector_worker_and_does_not_adopt_late_classification(self):
+        self._assert_movers_bounds_sector_worker()
+
+    def test_movers_join_bound_holds_when_clock_is_just_below_a_power_of_two(self):
+        # 剛開機的 Windows runner（monotonic 只有數百到一千多秒）曾讓 deadline - now 因
+        # m + 8.5 跨過 2 的次方而多出約 1e-10 秒，精確比較 <= 8.5 偶發失敗。
+        for clock_now in (508.8766, 1020.8766, 2044.8766, 131068.8766):
+            with self.subTest(clock_now=clock_now), mock.patch.object(time, 'monotonic', return_value=clock_now):
+                self._assert_movers_bounds_sector_worker()
+
+    def _assert_movers_bounds_sector_worker(self):
         from tests.test_server_http_security import ST
         workers = []
         class Worker:
@@ -1179,7 +1189,9 @@ class ReviewRegressions(unittest.TestCase):
             self.assertFalse(result['classificationComplete'])
             self.assertEqual(result['classificationCount'], 0)
             self.assertEqual(len(workers), 3)
-            self.assertTrue(all(0 <= timeout <= 8.5 for w in workers for timeout in w.waits))
+            # 浮點容差：deadline 以 monotonic() + 8.5 計算，時鐘值靠近 2 的次方時相減會多出約 1e-10。
+            waits = [timeout for w in workers for timeout in w.waits]
+            self.assertTrue(all(0 <= timeout <= 8.5 + 1e-6 for timeout in waits), waits)
             workers[2].target()
             self.assertIn('deadline', sectors.call_args.kwargs)
             self.assertEqual(result['classificationCount'], 0)
