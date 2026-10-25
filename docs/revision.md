@@ -1,3 +1,17 @@
+## 2026-10-25 條件期望卡片獨立出短期指標與長期指標
+
+- 基底：`442b90841ac979d0ff42facf1513baa04edf28b7`（origin/main）；分支 `claude/ce-short-long-split`。實作與合併 SHA 待 PR 合併後補記。
+- 決定：Sam 2026-10-25「獨立出短期指標與長期指標(原來) 不做任何降級」。起因是時間序列洩漏對照檢查：20 日持有期的相鄰樣本高度重疊，`n >= 20` 對長期指標的獨立證據偏樂觀。
+- 查證：沿用同一來源 `conditional_expectation.build_card` 的 `horizons`（1／5／20）與前端 `conditional_expectation_v5.js`；沒有另建平行管線。
+- 修正（全部是新增，不刪不改既有欄位）：
+  - 後端每個持有期新增 `independentEvents`（互不重疊的事件數）；卡片新增 `horizonGroups`：`short` = T+1、T+5，`long` = T+20（原有指標），各自判定 `ready`／`invalidIf`。頂層 `horizons`、`invalidIf`、`status`、`minimumSample` 與 `n >= 20` 門檻完全不變。
+  - 前端同一張表分成「短期指標」「長期指標」兩段，T+1／T+5／T+20 全部保留，並新增「獨立事件」欄；任一段樣本未達門檻只標該段，不再拖累另一段的呈現。
+- 沒有降級：沒有任何持有期、欄位、門檻被移除或收緊，沒有資料因此被隱藏。是否要把「獨立事件」納入門檻是另一個需要 Sam 決定的取捨，本次沒做。
+- 驗證：`test_conditional_expectation`、`test_conditional_expectation_p1`、`test_shadow_multifactor` 共 35 案（含新增 3 案）通過；`conditional_expectation_v5_selftest.js`（新增短長期分組斷言）通過；`test_bundle_fresh`、`test_build_reproducibility` 通過。未做瀏覽器實機畫面確認。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-23 整併大盤 8D 與台指期 8D（交接單第 9 節第 6 項）
 
 - 基底：`6945c039cb275264544e9a5dc5bd25701f4c9bcb`（origin/main）；分支 `claude/consolidate-chart-8d`。實作與合併 SHA 待 PR 合併後補記。

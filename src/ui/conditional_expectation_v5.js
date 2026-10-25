@@ -44,6 +44,7 @@
       '.st-ce-table th,.st-ce-table td{padding:4px 5px;border-bottom:1px solid rgba(38,54,79,.85);text-align:right;vertical-align:middle}' +
       '.st-ce-table th:first-child,.st-ce-table td:first-child{text-align:left;color:#8da2ba;font-weight:700}' +
       '.st-ce-table th{color:#7c8fa8;font-weight:700;background:rgba(8,16,28,.55)}' +
+      '.st-ce-table tr.st-ce-group th{text-align:left;color:#67e8f9;background:rgba(103,232,249,.08);letter-spacing:.04em}' +
       '.st-ce-muted{color:#64748b}.st-ce-up{color:var(--red,#ff7a76)}.st-ce-down{color:var(--green,#43df92)}' +
       '.st-ce-expired{padding:8px 9px;border:1px dashed rgba(148,163,184,.35);border-radius:6px;color:#94a3b8;' +
         'background:rgba(15,23,42,.45);font-size:10px;line-height:1.55;margin:4px 0 6px}' +
@@ -96,15 +97,29 @@
     return String(card.status || '').toUpperCase() === 'READY';
   }
 
-  function horizonRows(card) {
+  var GROUPS = [
+    { key: 'short', label: '短期指標', horizons: [1, 5] },
+    { key: 'long', label: '長期指標', horizons: [20] }
+  ];
+
+  function horizonRow(card, h) {
     var horizons = (card && card.horizons) || {};
-    return HORIZONS.map(function (h) {
-      var row = horizons[String(h)] || {};
-      var ready = !!row.ratesAvailable;
-      return '<tr><td>T+' + h + '</td><td>' + (ready ? esc(String(row.n || 0)) : esc(String(row.n || 0)) + '*') +
-        '</td><td>' + (ready ? pct(row.winRate) : '—') + '</td><td class="' + pctClass(row.medianReturnPct) + '">' +
-        (ready ? signedPct(row.medianReturnPct) : '—') + '</td><td>' +
-        (ready ? signedPct(row.maxDrawdownQ90Pct) : '—') + '</td></tr>';
+    var row = horizons[String(h)] || {};
+    var ready = !!row.ratesAvailable;
+    var events = row.independentEvents == null ? '—' : esc(String(row.independentEvents));
+    return '<tr><td>T+' + h + '</td><td>' + (ready ? esc(String(row.n || 0)) : esc(String(row.n || 0)) + '*') +
+      '</td><td>' + events + '</td><td>' + (ready ? pct(row.winRate) : '—') + '</td><td class="' + pctClass(row.medianReturnPct) + '">' +
+      (ready ? signedPct(row.medianReturnPct) : '—') + '</td><td>' +
+      (ready ? signedPct(row.maxDrawdownQ90Pct) : '—') + '</td></tr>';
+  }
+
+  function horizonRows(card) {
+    var groups = (card && card.horizonGroups) || {};
+    return GROUPS.map(function (g) {
+      var info = groups[g.key] || {};
+      var note = info.ready === false ? ' · 樣本未達門檻' : '';
+      return '<tr class="st-ce-group" data-ce-group="' + g.key + '"><th colspan="6">' + g.label + esc(note) + '</th></tr>' +
+        g.horizons.map(function (h) { return horizonRow(card, h); }).join('');
     }).join('');
   }
 
@@ -143,7 +158,7 @@
         (gate.reasons && gate.reasons.length ? '<br>' + esc(gate.reasons.join('；')) : '') + '</div>';
     }
     html += invalidHtml(card) +
-      '<table class="st-ce-table" aria-label="條件期望統計"><thead><tr><th>Horizon</th><th>N</th><th>Win</th>' +
+      '<table class="st-ce-table" aria-label="條件期望統計"><thead><tr><th>Horizon</th><th>N</th><th>獨立事件</th><th>Win</th>' +
       '<th>Median</th><th>MaxDD Q90</th></tr></thead><tbody>' + horizonRows(card) + '</tbody></table>' +
       '<div class="st-ce-foot">' + esc(DISCLAIMER) +
       (card.minimumSample != null ? ' · minimumSample=' + esc(String(card.minimumSample)) : '') +

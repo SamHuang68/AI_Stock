@@ -91,5 +91,15 @@ assert(/data-epistemic="CONDITIONAL"/.test(html), 'renderHtml must emit CONDITIO
 assert(/不適合作為預測參考/.test(html), 'renderHtml must show expired state');
 assert(/invalidIf/.test(html), 'renderHtml must show invalidIf');
 assert(/T\+1/.test(html) && /T\+5/.test(html) && /T\+20/.test(html), 'renderHtml must list horizons');
+assert(/data-ce-group="short"/.test(html) && /data-ce-group="long"/.test(html), 'renderHtml must split short and long indicators');
+assert(html.indexOf('T+5') < html.indexOf('data-ce-group="long"') && html.indexOf('data-ce-group="long"') < html.indexOf('T+20'), 'T+20 must sit under the long group');
+assert(/獨立事件/.test(html), 'renderHtml must show independent events column');
+var ready = JSON.parse(JSON.stringify(sample));
+ready.horizons['1'] = { n: 30, independentEvents: 30, winRate: 0.6, medianReturnPct: 0.4, maxDrawdownQ90Pct: -1, ratesAvailable: true };
+ready.horizons['5'] = { n: 25, independentEvents: 5, winRate: 0.55, medianReturnPct: 1.1, maxDrawdownQ90Pct: -2, ratesAvailable: true };
+ready.horizonGroups = { short: { ready: true }, long: { ready: false } };
+var html2 = sandbox.window.ConditionalExpectationV5.renderHtml(ready);
+assert(/短期指標<\/th>/.test(html2) && /長期指標 · 樣本未達門檻/.test(html2), 'long group must be withheld independently of the short group');
+assert(/\+1\.10%|1\.1/.test(html2), 'short group stats must remain visible when long is withheld');
 
 console.log('conditional_expectation_v5 self-test PASSED');
