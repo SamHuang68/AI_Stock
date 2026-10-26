@@ -82,9 +82,8 @@ def _save() -> None:
                 'report_epoch_ms': _state.get('report_epoch_ms'),
                 'costs': _state.get('costs'),
             }
-        tmp = STORE.with_suffix('.tmp')
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
-        tmp.replace(STORE)
+        from atomic_store import atomic_write_json
+        atomic_write_json(STORE, payload, backup=False)
     except Exception:
         pass
 

@@ -517,11 +517,9 @@ def fetch_tw_universe():
                     continue
                 cand = str(row.get('Code') or row.get('SecuritiesCompanyCode')
                            or row.get('證券代號') or row.get('股票代號') or '').strip()
+                # 只接受具名代號欄位；與 server._extract_tw_stock_codes 同一契約，不從價格或筆數猜代號。
                 if code4.match(cand):
-                    codes.add(cand); continue
-                for v in row.values():
-                    if code4.match(str(v).strip()):
-                        codes.add(str(v).strip()); break
+                    codes.add(cand)
         except Exception as e:
             print(f'[universe] scan failed {url}: {e}')
     return sorted(codes)

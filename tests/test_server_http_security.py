@@ -162,6 +162,33 @@ class ServerHttpSecurityTests(unittest.TestCase):
             self.assertIsNone(caught.exception.headers['Access-Control-Allow-Origin'])
             caught.exception.close()
 
+    def _status(self, path, headers=None):
+        req = urllib.request.Request(self.base + path, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=3) as response:
+                return response.status
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            return exc.code
+
+    def test_mutating_get_rejects_cross_site_browser_requests(self):
+        for path in ('/holders/backfill?weeks=104', '/holders/refresh', '/focus?refresh=1',
+                     '/movers?refresh=1', '/sectors?nocache=1'):
+            with self.subTest(path=path, header='Sec-Fetch-Site'):
+                self.assertEqual(self._status(path, {'Sec-Fetch-Site': 'cross-site'}), 403)
+            with self.subTest(path=path, header='Origin'):
+                self.assertEqual(self._status(path, {'Origin': 'https://evil.example'}), 403)
+
+    def test_holders_backfill_weeks_must_be_a_bounded_integer(self):
+        for weeks in ('abc', '0', '-5', '99999'):
+            with self.subTest(weeks=weeks):
+                self.assertEqual(self._status('/holders/backfill?weeks=' + weeks), 400)
+
+    def test_quote_symbol_is_decoded_only_once(self):
+        for path in ('/quote/%252Fx%253Fa', '/quote/%255ETWII'):
+            with self.subTest(path=path):
+                self.assertEqual(self._status(path), 400)
+
     def test_market_cors_rejects_other_origins_and_other_symbols(self):
         for origin in (
             'http://127.0.0.1:18432', 'http://127.0.0.1:18434',

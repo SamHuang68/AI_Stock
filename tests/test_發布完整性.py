@@ -96,7 +96,7 @@ class 發布完整性測試(unittest.TestCase):
 
     def test_無雜湊的舊暫存必須重新驗證(self):
         path = self.staged / release.MANIFEST_NAME
-        manifest = json.loads(path.read_text())
+        manifest = json.loads(path.read_text(encoding='utf-8'))
         manifest.pop('contentSha256')
         path.write_text(json.dumps(manifest), encoding='utf-8')
         with self.assertRaisesRegex(RuntimeError, '缺少受測內容雜湊'):
@@ -107,7 +107,7 @@ class 發布完整性測試(unittest.TestCase):
         commit = 'a' * 40
         staged = _fake_release(self.root, commit[:12])
         manifest_path = staged / release.MANIFEST_NAME
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
         manifest['commit'] = commit
         manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
         (staged / 'server/server.py').write_text('變更', encoding='utf-8')

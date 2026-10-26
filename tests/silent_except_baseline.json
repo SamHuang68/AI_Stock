@@ -27,7 +27,7 @@
     "server/pulse_orchestration.py": 7,
     "server/quote_api.py": 1,
     "server/sector_history.py": 1,
-    "server/server.py": 69,
+    "server/server.py": 68,
     "server/shadow_multifactor.py": 1,
     "server/signal_digest.py": 5,
     "server/signal_stats_pool.py": 1,

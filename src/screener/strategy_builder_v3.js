@@ -446,7 +446,8 @@
   function refreshSavedList() {
     const sel = document.getElementById('sb-saved'); if (!sel) return;
     const all = savedStore();
-    sel.innerHTML = '<option value="">— 載入條件組 —</option>' + Object.keys(all).map(k => `<option value="${k}">${k}</option>`).join('');
+    sel.textContent = ''; const firstOption = document.createElement('option'); firstOption.value = ''; firstOption.textContent = '— 載入條件組 —'; sel.appendChild(firstOption);
+    Object.keys(all).forEach(k => { const option = document.createElement('option'); option.value = k; option.textContent = k; sel.appendChild(option); });
   }
   function loadModel(name) {
     const all = savedStore(); if (!all[name]) return;

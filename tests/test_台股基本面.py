@@ -106,7 +106,7 @@ class RevenueTests(unittest.TestCase):
     def test_latest_table_missing_company_continues_to_prior_month_even_after_cache_warm(self):
         clock = mock.Mock(return_value=100)
         namespace = functions({'_mops_monthly_revenue'}, {
-            '_re': re, '_mops_rev_cache': {}, '_mops_rev_lock': threading.RLock(),
+            '_re': re, '_mops_rev_cache': {}, '_mops_rev_lock': threading.RLock(), '_mops_key_locks': {}, 'threading': threading,
             'time': SimpleNamespace(monotonic=clock), 'urllib': urllib,
             '_parse_mops_t21sc03': lambda html, period: json.loads(html),
         })
@@ -160,7 +160,7 @@ class UpstreamTests(unittest.TestCase):
     def test_foreign_company_table_retries_independently_after_failure(self):
         clock = mock.Mock(return_value=10)
         namespace = functions({'_mops_monthly_revenue'}, {
-            '_re': re, '_mops_rev_cache': {}, '_mops_rev_lock': threading.RLock(),
+            '_re': re, '_mops_rev_cache': {}, '_mops_rev_lock': threading.RLock(), '_mops_key_locks': {}, 'threading': threading,
             'time': SimpleNamespace(monotonic=clock), 'urllib': urllib,
             '_parse_mops_t21sc03': lambda html, period: json.loads(html),
         })

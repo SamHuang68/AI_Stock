@@ -44,10 +44,17 @@ RETRY_TIMES  = 4
 RETRY_DELAY  = 1.5
 TIMEOUT      = 20
 
-# ── SSL：Windows 憑證問題統一關閉 ────────────────────────────────────
+# ── SSL：預設驗證憑證；只有明列在 ST_ETF_INSECURE_HOSTS（逗號分隔主機名）的來源才關閉驗證 ──
 _SSL_CTX = ssl.create_default_context()
-_SSL_CTX.check_hostname = False
-_SSL_CTX.verify_mode    = ssl.CERT_NONE
+_INSECURE_SSL_CTX = ssl.create_default_context()
+_INSECURE_SSL_CTX.check_hostname = False
+_INSECURE_SSL_CTX.verify_mode    = ssl.CERT_NONE
+_INSECURE_HOSTS = {h.strip().lower() for h in os.environ.get('ST_ETF_INSECURE_HOSTS', '').split(',') if h.strip()}
+
+
+def _ssl_context_for(url: str):
+    host = (urllib.parse.urlsplit(url).hostname or '').lower()
+    return _INSECURE_SSL_CTX if host in _INSECURE_HOSTS else _SSL_CTX
 
 # ── 路徑 ──────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -123,7 +130,7 @@ def http_get(url: str, referer: str = '') -> str | None:
         started = time.monotonic()
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
+            with urllib.request.urlopen(req, timeout=TIMEOUT, context=_ssl_context_for(url)) as resp:
                 raw = resp.read()
                 if resp.headers.get('Content-Encoding') == 'gzip':
                     raw = gzip.decompress(raw)

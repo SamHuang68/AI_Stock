@@ -540,7 +540,7 @@ def _macro_economy_snapshot(years=5, force_live=False):
         last = pts[-1] if pts else None
         prev = pts[-2] if len(pts) >= 2 else None
         chg = None
-        if last and prev and prev.get('value') not in (None, 0):
+        if last and prev and prev.get('value') is not None:
             try:
                 chg = float(last['value']) - float(prev['value'])
             except Exception:
@@ -753,27 +753,40 @@ def _fetch_tw_light():
        主：wd.ndc.gov.tw/ndc/opendata/ndc0101.csv；備援：.json、data.gov.tw dataset 6334。"""
     candidates = ['https://wd.ndc.gov.tw/ndc/opendata/ndc0101.csv',
                   'https://wd.ndc.gov.tw/ndc/opendata/ndc0101.json']
+    valkeys = [('對策信號分數', '景氣對策信號', '綜合分數', '分數', 'score', 'light')]
+    last = None
+
+    def try_urls(urls):
+        nonlocal last
+        for url in urls:
+            try:
+                rows = _rows_from_text(_http_text(url))
+                pts, dbg = _parse_macro_rows(rows, valkeys)
+                if pts:
+                    return pts
+                last = dbg or 'empty'
+            except Exception as e:
+                last = 'ERR ' + str(e)
+        return None
+
+    # 主來源可用時不再先查中繼資料 API（過去每次都多等一次最長 12 秒）。
+    pts = try_urls(candidates)
+    if pts:
+        return pts
     # 動態備援：data.gov.tw dataset 6334 當前資源
+    extra = []
     try:
         meta = _http_json('https://data.gov.tw/api/v2/rest/dataset/6334', timeout=12)
         res = (meta.get('result') if isinstance(meta, dict) else None) or {}
         for d in (res.get('distribution') or res.get('resources') or []):
             u = d.get('resourceDownloadUrl') or d.get('downloadUrl') or d.get('url') or ''
-            if u:
-                candidates.append(u)
+            if u and u not in candidates:
+                extra.append(u)
     except Exception:
         pass
-    valkeys = [('對策信號分數', '景氣對策信號', '綜合分數', '分數', 'score', 'light')]
-    last = None
-    for url in candidates:
-        try:
-            rows = _rows_from_text(_http_text(url))
-            pts, dbg = _parse_macro_rows(rows, valkeys)
-            if pts:
-                return pts
-            last = dbg or 'empty'
-        except Exception as e:
-            last = 'ERR ' + str(e)
+    pts = try_urls(extra)
+    if pts:
+        return pts
     _macro_debug['tw_light'] = last or '(無回應)'
     return []
 
@@ -1116,8 +1129,8 @@ def _openapi_lookup_list(dataset_name, *, deadline=None):
         url = _openapi_url(ds)
         trace = {'correlationId': uuid.uuid4().hex, 'dataset': ds, 'url': url, 'method': 'GET'}
         _fundamental_trace('openapi_fetch_start', **trace)
+        import http_client as _hc
         try:
-            import http_client as _hc
             fetch_url = url
             origin = urllib.parse.urlsplit(url)
             for redirects in range(4):
@@ -1204,6 +1217,7 @@ def _ex_dividend_rows(rows, code=''):
 # ── MOPS 公開資訊觀測站 月營收(補上櫃:官方 OpenAPI 無 per-company 上櫃端點) ──
 _mops_rev_cache = {}   # (市場, 年, 月, 國內／外國公司) -> (失效時刻, 逐股資料)
 _mops_rev_lock = threading.RLock()
+_mops_key_locks = {}   # 快取鍵 -> 該月份專用鎖（由 _mops_rev_lock 保護建立）
 _MOPS_TR = _re.compile(r'<tr[^>]*>(.*?)</tr>', _re.I | _re.S)
 _MOPS_TD = _re.compile(r'<td[^>]*>(.*?)</td>', _re.I | _re.S)
 _MOPS_TAG = _re.compile(r'<[^>]+>')
@@ -1260,8 +1274,12 @@ def _mops_monthly_revenue(market, clean_code):
         # 國內公司與外國公司分表；不可漏掉 KY 股票。
         for category in (0, 1):
             key = (market, yy, mm, category)
+            # 全域鎖只保護鎖表；網路呼叫只持有該月份自己的鎖，避免一個慢月份擋住所有股票。
             with _mops_rev_lock:
-                cached = _mops_rev_cache.get(key)
+                key_lock = _mops_key_locks.setdefault(key, threading.Lock())
+            with key_lock:
+                with _mops_rev_lock:
+                    cached = _mops_rev_cache.get(key)
                 if cached and cached[0] > time.monotonic():
                     row = cached[1].get(clean_code)
                     if row:
@@ -1283,7 +1301,8 @@ def _mops_monthly_revenue(market, clean_code):
                     except Exception:
                         continue
                 # 成功五分鐘、失敗一分鐘；逐月共用且允許同一期後補申報。
-                _mops_rev_cache[key] = (time.monotonic() + (300 if idx else 60), idx)
+                with _mops_rev_lock:
+                    _mops_rev_cache[key] = (time.monotonic() + (300 if idx else 60), idx)
                 if clean_code in idx:
                     return dict(idx[clean_code])
     return None
@@ -2060,6 +2079,7 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
 
     def ingest_tpex(arr):
         nonlocal tpex_date_s
+        seen_codes = {x['code'] for x in rows}
         for r in arr or []:
             if not isinstance(r, dict):
                 continue
@@ -2087,8 +2107,9 @@ def _fetch_day_movers(n=8, target_date=None, include_rows=False):
                 pct = chg / prev * 100.0
             if abs(pct) > 30 and not code.endswith(('L', 'R')):
                 continue
-            if any(x['code'] == code for x in rows):
+            if code in seen_codes:
                 continue
+            seen_codes.add(code)
             rows.append({
                 'code': code, 'name': name or code, 'price': close,
                 'change': chg, 'changePct': round(pct, 2),
@@ -2636,8 +2657,28 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         except Exception as e:
             self._err('failed to read index HTML: ' + str(e), 500)
 
+    _MUTATING_GET_KEYS = ('refresh', 'nocache', 'action')
+    _MUTATING_HOLDERS = ('refresh', 'update', 'backfill', 'archive')
+
+    def _mutating_get(self):
+        """GET 但會觸發抓取、回補或快取失效的請求（舊前端契約保留 GET，故以來源檢查補強）。"""
+        parts = urlparse(self.path)
+        if parts.path.startswith('/holders/') and unquote(parts.path[9:]).strip('/') in self._MUTATING_HOLDERS:
+            return True
+        qs = parse_qs(parts.query)
+        return any((qs.get(k) or [''])[0].strip().lower() in ('1', 'true', 'yes', 'backfill', 'refresh')
+                   for k in self._MUTATING_GET_KEYS)
+
+    def _cross_site_get(self):
+        """瀏覽器明示的跨站請求（<img>、<script>、導覽）或來源不是本站／WaveDeck。非瀏覽器呼叫沒有這些標頭，放行。"""
+        if (self.headers.get('Sec-Fetch-Site') or '').lower() == 'cross-site':
+            return True
+        return not self._origin_ok()
+
     def do_GET(self):
         self._ensure_trace_id()
+        if self._mutating_get() and self._cross_site_get():
+            self._err('forbidden (cross-origin)', 403); return
         p = self.path
         if p in ('/', '/index.html', '/stock_terminal.html', '/stock_terminal_v2.html') or p.startswith('/stock_terminal'):
             self._handle_index()
@@ -3625,7 +3666,6 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                     m = res[0].get('meta') or {}
                     cur = m.get('regularMarketPrice')
                     if cur is None:
-                        cls = ((res[0].get('indicators') or {}).get('quote') or [{}])[0].get('close') or []
                         continue  # 缺成交價時不以未對齊的日線代替
                     prev = _yf_prevclose(m)
                     if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 0 for v in (cur, prev)):
@@ -3656,8 +3696,10 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         range=1d&interval=1m and extract price/high/low/vol from meta + last bar.
         bid/ask are not available free; would need broker API.
         """
-        from urllib.parse import unquote as _unq
-        sym = _unq(sym)                     # 路徑未自動解碼:%5ETWOII → ^TWOII,否則 _BAD_YF 比對不到
+        # 路由層（do_GET）已解碼一次並通過 _safe_sym；此處不可再解碼，
+        # 否則 %252F 之類的雙重編碼會在白名單之後變成 / 或 ?。
+        if '%' in sym or '/' in sym or '?' in sym:
+            self._err('bad symbol', 400); return
         if _re.fullmatch(r'\d{4,6}[A-Z]?(?:\.TW|\.TWO)?', sym.upper()):
             self._handle_twquote(sym)
             return
@@ -4272,7 +4314,7 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                         out[k] = val
                     else:
                         try: out[k] = float(val)
-                        except: pass
+                        except ValueError: pass
             if out.get('dividendYield') is not None:
                 out['dividendYield'] *= 100
         except urllib.error.HTTPError as e:
@@ -4303,7 +4345,12 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             except Exception as e:
                 self._err('holders refresh failed: ' + str(e), 500); return
         if rest in ('backfill', 'archive'):
-            weeks = int(qs.get('weeks', ['104'])[0] or 104)
+            try:
+                weeks = int(qs.get('weeks', ['104'])[0] or 104)
+            except ValueError:
+                self._err('weeks 必須是整數', 400); return
+            if not 1 <= weeks <= 520:
+                self._err('weeks 必須介於 1 到 520', 400); return
             th.start_background_backfill(weeks=weeks)
             self._ok(json.dumps({'ok': True, 'started': True, 'weeks': weeks}, ensure_ascii=False).encode()); return
         if rest.startswith('chart/'):
@@ -4808,12 +4855,16 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         else:
             # 往前找最近有資料的交易日；欄位對齊 chip_api（避免外資自營商誤中）
             import chip_api as _ca
+            _rank_deadline = time.monotonic() + 45.0   # 逐日往前試探的總預算
             for back in range(0, 7):
+                if time.monotonic() >= _rank_deadline:
+                    print('[inst-rank] T86 probing budget exhausted')
+                    break
                 dd = (today - timedelta(days=back)).strftime('%Y%m%d')
                 try:
                     url = f'https://www.twse.com.tw/rwd/zh/fund/T86?date={dd}&selectType=ALLBUT0999&response=json'
                     req = urllib.request.Request(url, headers=YF_HEADERS)
-                    with urllib.request.urlopen(req, timeout=15) as resp:
+                    with urllib.request.urlopen(req, timeout=8) as resp:
                         d = json.loads(resp.read())
                     if d.get('stat') not in ('OK', 'ok'):
                         continue
@@ -5968,10 +6019,15 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         try:
             mode = (self._read_json_body(max_bytes=4096) or {}).get('mode', 'full')
             # 自抓 /etf-delta
-            with urllib.request.urlopen(f'http://localhost:{PORT}/etf-delta', timeout=30) as r:
-                delta = json.loads(r.read())
-            if delta.get('error'):
-                self._err('etf-delta error: ' + str(delta.get('error')), 502); return
+            # 直接呼叫 /etf-delta 背後的同一個計算函式，不再自我發 HTTP 佔用兩條伺服器執行緒。
+            import etf_api
+            etf_files = etf_api.list_etf_files()
+            if len(etf_files) < 2:
+                self._err(f'etf-delta error: need ≥2 history files; found {len(etf_files)}', 502); return
+            delta = etf_api.compute_etf_delta(etf_files, None)
+            if not delta or delta.get('error'):
+                self._err('etf-delta error: ' + str((delta or {}).get('error') or 'delta compute failed'), 502); return
+            delta['meta'] = {'history': etf_api.etf_history_status()}
             subject = html = text = None
             if etf_report:
                 try:
@@ -6353,6 +6409,10 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
 
     def _handle_market_snapshot(self):
         """Single canonical source for the market headline surfaces."""
+        key = f'market-snapshot:{int(time.time() // 10)}'   # 10 秒快取，避免每個畫面各打一次 MIS
+        cached = _cache.get(key)
+        if cached is not None:
+            self._ok(cached); return
         try:
             indices = _twse_mis_index('tse_t00.tw|otc_o00.tw')
         except Exception:
@@ -6362,7 +6422,10 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         except Exception:
             txf = None
         out = market_snapshot(indices, txf)
-        self._ok(json.dumps(out, ensure_ascii=False).encode())
+        body = json.dumps(out, ensure_ascii=False).encode()
+        if out.get('ok'):
+            _cache.set(key, body, ttl=10)
+        self._ok(body)
 
     def _handle_margin_ratio_backfill(self):
         """POST /margin_ratio/backfill — 背景回補歷史（full=1 從 2001 起）。"""
