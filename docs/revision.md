@@ -51,6 +51,15 @@
 
 ---
 
+## 2026-10-26 補記 #270 合併狀態（movers 等待上限測試的時鐘邊界）
+
+- 基底：`9b1ef10f9c8abfcf0d14cbe38e6e60113d493c72`（origin/main）；分支 `claude/revision-270-status`。
+- #270 已合併：實作提交 `6ac4276df77b05e78a1739ebd4b30e4599899ae6`，合併提交 `9b1ef10f9c8abfcf0d14cbe38e6e60113d493c72`；合併前 CI 四項（ubuntu、windows、兩個 Cursor 審查）全部通過。內容見 2026-10-25「修正 movers 等待上限測試在 Windows CI 偶發失敗」一段。
+- 發布狀態：只改測試與文件，不涉及發布；正式站與本機仍為 `abf4c98`。
+- 未驗證：尚未累積足夠的 Windows CI 執行次數來證明偶發失敗不再出現；目前證據是邊界時鐘值下的回歸案例與修正前後對照。
+
+---
+
 ## 2026-10-25 修正 movers 等待上限測試在 Windows CI 偶發失敗
 
 - 基底：`85564a1cc6474cf7e5bac6e4a90813d877067852`（origin/main）；分支 `claude/fix-movers-clock-flake`。實作與合併 SHA 待 PR 合併後補記。
