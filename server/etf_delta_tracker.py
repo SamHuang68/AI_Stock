@@ -63,17 +63,35 @@ def load_catalog():
     try:
         with open(CATALOG_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f'[ERR] 讀取 {CATALOG_FILE} 失敗：{e}，使用 fallback')
         return _FALLBACK_ETFS
+    categories = data.get('categories') if isinstance(data, dict) else None
+    if not isinstance(categories, list):
+        print(f'[ERR] {CATALOG_FILE} 結構不符（缺少 categories 清單），使用 fallback')
+        return _FALLBACK_ETFS
     out = {}
-    for cat in data.get('categories', []):
-        for etf in cat.get('etfs', []):
+    skipped = 0
+    for cat in categories:
+        etfs = cat.get('etfs') if isinstance(cat, dict) else None
+        if not isinstance(etfs, list):
+            skipped += 1
+            continue
+        for etf in etfs:
+            if not isinstance(etf, dict):
+                skipped += 1
+                continue
             if (etf.get('enabled') and etf.get('code')
                     and str(etf.get('market') or 'TW').upper() == 'TW'):
-                code = etf['code'].strip().upper()
+                raw_code = etf['code']
+                if not isinstance(raw_code, str) or not raw_code.strip():
+                    skipped += 1
+                    continue
+                code = raw_code.strip().upper()
                 name = etf.get('name', code)
-                out[code] = (code, name)
+                out[code] = (code, name if isinstance(name, str) else code)
+    if skipped:
+        print(f'[WARN] {CATALOG_FILE} 有 {skipped} 筆結構或型別不符的項目已略過')
     if not out:
         print(f'[WARN] catalog 內無 enabled 的 ETF，使用 fallback')
         return _FALLBACK_ETFS

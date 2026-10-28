@@ -1,3 +1,20 @@
+## 2026-10-28 ETF 目錄載入：結構或型別不符的項目不再讓模組匯入失敗
+
+- 基底：`d203229e842f8e0b86b190121428a491e51ec3b0`（origin/main）；分支 `claude/etf-catalog-validation`。實作與合併 SHA 待 PR 合併後補記。
+- 來源：2026-10-24 Codex 在單一資料根候選分支（已關閉的 #266）上發現並修復 `data/etf_catalog.json` 欄位型別錯誤的缺陷（其提交 `e88f2d8`，保留於分支 `fix/etf-catalog-validation`）。該修法依賴 #266 的「每輪重載、沿用上一份有效清單」機制，main 沒有，所以沒有照搬，只沿用 main 既有契約。
+- 缺陷（main 實測重現）：`ETFS = load_catalog()` 在模組匯入時執行，而 `etf['code'].strip()` 在 `try` 之外；目錄裡 `code` 是整數就拋出 `AttributeError: 'int' object has no attribute 'strip'`，整個 `etf_delta_tracker` 匯入失敗。`categories`／`etfs` 不是清單、項目不是物件時也會拋例外。
+- 修正（`server/etf_delta_tracker.py` 的 `load_catalog`）：
+  - 根物件不是物件或 `categories` 不是清單：記錄 `[ERR]` 並回 fallback 10 檔（沿用「讀不到就 fallback」的既有契約）。
+  - 類別、`etfs`、單一項目結構不符，或 `code` 不是非空字串：略過該筆並記錄 `[WARN]` 筆數，其餘有效項目照常載入。`name` 不是字串時改用代碼。
+  - 讀檔例外由 `Exception` 縮為 `OSError`／`ValueError`。
+- 沒有降級：`enabled` 仍沿用原本的真值判斷（不收緊型別），市場過濾、全部停用時回 fallback、檔案不存在回 fallback 都不變。現行 `data/etf_catalog.json` 226 筆全部型別正確，載入結果與修正前相同（測試以獨立方式計算期望值對照，且不輸出任何記錄）。
+- 與 Codex 版的差異（刻意）：Codex 版是「任何一列不合法就整份目錄無效」；這裡是只略過不合法的列，因為整份退回 10 檔會讓 226 筆縮成 10 筆，屬於悄悄減少使用者看到的資訊。
+- 驗證：新增 `tests/test_etf_catalog_validation.py` 9 案，修正前在 main 上失敗（2 failures、7 errors，含原始的 `AttributeError`），修正後通過；既有 `test_etf_delta_tracker`、`test_etf_paths`、`test_etf_api`、`test_etf_snapshot_health`（共 30 案）、`test_ETF更新防再發`、`test_no_new_silent_exceptions` 通過。
+- 未驗證：沒有重啟服務做實機載入（只改匯入時讀一次的函式，需重啟才會生效）；HTTP 儲存入口 `/etf-catalog` 沒有加驗證，仍只檢查 `categories` 是陣列，因此不能說 HTTP 已拒絕不合法內容。
+- 發布狀態：未合併、未發布。
+
+---
+
 ## 2026-10-26 補記 #270 合併狀態（movers 等待上限測試的時鐘邊界）
 
 - 基底：`9b1ef10f9c8abfcf0d14cbe38e6e60113d493c72`（origin/main）；分支 `claude/revision-270-status`。
