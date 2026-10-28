@@ -2,35 +2,44 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "d203229e842f8e0b86b190121428a491e51ec3b0",
+  "baseCommit": "b935588827e638459bd64a9f0f2831a415c91a20",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
   ],
   "cases": [
     {
-      "id": "ETF 目錄載入結構驗證",
+      "id": "全市場日線缺口偵測與追補",
       "kind": "unittest",
-      "timeoutSeconds": 300,
-      "reason": "load_catalog 遇到型別或結構不符的項目不得讓模組匯入失敗；既有載入契約與 fallback 不變",
+      "timeoutSeconds": 600,
+      "reason": "新增缺口偵測與追補，並讓 run_update 支援歷史回補模式；每日更新、排程與突破日更的既有行為不變",
       "targets": [
-        "tests.test_etf_catalog_validation",
-        "tests.test_etf_delta_tracker",
-        "tests.test_ETF更新防再發",
-        "tests.test_no_new_silent_exceptions"
+        "tests.test_全市場日線缺口",
+        "tests.test_台股日線",
+        "tests.test_三項限制解方",
+        "tests.test_突破日更整合",
+        "tests.test_證據限制回報",
+        "tests.test_no_new_silent_exceptions",
+        "tests.test_server_startup_order"
       ],
       "changes": [
-        "server/etf_delta_tracker.py",
-        "tests/test_etf_catalog_validation.py"
+        "server/台股日線.py",
+        "server/全市場日線缺口.py",
+        "server/個股研究維護.py",
+        "tests/test_全市場日線缺口.py"
       ],
       "inputs": [
-        "server/etf_delta_tracker.py",
-        "data/etf_catalog.json",
-        "tests/test_etf_catalog_validation.py",
-        "tests/test_etf_delta_tracker.py",
-        "tests/test_ETF更新防再發.py",
+        "server/台股日線.py",
+        "server/全市場日線缺口.py",
+        "server/個股研究維護.py",
+        "tests/test_全市場日線缺口.py",
+        "tests/test_台股日線.py",
+        "tests/test_三項限制解方.py",
+        "tests/test_突破日更整合.py",
+        "tests/test_證據限制回報.py",
         "tests/test_no_new_silent_exceptions.py",
-        "tests/silent_except_baseline.json"
+        "tests/silent_except_baseline.json",
+        "tests/test_server_startup_order.py"
       ]
     }
   ]
