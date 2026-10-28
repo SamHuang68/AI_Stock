@@ -2,44 +2,26 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "b935588827e638459bd64a9f0f2831a415c91a20",
+  "baseCommit": "066d13debea113d7d73e315d3d23a0ac75af879c",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
   ],
   "cases": [
     {
-      "id": "全市場日線缺口偵測與追補",
+      "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "新增缺口偵測與追補，並讓 run_update 支援歷史回補模式；每日更新、排程與突破日更的既有行為不變",
+      "reason": "發布狀態只改文件；分享封存掃描",
       "targets": [
-        "tests.test_全市場日線缺口",
-        "tests.test_台股日線",
-        "tests.test_三項限制解方",
-        "tests.test_突破日更整合",
-        "tests.test_證據限制回報",
-        "tests.test_no_new_silent_exceptions",
-        "tests.test_server_startup_order"
+        "tests.test_dist_scrub"
       ],
       "changes": [
-        "server/台股日線.py",
-        "server/全市場日線缺口.py",
-        "server/個股研究維護.py",
-        "tests/test_全市場日線缺口.py"
+        "docs/revision.md"
       ],
       "inputs": [
-        "server/台股日線.py",
-        "server/全市場日線缺口.py",
-        "server/個股研究維護.py",
-        "tests/test_全市場日線缺口.py",
-        "tests/test_台股日線.py",
-        "tests/test_三項限制解方.py",
-        "tests/test_突破日更整合.py",
-        "tests/test_證據限制回報.py",
-        "tests/test_no_new_silent_exceptions.py",
-        "tests/silent_except_baseline.json",
-        "tests/test_server_startup_order.py"
+        "docs/revision.md",
+        "tests/test_dist_scrub.py"
       ]
     }
   ]
