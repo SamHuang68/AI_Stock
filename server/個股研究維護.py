@@ -30,7 +30,8 @@ def schedule_status():
     config = load_json(str(data / 'stock_daily_schedule.json'), default={}, expected_type=dict)
     return {'enabled': config.get('enabled') is True, 'consentAt': config.get('consentAt'),
             'times': ['18:30', '19:30', '20:30'], 'scope': 'TWSE／TPEx 官方批次日線及法人、Yahoo 大盤日線及個股還原快照、既有官方研究續補（最多前月與當月原始收據及公司行動）',
-            'lastSources': load_json(str(data / 'stock_daily_sources.json'), default={}, expected_type=dict)}
+            'lastSources': load_json(str(data / 'stock_daily_sources.json'), default={}, expected_type=dict),
+            'lastGapCatchUp': load_json(str(data / 'stock_daily_gap_catchup.json'), default={}, expected_type=dict)}
 
 
 def configure_schedule(enabled):
@@ -90,6 +91,39 @@ def schedule_tick(current):
     atomic_write_json(str(filename), attempts, backup=True)
     submitted = job_queue.submit('stock-daily-sources', lambda: scheduled_update(current.date().isoformat()),
                                  meta={'sessionDate': current.date().isoformat(), 'consentAt': config['consentAt']})
+    if submitted.get('queued'):
+        attempts[key]['status'] = 'queued'
+        atomic_write_json(str(filename), attempts, backup=True)
+        return True
+    return False
+
+
+GAP_JOB = 'stock-daily-gap-catchup'
+
+
+def gap_catch_up_job(current):
+    """補回最近 31 日內全市場日線偏低的交易日（官方 TWSE／TPEX 指定日期，沿用 台股日線.run_update）。"""
+    import 全市場日線缺口 as gap
+    result = gap.catch_up(Path(datastore.DB_PATH), current)
+    atomic_write_json(str(Path(datastore.DB_PATH).parent / 'stock_daily_gap_catchup.json'), result, backup=True)
+    return result
+
+
+def catch_up_tick(current):
+    """每個日曆日最多提交一次缺口追補。刻意不受平日 14:00～21:00 的排程窗口限制：
+    服務在窗口內沒跑，隔天、週末或重啟後也要能補。與每日來源更新同一個擁有者設定與同一批官方來源。"""
+    if not schedule_status()['enabled']:
+        return False
+    key = 'gap/' + current.date().isoformat()
+    filename = Path(datastore.DB_PATH).parent / 'stock_daily_attempts.json'
+    attempts = load_json(str(filename), default={}, expected_type=dict)
+    if key in attempts:
+        return False
+    # 先留下收據再交佇列，避免工作已外送、程序重啟卻還沒有收據。
+    attempts[key] = {'queuedAt': current.isoformat(), 'run': GAP_JOB, 'status': 'reserved'}
+    atomic_write_json(str(filename), attempts, backup=True)
+    submitted = job_queue.submit(GAP_JOB, lambda: gap_catch_up_job(current),
+                                 meta={'sessionDate': current.date().isoformat(), 'externalCalls': '官方 TWSE／TPEX 指定日期日線'})
     if submitted.get('queued'):
         attempts[key]['status'] = 'queued'
         atomic_write_json(str(filename), attempts, backup=True)
@@ -310,6 +344,11 @@ def start_daemon():
             except Exception:
                 import logging
                 logging.getLogger(__name__).exception('每日證據結報檢查失敗')
+            try:
+                catch_up_tick(current)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception('全市場日線缺口追補檢查失敗')
             if current.weekday() < 5 and 14 <= current.hour < 21:
                 try:
                     schedule_tick(current)

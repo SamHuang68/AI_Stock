@@ -263,7 +263,8 @@ def import_day(db: Path, exchange: str, day: date, records: list[dict], digest: 
         conn.execute('INSERT OR REPLACE INTO daily_imports VALUES(?,?,?,?,?)', (exchange, day.isoformat(), len(records), digest, retrieved))
 
 
-def run_update(db: Path, *, start: date | None = None, now: datetime | None = None, fetch=get_json, refresh_existing: bool = False, check=lambda: None) -> dict:
+def run_update(db: Path, *, start: date | None = None, now: datetime | None = None, fetch=get_json, refresh_existing: bool = False, check=lambda: None, historical: bool = False) -> dict:
+    """historical=True 用於補歷史缺口日：只匯入指定交易日，不覆寫每日更新狀態、不新增研究觀察、不延長公司行動核對。"""
     db = db.resolve()
     lock = acquire_daemon_lock('official-daily-bars', lock_dir=db.parent / 'runtime_locks')
     if lock is None:
@@ -285,6 +286,8 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
             cancelled = True
             raise
     def save():
+        if historical:
+            return
         with closing(sqlite3.connect(db, timeout=30)) as conn, conn:
             conn.execute('INSERT OR REPLACE INTO daily_update_state VALUES(1,?)', (json.dumps(state, ensure_ascii=False),))
     try:
@@ -351,7 +354,8 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
         state['latestSessions'] = latest
         # 已建立的研究股票每日延長公司行動核對區間，無完整核對則保持舊涵蓋日期。
         with closing(sqlite3.connect(db)) as conn, conn:
-            research = conn.execute("SELECT symbol,end_date FROM action_coverage WHERE market='TW'").fetchall()
+            research = [] if historical else conn.execute("SELECT symbol,end_date FROM action_coverage WHERE market='TW'").fetchall()
+            imported_target = {r[0] for r in conn.execute('SELECT exchange FROM daily_imports WHERE session_date=?', (target.isoformat(),))}
         for symbol, end in research:
             check_active()
             if end < target.isoformat():
@@ -361,9 +365,15 @@ def run_update(db: Path, *, start: date | None = None, now: datetime | None = No
                     if cancelled:
                         raise
                     state['failures'].append({'symbol': symbol, 'reason': str(exc)[:180]})
-        state['ok'] = not state['failures'] and all(latest.get(ex) == target.isoformat() for ex in ('TWSE', 'TPEX'))
+        if historical:
+            # 回補較早的日子時，「最新匯入日」必然晚於目標日，改以目標日兩個交易所都已匯入判定。
+            state['ok'] = not state['failures'] and {'TWSE', 'TPEX'} <= imported_target
+        else:
+            state['ok'] = not state['failures'] and all(latest.get(ex) == target.isoformat() for ex in ('TWSE', 'TPEX'))
         state['status'] = '已更新' if state['ok'] else '資料不完整'
-        if state['ok']:
+        if historical:
+            state['researchShadow'] = {'status': '回補略過', 'reason': '歷史日期回補不新增研究觀察'}
+        elif state['ok']:
             # 先提交已完成狀態，供純本機研究的 freshness gate 使用。
             save()
             check_active()
