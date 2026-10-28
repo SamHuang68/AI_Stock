@@ -1,3 +1,16 @@
+## 2026-10-28 補記 793f04a 發布狀態（含 #270、#272、#273）
+
+- 基底：`793f04a094d7a0f976dd22d84714d1d7e6724032`（origin/main）；分支 `claude/revision-793f04a-release`。
+- 發布：Sam 2026-10-28「push & deploy」。發布版為 `793f04a094d7a0f976dd22d84714d1d7e6724032`（含 #270 測試修正、#271／#274 文件、#272 ETF 目錄載入結構驗證、#273 全市場日線缺口偵測與自動追補），release id `793f04a094d7`；前一版 `abf4c98eb82d1d1a232b4565ec4a3791f001547f`。「push」部分：發布前 AI_Stock 與共用記憶皆領先 0、落後 0，沒有未推送的提交。
+- 流程：stage `tests: passed`（組合驗證計畫涵蓋 `abf4c98→793f04a` 全部程式變更）→ 停正式站與孤兒後端 → 停止後備份 14 個 SQLite（完整性 ok）→ promote（`data/` 前後皆 324 項）→ 啟動排程與本機。
+- 實測：兩端 `runtimeCommit` 皆為 `793f04a…`，閘道 `isolated-host`；兩端 `/sectors?mkt=TW` 56 列；本機 `/selftest` 21／21。**#273 實機生效**：兩端每日來源更新皆已啟用且有觀察帳本，啟動後當日追補工作已排隊並執行，結果檔 `stock_daily_gap_catchup.json` 顯示 `missing: []`、`attempted: 0`、`remaining: 0`。
+- 未驗證：自動追補「真的補回缺口日」的路徑沒有在實機觸發過（目前沒有缺口）；#272 的實機載入沒有另外對照輸出；閘道／Tailscale 端版本（需 Owner token）、手機尺寸畫面。
+- 本機自行停止（未解決）：發布時本機 18432 已不在，今天兩度自行停止（約 10:16 後、15:58 後）。已排除：伺服器程式沒有自行結束的路徑、系統記憶體充足（97 GB、可用 22 GB；伺服器約 256 MB）、沒有資源耗盡或程序崩潰事件、沒有睡眠或重開機（上次開機 10-14）、啟動器沒有監看迴圈（伺服器啟動後是無人看管的獨立程序）；Windows 事件記錄中的 `IsolatedUserMode` 是 Windows Hello 的 `NgcIso.exe` 例行啟動，每天固定 24～37 次，與停止無關。原因仍不明。已加只讀哨兵（`AI-Workspace/docs/stock-terminal/local-watch/watch_local.ps1`，不在 Git 內）：盯住伺服器程序，一結束就記錄時間、結束碼與當時的程序／事件快照到 `exit-log.txt`。第一版哨兵以 `Get-Process` 取結束碼，在哨兵不是父程序時會得到空值並誤報為正常退出，已改用 Win32 API 並以「自己 exit 7、Stop-Process、taskkill」三種情況驗證區分正確。哨兵本身也是一個無人看管的背景程序，不會重啟伺服器。
+- 驗證：只改文件；`tests.test_dist_scrub` 通過。
+- 發布狀態：文件變更，不涉及發布。
+
+---
+
 ## 2026-10-28 補記 #272、#273 合併狀態與缺口後續調查
 
 - 基底：`066d13debea113d7d73e315d3d23a0ac75af879c`（origin/main）；分支 `claude/revision-272-273-status`。
