@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "066d13debea113d7d73e315d3d23a0ac75af879c",
+  "baseCommit": "793f04a094d7a0f976dd22d84714d1d7e6724032",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
