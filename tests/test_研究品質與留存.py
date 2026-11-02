@@ -134,6 +134,23 @@ class AdjustmentTests(unittest.TestCase):
         self.assertEqual(out['results']['2330']['status'], 'completed')
         self.assertEqual(fetch.call_count, 1)
 
+    def test_closed_session_missing_from_candidate_does_not_reject_the_snapshot(self):
+        """舊快照含休市日（2026-09-19 週六）、供應商候選沒有：改存候選；缺開市日仍照舊拒絕。"""
+        pack = self.snapshot_fixture(('2330',))
+        saturday = int(datetime(2026, 9, 19, 9, tzinfo=ss._TZ['TW']).timestamp())
+        old = {**pack, 'timestamps': [saturday] + pack['timestamps'][:3], 'quoteClose': [10] * 4,
+               'adjclose': [9] * 4, 'fetchedAt': 1}
+        adjusted.save_snapshot('2330', 'TW', old)
+        with patch.object(datastore, 'fetch_yahoo_daily', return_value=pack):
+            out = adjusted.refresh_snapshots(['2330'], expected_day='2026-09-24')
+        result = out['results']['2330']
+        self.assertNotIn('rejectedSnapshot', result)
+        self.assertTrue(result['savedSnapshot'])
+        with datastore.read_snapshot() as conn:
+            saved = adjusted.load_snapshot(conn, '2330')
+        self.assertEqual(saved['fetchedAt'], 2)
+        self.assertNotIn('2026-09-19', {row['date'] for row in saved['rows']})
+
     def test_new_internal_gap_or_truncated_start_cannot_replace_old_snapshot(self):
         pack = self.snapshot_fixture(('2330',))
         old = {**pack, 'timestamps': pack['timestamps'][:3], 'quoteClose': [10] * 3,
