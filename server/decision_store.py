@@ -7,7 +7,12 @@ import os
 import sqlite3
 import time
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from log_once import log_once
+
+TAIPEI = timezone(timedelta(hours=8))   # 台灣沒有日光節約時間
 
 
 def freeze(value):
@@ -30,6 +35,10 @@ def initialize(conn):
     conn.execute('CREATE TABLE IF NOT EXISTS decision_history('
                  'id INTEGER PRIMARY KEY AUTOINCREMENT,as_of TEXT,created_at INTEGER,market TEXT,'
                  'input_hash TEXT UNIQUE,regime TEXT,confidence REAL,completeness REAL,context_json TEXT)')
+    # decision_history 只是「最近 500 筆」的滾動緩衝（約 8.6 小時），不是歷史檔案；
+    # 研究要查的逐日情境標籤另存在這張表，每個台北日期一列，不受 500 筆上限清除。
+    conn.execute('CREATE TABLE IF NOT EXISTS decision_regime_daily('
+                 'day TEXT PRIMARY KEY,as_of TEXT NOT NULL,regime TEXT,confidence REAL,completeness REAL)')
     conn.execute('CREATE TABLE IF NOT EXISTS decision_commits('
                  'revision INTEGER PRIMARY KEY AUTOINCREMENT,snapshot_id TEXT UNIQUE NOT NULL,'
                  'context_json TEXT NOT NULL,inputs_json TEXT NOT NULL)')
@@ -83,13 +92,49 @@ def pending(path):
         'SELECT payload_json FROM decision_publish_intents ORDER BY sequence')]
 
 
+def taipei_day(as_of):
+    """as_of（UTC 的 Z 結尾、帶時區或無時區）→ (台北日期, UTC 標準字串)；無法解析回 None。無時區視為 UTC。"""
+    try:
+        moment = datetime.fromisoformat(str(as_of).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return (moment.astimezone(TAIPEI).date().isoformat(),
+            moment.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+
+
+def save_regime_daily(conn, as_of, regime, confidence, completeness):
+    """每個台北日期留最後一筆（as_of 最大者）；亂序到達的較舊紀錄不覆蓋較新的。"""
+    parsed = taipei_day(as_of)
+    if not parsed:
+        log_once('決策每日情境', f'asOf 無法解析，略過每日情境紀錄：{as_of!r}')
+        return
+    day, utc = parsed
+    conn.execute('INSERT INTO decision_regime_daily(day,as_of,regime,confidence,completeness) VALUES(?,?,?,?,?) '
+                 'ON CONFLICT(day) DO UPDATE SET as_of=excluded.as_of,regime=excluded.regime,'
+                 'confidence=excluded.confidence,completeness=excluded.completeness '
+                 'WHERE excluded.as_of>=decision_regime_daily.as_of', (day, utc, regime, confidence, completeness))
+
+
+def backfill_regime_daily(conn):
+    """每日表還是空的時，用現有的 decision_history 補一次；之後由 save_history 維護。"""
+    if conn.execute('SELECT 1 FROM decision_regime_daily LIMIT 1').fetchone():
+        return
+    for row in conn.execute('SELECT as_of,regime,confidence,completeness FROM decision_history ORDER BY id').fetchall():
+        save_regime_daily(conn, *row)
+
+
 def save_history(conn, context):
-    conn.execute('INSERT OR IGNORE INTO decision_history('
+    regime = context.get('regime') or {}
+    completeness = (context.get('dataQuality') or {}).get('completeness')
+    inserted = conn.execute('INSERT OR IGNORE INTO decision_history('
                  'as_of,created_at,market,input_hash,regime,confidence,completeness,context_json) '
                  'VALUES(?,?,?,?,?,?,?,?)', (
                      context.get('asOf'), int(time.time()), context.get('market'), context['inputHash'],
-                     (context.get('regime') or {}).get('id'), (context.get('regime') or {}).get('confidence'),
-                     (context.get('dataQuality') or {}).get('completeness'), encode(context)))
+                     regime.get('id'), regime.get('confidence'), completeness, encode(context))).rowcount
+    if inserted:
+        save_regime_daily(conn, context.get('asOf'), regime.get('id'), regime.get('confidence'), completeness)
 
 
 def commit(path, context, inputs, published_at):
@@ -99,6 +144,7 @@ def commit(path, context, inputs, published_at):
         with conn:
             initialize(conn)
             conn.execute('BEGIN IMMEDIATE')
+            backfill_regime_daily(conn)
             row = conn.execute('SELECT context_json,inputs_json FROM decision_commits WHERE snapshot_id=?',
                                (context['snapshotId'],)).fetchone()
             if row:

@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "2e84ebe725d6b7ba2896d02b20eeb07db6f2499f",
+  "baseCommit": "1735200b1125cdc07bbdf2ca2d8a69f7b23453bb",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -25,45 +25,35 @@
       ]
     },
     {
-      "id": "還原快照休市日與每日來源工作期限",
+      "id": "決策每日情境永久保留",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "還原快照候選缺少休市日不再被當成縮減既有涵蓋而拒收；每日來源與缺口追補工作的期限放寬到實際耗時之上。拒收開市日缺漏與截頭的條件、partial 判定與排程時段不變",
+      "reason": "新增 decision_regime_daily 保存逐日情境，regime_at_date 改讀此表（舊資料庫退回 decision_history）；decision_history 的寫入、500 筆上限與讀者不變",
       "targets": [
-        "tests.test_研究品質與留存",
-        "tests.test_全市場日線缺口",
-        "tests.test_forward_capture_pipeline",
-        "tests.test_全檢資料邊界",
-        "tests.test_研究缺口補完",
-        "tests.test_官方研究續補",
-        "tests.test_證據限制回報",
-        "tests.test_三項限制解方",
-        "tests.test_no_new_silent_exceptions",
-        "tests.test_server_startup_order",
-        "tests.test_job_queue_budget_cleanup"
+        "tests.test_決策每日情境",
+        "tests.test_決策持久提交",
+        "tests.test_conditional_expectation",
+        "tests.test_decision_context",
+        "tests.test_決策資料品質",
+        "tests.test_no_new_silent_exceptions"
       ],
       "changes": [
-        "server/個股還原研究.py",
-        "server/個股研究維護.py",
-        "tests/test_研究品質與留存.py",
-        "tests/test_全市場日線缺口.py"
+        "server/decision_store.py",
+        "server/conditional_expectation.py",
+        "tests/test_決策每日情境.py"
       ],
       "inputs": [
-        "server/個股還原研究.py",
-        "server/個股研究維護.py",
-        "server/job_queue.py",
-        "tests/test_研究品質與留存.py",
-        "tests/test_全市場日線缺口.py",
-        "tests/test_forward_capture_pipeline.py",
-        "tests/test_全檢資料邊界.py",
-        "tests/test_研究缺口補完.py",
-        "tests/test_官方研究續補.py",
-        "tests/test_證據限制回報.py",
-        "tests/test_三項限制解方.py",
+        "server/decision_store.py",
+        "server/conditional_expectation.py",
+        "server/decision_context.py",
+        "server/log_once.py",
+        "tests/test_決策每日情境.py",
+        "tests/test_決策持久提交.py",
+        "tests/test_conditional_expectation.py",
+        "tests/test_decision_context.py",
+        "tests/test_決策資料品質.py",
         "tests/test_no_new_silent_exceptions.py",
-        "tests/silent_except_baseline.json",
-        "tests/test_server_startup_order.py",
-        "tests/test_job_queue_budget_cleanup.py"
+        "tests/silent_except_baseline.json"
       ]
     }
   ]

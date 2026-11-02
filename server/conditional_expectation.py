@@ -341,17 +341,29 @@ def regime_at_date(
     *,
     decision_db_path: str = DECISION_DB_PATH,
 ) -> str:
-    """Point-in-time regime tag from decision_history (no future leakage)."""
+    """Point-in-time regime tag (no future leakage), 取該台北日期以前最後一天的最後一筆。
+
+    讀 decision_regime_daily（每個台北日期一列，永久保留）；舊資料庫尚無此表時退回只涵蓋約 8.6 小時的
+    decision_history 滾動緩衝。涵蓋範圍之前的日期查不到，回 UNKNOWN。
+    """
     if not os.path.isfile(decision_db_path):
         return 'UNKNOWN'
     target = as_of.isoformat()
     try:
         with closing(sqlite3.connect(decision_db_path, timeout=5)) as conn:
-            row = conn.execute(
-                'SELECT regime FROM decision_history '
-                'WHERE substr(as_of, 1, 10) <= ? ORDER BY as_of DESC LIMIT 1',
-                (target,),
-            ).fetchone()
+            try:
+                row = conn.execute(
+                    'SELECT regime FROM decision_regime_daily WHERE day <= ? ORDER BY day DESC LIMIT 1',
+                    (target,),
+                ).fetchone()
+            except sqlite3.OperationalError as exc:
+                if 'no such table' not in str(exc):
+                    raise
+                row = conn.execute(
+                    'SELECT regime FROM decision_history '
+                    'WHERE substr(as_of, 1, 10) <= ? ORDER BY as_of DESC LIMIT 1',
+                    (target,),
+                ).fetchone()
         return _normalize_regime(row[0] if row else None)
     except sqlite3.Error:
         return 'UNKNOWN'
