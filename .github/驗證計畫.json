@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "1735200b1125cdc07bbdf2ca2d8a69f7b23453bb",
+  "baseCommit": "b5174f04e221cbdc877dd7d8c1649281af83fde1",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -25,35 +25,27 @@
       ]
     },
     {
-      "id": "決策每日情境永久保留",
+      "id": "每日來源partial分兩層",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "新增 decision_regime_daily 保存逐日情境，regime_at_date 改讀此表（舊資料庫退回 decision_history）；decision_history 的寫入、500 筆上限與讀者不變",
+      "timeoutSeconds": 300,
+      "reason": "官方當日檔列出但無價的代號（unavailableSymbols）不再讓來源降級為 partial，改記在 noPriceSymbols；不在官方檔內（unconfirmedSymbols）、衝突與來源 partial 仍降級",
       "targets": [
-        "tests.test_決策每日情境",
-        "tests.test_決策持久提交",
-        "tests.test_conditional_expectation",
-        "tests.test_decision_context",
-        "tests.test_決策資料品質",
-        "tests.test_no_new_silent_exceptions"
+        "tests.test_三項限制解方",
+        "tests.test_全檢資料邊界",
+        "tests.test_全市場日線缺口",
+        "tests.test_研究品質與留存"
       ],
       "changes": [
-        "server/decision_store.py",
-        "server/conditional_expectation.py",
-        "tests/test_決策每日情境.py"
+        "server/個股每日資料.py",
+        "tests/test_三項限制解方.py"
       ],
       "inputs": [
-        "server/decision_store.py",
-        "server/conditional_expectation.py",
-        "server/decision_context.py",
-        "server/log_once.py",
-        "tests/test_決策每日情境.py",
-        "tests/test_決策持久提交.py",
-        "tests/test_conditional_expectation.py",
-        "tests/test_decision_context.py",
-        "tests/test_決策資料品質.py",
-        "tests/test_no_new_silent_exceptions.py",
-        "tests/silent_except_baseline.json"
+        "server/個股每日資料.py",
+        "server/個股研究維護.py",
+        "tests/test_三項限制解方.py",
+        "tests/test_全檢資料邊界.py",
+        "tests/test_全市場日線缺口.py",
+        "tests/test_研究品質與留存.py"
       ]
     }
   ]

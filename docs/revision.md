@@ -1,3 +1,22 @@
+## 2026-11-03 每日來源的 partial 分兩層：官方無價不降級
+
+- 基底：`b5174f04e221cbdc877dd7d8c1649281af83fde1`（origin/main，含 #276～#278）；分支 `claude/partial-two-tier`。實作與合併 SHA 待 PR 合併後補記。依據：Sam 2026-11-03 對「partial 分兩層」回覆「做」（此項會改變使用者看到的來源狀態，受影響項目列於下）。
+- 問題：`個股每日資料.run` 把 `unavailableSymbols` 非空一律降為 `partial`。`unavailableSymbols` 是官方當日檔「列出了代號、但開高低收為 `--`（沒有成交價）」的代號（2026-10-28：TWSE 7 檔、TPEx 26 檔，與官方檔逐檔核對過）——這是官方對該日的完整回答，不會等一會兒就變成有價，所以 TWSE／TPEx 日線永遠到不了 `completed`，整體 `stock_daily_sources.json` 長期是 `partial`，真正的缺口（代號不在官方檔內、來源衝突、來源本身回報 partial）被一個永遠存在的 `partial` 蓋住。原設計（`tests/test_三項限制解方.py` 舊斷言）把這些代號當成「暫時未到、重跑會補上」。
+- 修正（`server/個股每日資料.py`）：兩層。
+  - 第一層（資訊，不降級）：`unavailableSymbols`。仍保留在各來源的 `result.unavailableSymbols`，並新增 `state['noPriceSymbols']`（兩個交易所的聯集）供查閱。
+  - 第二層（缺口，維持 `partial`）：來源自己回報 `partial`、有 `conflicts`、代號不在官方檔內（`unconfirmedSymbols`，TWSE／TPEx 兩列都降級並列出）、來源失敗，以及其他來源（還原快照、官方研究續補等）的 `partial`。這些判定與測試都沒改。
+- **使用者看得到的改變（Sam 已同意）**：
+  - TWSE 日線、TPEx 日線兩個來源，當日只有無價代號時，狀態由 `partial` 變為 `completed`。
+  - 整體狀態仍會因下列原因維持 `partial`：`unconfirmedSymbols`（2026-10-29 調查時有 3 檔：00847B、1522A、8183，不在官方檔內，原因未明）、還原快照與官方研究續補未完成。所以**整體狀態不會立刻變成 `completed`**；要等那幾項解除。這是刻意的：不為了讓狀態好看而放寬第二層。
+  - 沒有欄位被移除：`unavailableSymbols` 與 `unconfirmedSymbols` 原樣保留，另增 `noPriceSymbols`。前端沒有讀取這些欄位（已搜尋 `src/`）。
+- 連帶行為：來源只剩無價代號時不再被視為未完成，同一天重跑會沿用已完成的 TWSE／TPEx 日線，不再重抓（原本會重抓）；`schedule_tick` 的「當天已完成就不再跑後續時段」的提前結束，仍只在整體 `completed` 時成立（還原快照要做完才算，見 #277 的說明），不會因此少做還原快照。
+- 沒有降級：第二層的所有判定、時段、來源與重試邏輯不變。
+- 驗證：`tests/test_三項限制解方.py` 的 `test_daily_sources_retry_missing_rows_without_refetching_completed_sources` 改為新行為（官方列出但無價的 2317 → 第一次即 `completed`、`noPriceSymbols == ['2317']`、第二次不重抓）；`tests/test_全檢資料邊界.py` 的「代號不在官方檔內 → partial、補齊後 completed」保持原斷言並通過；兩個測試模組共 21 案通過。
+- 未驗證：實機（發布後觀察 TWSE／TPEx 兩列是否變為 `completed`、`noPriceSymbols` 是否填入）。
+- 發布狀態：**未合併、未發布**。
+
+---
+
 ## 2026-11-03 條件期望的逐日市場情境改存永久的每日表
 
 - 基底：`cda001c9ffbfff900179a3cbdd3d21b60c87b37c`（origin/main）；分支 `claude/regime-history`。實作與合併 SHA 待 PR 合併後補記。依據：2026-10-29 唯讀調查（共用記憶 gotchas/0030 的 2026-10-29 補記），Sam 2026-11-03「照你建議執行」。
