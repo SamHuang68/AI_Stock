@@ -22,6 +22,9 @@ from 台股交易參考 import session, instrument
 ROOT = Path(__file__).resolve().parents[1]
 JOB = 'stock-research-maintenance'
 REPORT_JOB = 'stock-evidence-report'
+# 佇列預設 300 秒，但每日來源更新（官方日檔、還原快照 120 秒預算、全市場重算與證據報告）實測約 330～1540 秒；
+# 期限是合作式的，超過只會把完成的工作標成 timed_out 並丟棄回傳值，所以放寬到實際上限之上。
+SOURCES_TIMEOUT_SECONDS = 1800
 _thread = None
 
 
@@ -90,7 +93,8 @@ def schedule_tick(current):
     attempts[key] = {'queuedAt': current.isoformat(), 'run': 'stock-daily-sources', 'status': 'reserved'}
     atomic_write_json(str(filename), attempts, backup=True)
     submitted = job_queue.submit('stock-daily-sources', lambda: scheduled_update(current.date().isoformat()),
-                                 meta={'sessionDate': current.date().isoformat(), 'consentAt': config['consentAt']})
+                                 meta={'sessionDate': current.date().isoformat(), 'consentAt': config['consentAt']},
+                                 timeout=SOURCES_TIMEOUT_SECONDS)
     if submitted.get('queued'):
         attempts[key]['status'] = 'queued'
         atomic_write_json(str(filename), attempts, backup=True)
@@ -123,7 +127,8 @@ def catch_up_tick(current):
     attempts[key] = {'queuedAt': current.isoformat(), 'run': GAP_JOB, 'status': 'reserved'}
     atomic_write_json(str(filename), attempts, backup=True)
     submitted = job_queue.submit(GAP_JOB, lambda: gap_catch_up_job(current),
-                                 meta={'sessionDate': current.date().isoformat(), 'externalCalls': '官方 TWSE／TPEX 指定日期日線'})
+                                 meta={'sessionDate': current.date().isoformat(), 'externalCalls': '官方 TWSE／TPEX 指定日期日線'},
+                                 timeout=SOURCES_TIMEOUT_SECONDS)
     if submitted.get('queued'):
         attempts[key]['status'] = 'queued'
         atomic_write_json(str(filename), attempts, backup=True)

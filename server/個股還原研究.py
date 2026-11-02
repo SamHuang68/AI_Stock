@@ -135,7 +135,9 @@ def refresh_snapshots(symbols, *, expected_day=None, deadline=None, previous_att
         candidate = {**_snapshot_payload(pack, 'TW'), 'symbol': code}
         old_dates = {row['date'] for row in (previous or {}).get('rows', [])}
         candidate_dates = {row['date'] for row in candidate['rows']}
-        removed_dates = sorted(old_dates - candidate_dates)
+        # 舊快照若含休市日（例如曾被填充的颱風假），供應商候選沒有該日是正確的，不算縮減既有涵蓋。
+        from 台股交易參考 import session
+        removed_dates = sorted(day for day in old_dates - candidate_dates if session(day)['status'] != 'closed')
         appended = 0
         if append_missing:
             # 保留手動更新的缺日追加能力；既有日期不覆寫，不混接還原快照。

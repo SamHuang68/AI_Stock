@@ -198,6 +198,20 @@ class ScheduleWiringTests(unittest.TestCase):
             maintenance.configure_schedule(False)
             self.assertFalse(maintenance.catch_up_tick(saturday + timedelta(days=2)))
 
+    def test_long_running_source_jobs_get_a_timeout_above_the_queue_default(self):
+        """每日來源與缺口追補的實際耗時超過佇列預設 300 秒；期限不夠會把完成的工作標成 timed_out。"""
+        self.assertGreater(maintenance.SOURCES_TIMEOUT_SECONDS, 300)
+        monday = datetime(2026, 10, 26, 18, 40, tzinfo=TZ)
+        with patch.object(maintenance.job_queue, 'submit', return_value={'queued': True}) as submit, \
+                patch.object(maintenance, 'start_daemon'), \
+                patch.object(maintenance, 'session', return_value={'status': 'scheduled'}):
+            maintenance.configure_schedule(True)
+            self.assertTrue(maintenance.schedule_tick(monday))
+            self.assertTrue(maintenance.catch_up_tick(monday))
+        names = {call.args[0]: call.kwargs.get('timeout') for call in submit.call_args_list}
+        self.assertEqual(names, {'stock-daily-sources': maintenance.SOURCES_TIMEOUT_SECONDS,
+                                 maintenance.GAP_JOB: maintenance.SOURCES_TIMEOUT_SECONDS})
+
     def test_job_persists_a_visible_result_in_schedule_status(self):
         now = datetime(2026, 10, 28, 9, 0, tzinfo=TZ)
         summary = {'checkedAt': now.isoformat(), 'missing': ['2026-10-19'], 'attempted': [{'date': '2026-10-19', 'ok': True}], 'remaining': 0}

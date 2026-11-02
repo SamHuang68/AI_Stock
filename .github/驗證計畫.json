@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "cda001c9ffbfff900179a3cbdd3d21b60c87b37c",
+  "baseCommit": "2e84ebe725d6b7ba2896d02b20eeb07db6f2499f",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -25,23 +25,45 @@
       ]
     },
     {
-      "id": "本機啟動器listener擁有者被隱藏",
+      "id": "還原快照休市日與每日來源工作期限",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "Assert-LocalListeners 在 listener 擁有者被作業系統隱藏（OwningProcess=0）時改為依登記程序身分與 /health 核對；新增開機自啟的安裝腳本。外部 listener、公開綁定、PID 重用、不同命令的拒絕條件不變",
+      "reason": "還原快照候選缺少休市日不再被當成縮減既有涵蓋而拒收；每日來源與缺口追補工作的期限放寬到實際耗時之上。拒收開市日缺漏與截頭的條件、partial 判定與排程時段不變",
       "targets": [
-        "tests.test_local_release"
+        "tests.test_研究品質與留存",
+        "tests.test_全市場日線缺口",
+        "tests.test_forward_capture_pipeline",
+        "tests.test_全檢資料邊界",
+        "tests.test_研究缺口補完",
+        "tests.test_官方研究續補",
+        "tests.test_證據限制回報",
+        "tests.test_三項限制解方",
+        "tests.test_no_new_silent_exceptions",
+        "tests.test_server_startup_order",
+        "tests.test_job_queue_budget_cleanup"
       ],
       "changes": [
-        "scripts/start_local.ps1",
-        "scripts/install_local_startup.ps1",
-        "tests/test_local_release.py"
+        "server/個股還原研究.py",
+        "server/個股研究維護.py",
+        "tests/test_研究品質與留存.py",
+        "tests/test_全市場日線缺口.py"
       ],
       "inputs": [
-        "scripts/start_local.ps1",
-        "scripts/install_local_startup.ps1",
-        "scripts/local_release.py",
-        "tests/test_local_release.py"
+        "server/個股還原研究.py",
+        "server/個股研究維護.py",
+        "server/job_queue.py",
+        "tests/test_研究品質與留存.py",
+        "tests/test_全市場日線缺口.py",
+        "tests/test_forward_capture_pipeline.py",
+        "tests/test_全檢資料邊界.py",
+        "tests/test_研究缺口補完.py",
+        "tests/test_官方研究續補.py",
+        "tests/test_證據限制回報.py",
+        "tests/test_三項限制解方.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/silent_except_baseline.json",
+        "tests/test_server_startup_order.py",
+        "tests/test_job_queue_budget_cleanup.py"
       ]
     }
   ]
