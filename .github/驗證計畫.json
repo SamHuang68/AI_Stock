@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "793f04a094d7a0f976dd22d84714d1d7e6724032",
+  "baseCommit": "cda001c9ffbfff900179a3cbdd3d21b60c87b37c",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -22,6 +22,38 @@
       "inputs": [
         "docs/revision.md",
         "tests/test_dist_scrub.py"
+      ]
+    },
+    {
+      "id": "決策每日情境永久保留",
+      "kind": "unittest",
+      "timeoutSeconds": 600,
+      "reason": "新增 decision_regime_daily 保存逐日情境，regime_at_date 改讀此表（舊資料庫退回 decision_history）；decision_history 的寫入、500 筆上限與讀者不變",
+      "targets": [
+        "tests.test_決策每日情境",
+        "tests.test_決策持久提交",
+        "tests.test_conditional_expectation",
+        "tests.test_decision_context",
+        "tests.test_決策資料品質",
+        "tests.test_no_new_silent_exceptions"
+      ],
+      "changes": [
+        "server/decision_store.py",
+        "server/conditional_expectation.py",
+        "tests/test_決策每日情境.py"
+      ],
+      "inputs": [
+        "server/decision_store.py",
+        "server/conditional_expectation.py",
+        "server/decision_context.py",
+        "server/log_once.py",
+        "tests/test_決策每日情境.py",
+        "tests/test_決策持久提交.py",
+        "tests/test_conditional_expectation.py",
+        "tests/test_decision_context.py",
+        "tests/test_決策資料品質.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/silent_except_baseline.json"
       ]
     }
   ]

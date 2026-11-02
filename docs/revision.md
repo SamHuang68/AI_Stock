@@ -1,3 +1,20 @@
+## 2026-11-03 條件期望的逐日市場情境改存永久的每日表
+
+- 基底：`cda001c9ffbfff900179a3cbdd3d21b60c87b37c`（origin/main）；分支 `claude/regime-history`。實作與合併 SHA 待 PR 合併後補記。依據：2026-10-29 唯讀調查（共用記憶 gotchas/0030 的 2026-10-29 補記），Sam 2026-11-03「照你建議執行」。
+- 根因（證據：`server/decision_store.py` 的清除敘述、兩端 `decision_history.db`）：`decision_history` 是「最近 500 筆」的滾動緩衝（約每 62 秒一筆，只涵蓋約 8.6 小時；`LIMIT 500` 自 2026-08-17 的 `4f89131`），每次提交的同一交易內清除。研究端 `conditional_expectation.regime_at_date`（2026-09-07 加入）卻把它當成長期的逐日檔案查，對今天以前的日期一律查不到列、回 `UNKNOWN`；市場情境又是條件期望分箱 id 的一部分（`rsi14×devz×rs×inst3d×regime/v2`），所以歷史觀測全落在 `UNKNOWN` 分箱，與今天有真實情境的分箱對不上。沒有任何測試鎖定這個契約。
+- 修正：
+  - `decision_store.py` 新增表 `decision_regime_daily`（每個**台北**日期一列，永久保留，不受 500 筆上限清除）。`save_history` 在同一交易內寫入，每日只留 `as_of` 最大的一筆，較舊的亂序紀錄不覆蓋；`as_of` 一律轉為 UTC 標準字串比較（原本的 `substr(as_of,1,10)` 是 UTC 日期，與台北交易日在晚間差一天）。`as_of` 無法解析時以 `log_once` 記錄並略過，不讓提交失敗。
+  - 每日表為空時，`commit` 在交易內用現有的 `decision_history` 回補一次（只讀 `as_of`、`regime`、`confidence`、`completeness`，不讀大的 JSON 欄位）。
+  - `regime_at_date` 改讀 `decision_regime_daily`（取不晚於目標日的最後一天）；舊資料庫尚無此表時退回原本的 `decision_history` 查詢，行為與先前一致。涵蓋範圍之前的日期仍是 `UNKNOWN`，**不造假**。
+- 限制（誠實說明）：每日表只能從啟用日起累積，**無法回補過去**（舊列已被清除）；回補只涵蓋啟用當下緩衝內的約一天。在歷史累積足夠之前，條件期望的分箱因為情境是 id 的一部分，樣本數仍會偏低。是否在情境缺漏時改用不含情境的分箱（會改變統計定義與使用者看到的樣本數）是另一項決定，未處理。同一天的最後一筆包含收盤後的晚間 pulse，與原本取「當日最後一筆」的語意相同，未改。
+- 更正先前的說法：`CONFLICT` 是 `decision_context` 規則的最後 else 分支（`regime.conflict.v1`），是真實的情境值，不是缺值；缺列才是 `UNKNOWN`。
+- 沒有降級：`decision_history` 的寫入、500 筆上限、`/decision/history` 與其他讀者都不變；`shadow_multifactor` 也呼叫 `regime_at_date`，簽名與回傳型別不變。
+- 驗證：新增 `tests/test_決策每日情境.py` 9 案（滾動緩衝被清掉後逐日情境仍在、台北日期邊界、最後一筆勝出與亂序、`+08:00` 與 `Z` 混用、回補、無法解析的 `as_of`、涵蓋前回 `UNKNOWN`、舊資料庫退回、檔案不存在）；移除修正後 6 案失敗（已作對照）。`test_決策每日情境`＋`test_決策持久提交`＋`test_conditional_expectation`＋`test_decision_context`＋`test_決策資料品質`＋`test_no_new_silent_exceptions`＋`test_dist_scrub` 共 98 案通過。
+- 未驗證：正式站與本機實機（發布後第一次提交會回補並建表，大檔案的實際耗時未量測；回補只讀 500 列的 4 個欄位）。
+- 發布狀態：**未合併、未發布**。
+
+---
+
 ## 2026-10-28 補記 793f04a 發布狀態（含 #270、#272、#273）
 
 - 基底：`793f04a094d7a0f976dd22d84714d1d7e6724032`（origin/main）；分支 `claude/revision-793f04a-release`。
