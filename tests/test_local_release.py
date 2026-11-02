@@ -499,6 +499,14 @@ if (-not $blocked) {{throw '外部 listener 未拒絕'}}
 $blocked=$false
 try {{ Assert-LocalListeners @([pscustomobject]@{{LocalAddress='0.0.0.0';LocalPort=18432;OwningProcess=123}}) $proc $receipt $base $python }} catch {{ $blocked=$true }}
 if (-not $blocked) {{throw '公開綁定未拒絕'}}
+# 擁有者被作業系統隱藏（OwningProcess=0）：登記程序存活時放行，其餘條件仍拒絕。
+Assert-LocalListeners @([pscustomobject]@{{LocalAddress='127.0.0.1';LocalPort=18432;OwningProcess=0}}) $proc $receipt $base $python
+$blocked=$false
+try {{ Assert-LocalListeners @([pscustomobject]@{{LocalAddress='0.0.0.0';LocalPort=18432;OwningProcess=0}}) $proc $receipt $base $python }} catch {{ $blocked=$true }}
+if (-not $blocked) {{throw '擁有者隱藏時公開綁定未拒絕'}}
+$blocked=$false
+try {{ Assert-LocalListeners @([pscustomobject]@{{LocalAddress='127.0.0.1';LocalPort=18432;OwningProcess=0}}) $null $receipt $base $python }} catch {{ $blocked=$true }}
+if (-not $blocked) {{throw '擁有者隱藏且登記程序不存在時未拒絕'}}
 $health=[pscustomobject]@{{status='ok';runtimeCommit='abc';bind='127.0.0.1';port=18432;baseDir=$base;pythonExe=$python}}
 if (-not (Test-LocalHealth $health $base 'abc' $python)) {{throw '健康核對錯誤'}}
 if (Test-LocalHealth $health $base 'def' $python) {{throw '錯誤 SHA 未拒絕'}}

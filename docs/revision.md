@@ -1,3 +1,16 @@
+## 2026-11-03 本機開機自啟與 listener 擁有者被隱藏的容錯
+
+- 基底：`cda001c9ffbfff900179a3cbdd3d21b60c87b37c`（origin/main）；分支 `claude/local-startup`。實作與合併 SHA 待 PR 合併後補記。
+- 起因：2026-10-29 11:37 的 Windows 更新重開機（System 事件 1074，MoNotificationUx「計劃之中」）讓本機 18432 與哨兵一併結束，而本機沒有開機自啟，直到 10-30 13:30 才手動啟動，中間約 26 小時沒有服務（含 10-29 收盤後排程）。哨兵是一般程序，重開機時一起消失，所以 `exit-log.txt` 沒有結束事件；判斷程序是否結束須同時核對程序、`LastBootUpTime` 與系統事件。10-30 06:51 另有一次非預期關機（Kernel-Power 41、事件 6008），原因未查到。
+- 已做（不在 Git 內的機器設定，Sam 2026-11-03 授權「本機要開機自啟」）：註冊工作排程 `StockTerminal_Local_Host`，比照正式站 `StockTerminal_PrivateWeb_Host`：目前使用者、互動式登入、一般權限（不需管理員）、登入後延遲 60 秒（正式站 30 秒）；動作執行已安裝的 `start_local.ps1 -NoBrowser`，並以 Transcript 寫入 `StockTerminalLocal\logs\local_host_task.log`。重複執行無害：已在線時只核對身分與健康，不重啟。可用 `scripts/install_local_startup.ps1` 重建，加 `-Remove` 移除。
+- 實測發現的問題與根因：註冊後手動執行該工作，結束碼 1，訊息「18432 的程序不是已登記的本機 ST」。用唯讀診斷逐項比對，登記收據的 PID、建立時間、命令列、基底目錄、執行檔全部相符，不符的只有 listener 擁有者：這台機器（Windows 10.0.26300，10-29 更新後）對一般使用者回報**所有** listener 的 `OwningProcess` 為 0（13 個全為 0；`netstat -ano` 的 LISTENING 列 PID 也是 0；已建立連線的 PID 正常）。10-29 08:47 更新前同一個查詢仍回傳正確 PID。`Assert-LocalListeners` 要求擁有者等於登記 PID，所以在伺服器已在線時一律拒絕；冷啟動時則會在伺服器已啟動、就緒後的最後核對拋錯，伺服器仍在跑但結束碼為 1。工作排程環境與我的終端機結果相同，所以不是工具沙箱造成。
+- 修正（`scripts/start_local.ps1`）：`Assert-LocalListeners` 在擁有者為 0（被作業系統隱藏）時略過 PID 比對，其餘條件不變：位址必須是 `127.0.0.1`、埠必須是 18432，且登記程序身分（PID、建立時間、完整命令列、基底目錄、執行檔）必須符合；擁有者隱藏而登記程序不存在時仍拒絕。版本、資料目錄與執行檔由其後既有的 `/health` 核對（`Test-LocalHealth`，三條啟動路徑都有）。擁有者不為 0 時行為不變，外部 PID 的 listener 仍被拒。
+- 沒有降級：既有的拒絕條件（外部 listener、公開綁定、PID 重用、不同命令）都保留並仍有測試；只放寬「系統完全不提供擁有者」這一個無法比對的情形。`go.ps1`、`diagnose_tip.ps1`、`wavedeck\CHECK_WAVEDECK.ps1` 也讀 `OwningProcess`，本次未改，也未逐一驗證它們在擁有者為 0 時的行為。
+- 驗證：`tests.test_local_release` 的啟動器 PowerShell 測試 3 案通過，其中身分案例新增 3 個斷言（擁有者 0 放行、擁有者 0 且公開綁定拒絕、擁有者 0 且登記程序不存在拒絕）；原有的「PID 999 外部 listener 拒絕」「公開綁定拒絕」保留。安裝腳本以臨時任務名稱實測註冊與移除。`tests.test_launcher_safety` 在這台機器有 1 案失敗（`test_real_listener_round_trip_on_windows`，真實 listener 的擁有者查詢，與上述同一個作業系統行為），在未修改的 main 上同樣失敗，因此不屬於本次變更；該測試與 `go.ps1` 的開發啟動流程在這個作業系統版本上都受影響，本次未處理。**未實測**：真正重開機後由登入觸發的自動啟動（無法在不重開機下驗證）；修正版 `start_local.ps1` 在實機的行為（已安裝的副本要等 `local_release.py sync` 才更新，在那之前排程仍會以舊版執行，伺服器能起來但結束碼為 1）。
+- 發布狀態：**未合併、未發布**。
+
+---
+
 ## 2026-10-28 補記 793f04a 發布狀態（含 #270、#272、#273）
 
 - 基底：`793f04a094d7a0f976dd22d84714d1d7e6724032`（origin/main）；分支 `claude/revision-793f04a-release`。

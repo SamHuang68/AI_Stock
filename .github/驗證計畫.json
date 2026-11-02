@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "793f04a094d7a0f976dd22d84714d1d7e6724032",
+  "baseCommit": "cda001c9ffbfff900179a3cbdd3d21b60c87b37c",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -22,6 +22,26 @@
       "inputs": [
         "docs/revision.md",
         "tests/test_dist_scrub.py"
+      ]
+    },
+    {
+      "id": "本機啟動器listener擁有者被隱藏",
+      "kind": "unittest",
+      "timeoutSeconds": 600,
+      "reason": "Assert-LocalListeners 在 listener 擁有者被作業系統隱藏（OwningProcess=0）時改為依登記程序身分與 /health 核對；新增開機自啟的安裝腳本。外部 listener、公開綁定、PID 重用、不同命令的拒絕條件不變",
+      "targets": [
+        "tests.test_local_release"
+      ],
+      "changes": [
+        "scripts/start_local.ps1",
+        "scripts/install_local_startup.ps1",
+        "tests/test_local_release.py"
+      ],
+      "inputs": [
+        "scripts/start_local.ps1",
+        "scripts/install_local_startup.ps1",
+        "scripts/local_release.py",
+        "tests/test_local_release.py"
       ]
     }
   ]
