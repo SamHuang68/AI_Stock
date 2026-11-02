@@ -1,3 +1,19 @@
+## 2026-11-03 還原快照不再因休市日被拒收；每日來源與缺口追補的工作期限
+
+- 基底：`cda001c9ffbfff900179a3cbdd3d21b60c87b37c`（origin/main）；分支 `claude/daily-sources-fixes`。實作與合併 SHA 待 PR 合併後補記。依據：2026-10-29 唯讀調查（共用記憶 gotchas/0030 的 2026-10-29 補記），Sam 2026-11-03「照你建議執行」。
+- 還原快照（`server/個股還原研究.py`）：
+  - 現象：正式站還原快照每個時段下載約 760～1290 次、幾乎全被拒收，自 10-14 起沒有收斂；本機則三個時段剛好做完一天。
+  - 根因（證據：兩端 `stock_daily_sources.json`／`.jsonl` 與資料庫）：舊快照含 2026-07-10（巴威颱風臨時休市日），供應商候選沒有這一日，`removed_dates = 舊快照日期 − 候選日期` 非空就拒收（「新快照截短本機歷史或縮減既有涵蓋」）。被拒的 846 筆 `removedDates` 全是 `['2026-07-10']`。正式站日線另有 2317 根 07-10 填充列，本機只有 3 根，是兩端唯一已證實的差異。
+  - 修正：`removed_dates` 排除休市日（`台股交易參考.session(day)['status'] == 'closed'`，與同檔 `adjusted_segments` 既有的休市日略過同一契約）。開市日被移除、`truncated_start` 的拒收條件不變。兩端行事曆都標示 07-10 為「官方公告休市：巴威颱風臨時休市」。
+  - 預期影響（讀程式推得，未在實機驗證）：07-10 這類休市日不再讓候選被拒，候選會被存成新快照（不含休市日），同日內符合既有「當日已核對部分快照」條件時不重複下載。**不處理**正式站日線裡的 07-10 填充列（涉及資料庫寫入，未經同意不刪），因此那些股票的對齊狀態仍會是 `incompatible`（`missingDates` 含 07-10），還原快照回報預期仍是 `partial`，不會因此變成 `completed`；但快照會被保存，部分區段研究（`adjusted_segments` 已略過休市日）可用。每個交易日仍要為每檔重抓一次，預期吞吐量與本機相同。
+- 工作期限（`server/個股研究維護.py`）：`stock-daily-sources` 與 `stock-daily-gap-catchup` 原用佇列預設 300 秒，實測每日來源約 330～1540 秒；期限是合作式的，函式跑完才檢查，所以工作照常做完，只是被標成 `timed_out` 且回傳值被丟棄，狀態與證據報告誤判。新增 `SOURCES_TIMEOUT_SECONDS = 1800`，兩個工作提交時傳入。**沒有**拆分工作：全市場重算與證據報告仍在同一個工作內，單一 worker 仍會被占用約 6～12 分鐘，連帶延後 `stock-daily-observation`，這是已知殘留，另案。
+- 沒有降級：`partial` 的判定、時段、來源與使用者看得到的欄位都沒改。
+- 驗證：新增 2 案——`test_closed_session_missing_from_candidate_does_not_reject_the_snapshot`（舊快照含週六、候選沒有時改存候選；移除修正後該測試失敗，已作對照）、`test_long_running_source_jobs_get_a_timeout_above_the_queue_default`；`test_研究品質與留存`＋`test_全市場日線缺口` 44 案通過，相關回歸（`test_forward_capture_pipeline`、`test_全檢資料邊界`、`test_研究缺口補完`、`test_官方研究續補`、`test_證據限制回報`、`test_三項限制解方`、`test_no_new_silent_exceptions`、`test_server_startup_order`、`test_job_queue_budget_cleanup`）79 案通過。
+- 未驗證：在正式站實機上的收斂（需發布後觀察幾個時段的 `被拒收數` 與 `savedSnapshot`）；1800 秒是否足夠（目前實測上限約 1540 秒）。
+- 發布狀態：**未合併、未發布**。
+
+---
+
 ## 2026-10-28 補記 793f04a 發布狀態（含 #270、#272、#273）
 
 - 基底：`793f04a094d7a0f976dd22d84714d1d7e6724032`（origin/main）；分支 `claude/revision-793f04a-release`。
