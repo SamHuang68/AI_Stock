@@ -49,6 +49,7 @@
       '.st-ce-expired{padding:8px 9px;border:1px dashed rgba(148,163,184,.35);border-radius:6px;color:#94a3b8;' +
         'background:rgba(15,23,42,.45);font-size:10px;line-height:1.55;margin:4px 0 6px}' +
       '.st-ce-invalid{font-size:9px;color:#fbbf24;margin:2px 0 4px;line-height:1.45}' +
+      '.st-ce-fallback{font-size:9px;color:#fbbf24;margin:2px 0 4px;line-height:1.45}' +
       '.st-ce-foot{font-size:9px;color:#75869d;line-height:1.5;margin-top:4px}' +
       '.st-ce-loading{font-size:10px;color:#8da2ba;padding:6px 2px}' +
       '.st-ce-error{font-size:10px;color:var(--red,#ff7a76);padding:6px 2px}';
@@ -123,6 +124,14 @@
     }).join('');
   }
 
+  function fallbackHtml(card) {
+    var stats = card && card.statsBin;
+    if (!stats || stats.scope !== 'regime_agnostic') return '';
+    return '<div class="st-ce-fallback" data-ce-scope="regime_agnostic">市場情境歷史不足：下列統計改用不含情境的分箱（' +
+      esc(stats.binLabel || stats.binId || '') + '；相同技術條件的 ' + esc(String(stats.matchedObservations || 0)) +
+      ' 筆歷史觀測中 ' + esc(String(stats.regimeUnknownObservations || 0)) + ' 筆沒有情境標籤）</div>';
+  }
+
   function invalidHtml(card) {
     var invalid = (card && card.invalidIf) || [];
     if (!invalid.length) return '';
@@ -152,6 +161,7 @@
       '<div class="st-ce-tags">' + epistemicBadge('CONDITIONAL') +
       '<span class="st-ce-tag">Shadow · 研究</span><span class="st-ce-tag">' + esc(status) + '</span></div></div>' +
       '<div class="st-ce-bin">' + esc(card.binLabel || card.binId || '分箱待建立') + '</div>' +
+      fallbackHtml(card) +
       '<div class="st-ce-asof">asOf · ' + asOfLine(card) + '</div>';
     if (expired) {
       html += '<div class="st-ce-expired">資料過期 · 不適合作為預測參考' +

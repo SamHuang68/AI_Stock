@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "1735200b1125cdc07bbdf2ca2d8a69f7b23453bb",
+  "baseCommit": "b5174f04e221cbdc877dd7d8c1649281af83fde1",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -25,35 +25,63 @@
       ]
     },
     {
-      "id": "決策每日情境永久保留",
+      "id": "條件期望情境缺漏改用不含情境的分箱",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "新增 decision_regime_daily 保存逐日情境，regime_at_date 改讀此表（舊資料庫退回 decision_history）；decision_history 的寫入、500 筆上限與讀者不變",
+      "timeoutSeconds": 300,
+      "reason": "含情境的分箱樣本不足、且同技術條件的歷史觀測多數缺情境標籤時，統計改用不含情境的分箱並在 statsBin 標明；其餘情況的數字與原本相同",
       "targets": [
-        "tests.test_決策每日情境",
-        "tests.test_決策持久提交",
         "tests.test_conditional_expectation",
-        "tests.test_decision_context",
-        "tests.test_決策資料品質",
-        "tests.test_no_new_silent_exceptions"
+        "tests.test_conditional_expectation_p1",
+        "tests.test_shadow_multifactor"
       ],
       "changes": [
-        "server/decision_store.py",
         "server/conditional_expectation.py",
-        "tests/test_決策每日情境.py"
+        "tests/test_conditional_expectation.py"
       ],
       "inputs": [
-        "server/decision_store.py",
         "server/conditional_expectation.py",
-        "server/decision_context.py",
-        "server/log_once.py",
-        "tests/test_決策每日情境.py",
-        "tests/test_決策持久提交.py",
+        "server/conditional_expectation_p1.py",
+        "server/shadow_multifactor.py",
         "tests/test_conditional_expectation.py",
-        "tests/test_decision_context.py",
-        "tests/test_決策資料品質.py",
-        "tests/test_no_new_silent_exceptions.py",
-        "tests/silent_except_baseline.json"
+        "tests/test_conditional_expectation_p1.py",
+        "tests/test_shadow_multifactor.py"
+      ]
+    },
+    {
+      "id": "條件期望前端顯示備援分箱",
+      "kind": "node",
+      "timeoutSeconds": 60,
+      "reason": "卡片在統計改用不含情境的分箱時顯示說明與觀測數；其餘顯示不變",
+      "targets": [
+        "tests/conditional_expectation_v5_selftest.js"
+      ],
+      "changes": [
+        "src/ui/conditional_expectation_v5.js",
+        "tests/conditional_expectation_v5_selftest.js"
+      ],
+      "inputs": [
+        "src/ui/conditional_expectation_v5.js",
+        "tests/conditional_expectation_v5_selftest.js",
+        "build_v2.py"
+      ]
+    },
+    {
+      "id": "打包產物與原始碼一致",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "src 變更後重建 stock_terminal_v2.html",
+      "targets": [
+        "tests.test_bundle_fresh",
+        "tests.test_build_reproducibility"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "stock_terminal_v2.html",
+        "build_v2.py",
+        "tests/test_bundle_fresh.py",
+        "tests/test_build_reproducibility.py"
       ]
     }
   ]

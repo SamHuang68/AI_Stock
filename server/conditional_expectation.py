@@ -30,6 +30,8 @@ from postmarket_report import tech_summary_from_bars
 
 CONTRACT_VERSION = 1
 BIN_MODEL_ID = 'rsi14×devz×rs×inst3d×regime/v2'
+# 情境標籤缺漏時的備援分箱：同樣的技術條件，不含市場情境。
+BIN_MODEL_ID_NO_REGIME = 'rsi14×devz×rs×inst3d/v2'
 MODEL_VERSION = 'st-conditional-expectation/pit-v2'
 RETURN_CONVENTION = 'close_to_close_same_symbol'
 EPISTEMIC = 'CONDITIONAL'
@@ -289,6 +291,10 @@ def _make_bin_id(
     return f'{rsi_key}_{devz_key}_{rs_key}_inst{inst_key}_reg{regime_key}'
 
 
+def _make_bin_id_no_regime(rsi_key: str, devz_key: str, rs_key: str, inst_key: str) -> str:
+    return f'{rsi_key}_{devz_key}_{rs_key}_inst{inst_key}'
+
+
 def _make_bin_label(
     rsi_label: str,
     devz_label: str,
@@ -396,12 +402,15 @@ def bin_state(
     inst_key, inst_label = _inst3d_sign(chip_inst_by_date or {}, as_of_date)
     regime_key = _normalize_regime(regime_id or regime_at_date(as_of_date))
     bin_id = _make_bin_id(rsi_key, devz_key, rs_key, inst_key, regime_key)
+    enough_bars = len(pit_bars) >= MIN_OBSERVATION_BARS
     return {
         'symbol': code,
         'asOfDate': as_of_date.isoformat(),
         'binModelId': BIN_MODEL_ID,
-        'binId': bin_id if len(pit_bars) >= MIN_OBSERVATION_BARS else None,
+        'binId': bin_id if enough_bars else None,
         'binLabel': _make_bin_label(rsi_label, devz_label, rs_label, inst_label, regime_key),
+        'binIdNoRegime': _make_bin_id_no_regime(rsi_key, devz_key, rs_key, inst_key) if enough_bars else None,
+        'binLabelNoRegime': ' · '.join((rsi_label, devz_label, rs_label, inst_label)),
         'features': {
             'rsi14': (tech or {}).get('rsi14'),
             'rsiBand': rsi_key,
@@ -511,6 +520,8 @@ def collect_pit_observations(
             'barIndex': idx,
             'sessionDate': session.isoformat(),
             'binId': state['binId'],
+            'binIdNoRegime': state.get('binIdNoRegime'),
+            'regime': state['features'].get('regime'),
             'binModelId': state['binModelId'],
             'features': state['features'],
             'outcomes': outcomes,
@@ -551,9 +562,11 @@ def aggregate_horizon_stats(
 def aggregate_bin_stats(
     observations: list[dict[str, Any]],
     bin_id: str,
+    *,
+    key: str = 'binId',
 ) -> dict[str, dict[str, Any]]:
-    """Aggregate conditional stats for one bin across all horizons."""
-    matched = [row for row in observations if row.get('binId') == bin_id]
+    """Aggregate conditional stats for one bin across all horizons（key 指定比對哪個分箱欄位）."""
+    matched = [row for row in observations if row.get(key) == bin_id]
     horizons: dict[str, dict[str, Any]] = {}
     for horizon in HORIZONS:
         key = str(horizon)
@@ -630,7 +643,44 @@ def compute_card_stats(
         regime_lookup=lookup,
     )
     horizons = aggregate_bin_stats(observations, state['binId'])
+    fallback = _regime_agnostic_fallback(observations, state, horizons)
+    if fallback:
+        horizons, state['statsBin'] = fallback
     return state, horizons
+
+
+def _regime_agnostic_fallback(
+    observations: list[dict[str, Any]],
+    state: dict[str, Any],
+    horizons: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]] | None:
+    """含情境的分箱樣本不足、且同技術條件的歷史觀測多數缺情境標籤時，改用不含情境的分箱。
+
+    情境標籤只能從 decision_regime_daily 開始累積，更早的歷史觀測是 UNKNOWN，與今天有情境的分箱永遠對不上。
+    不足但情境標籤齊全（真的很少見的情境）不會改用，避免掩蓋情境的影響；改用時一律標明。
+    """
+    if all((horizons.get(str(h)) or {}).get('n', 0) >= MIN_SAMPLE for h in HORIZONS):
+        return None
+    plain_id = state.get('binIdNoRegime')
+    if not plain_id:
+        return None
+    matched = [row for row in observations if row.get('binIdNoRegime') == plain_id]
+    unknown = sum(1 for row in matched if row.get('regime') == 'UNKNOWN')
+    if not matched or unknown * 2 <= len(matched):
+        return None
+    plain = aggregate_bin_stats(observations, plain_id, key='binIdNoRegime')
+    if sum(plain[str(h)]['n'] for h in HORIZONS) <= sum((horizons.get(str(h)) or {}).get('n', 0) for h in HORIZONS):
+        return None
+    return plain, {
+        'scope': 'regime_agnostic',
+        'reason': 'regime_history_missing',
+        'binModelId': BIN_MODEL_ID_NO_REGIME,
+        'binId': plain_id,
+        'binLabel': state.get('binLabelNoRegime'),
+        'matchedObservations': len(matched),
+        'regimeUnknownObservations': unknown,
+        'regimeBinSamples': {str(h): (horizons.get(str(h)) or {}).get('n', 0) for h in HORIZONS},
+    }
 
 
 def _invalid_if(gate: dict[str, Any], horizons: dict[str, dict[str, Any]], *, has_bin: bool) -> list[str]:
@@ -714,6 +764,7 @@ def build_card(
         'symbol': code,
         'binId': state.get('binId'),
         'binLabel': state.get('binLabel'),
+        'statsBin': state.get('statsBin') or {'scope': 'with_regime', 'binModelId': BIN_MODEL_ID, 'binId': state.get('binId')},
         'features': state.get('features') or {},
         'horizons': horizons,
         'horizonGroups': horizon_groups(horizons, gate, has_bin=has_bin),
@@ -734,5 +785,6 @@ def build_card(
         'notes': [
             '規則分箱歷史條件期望（shadow research）；不可覆寫 DecisionContext 曝險或信心分數。',
             'ratesAvailable=false 表示樣本數未達 minimumSample，統計 withheld。',
+            'statsBin.scope=regime_agnostic 表示市場情境歷史不足，統計改用不含情境的分箱；情境標籤只從 decision_regime_daily 開始累積。',
         ],
     }
