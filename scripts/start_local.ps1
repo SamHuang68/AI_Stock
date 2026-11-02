@@ -40,8 +40,11 @@ function Test-ManagedLocalIdentity($Process, $Receipt, [string]$BaseDir, [string
 function Assert-LocalListeners($Listeners, $Process, $Receipt, [string]$BaseDir, [string]$Python) {
     foreach ($listener in @($Listeners)) {
         if (-not $listener) { continue }
+        # 部分 Windows 版本對一般使用者隱藏 listener 的擁有者，OwningProcess 會是 0。
+        # 此時無法比對 PID；仍要求位址與埠、登記程序身分都符合，版本與資料目錄由其後的 /health 核對。
+        $ownerHidden = [int]$listener.OwningProcess -eq 0
         if ($listener.LocalAddress -ne '127.0.0.1' -or [int]$listener.LocalPort -ne 18432 -or
-            [int]$listener.OwningProcess -ne [int]$Receipt.pid -or
+            (-not $ownerHidden -and [int]$listener.OwningProcess -ne [int]$Receipt.pid) -or
             -not (Test-ManagedLocalIdentity $Process $Receipt $BaseDir $Python)) {
             throw '18432 的程序不是已登記的本機 ST；未停止程序或修改資料。'
         }
