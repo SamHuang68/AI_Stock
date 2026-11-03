@@ -175,7 +175,7 @@ class ExplainTests(unittest.TestCase):
 
     def test_401_explains_recovery_without_retry_or_secret_logging(self):
         sent = []
-        secret = 'sk-ant-api03-private-test-secret'
+        secret = 'sk-' + 'ant-api03-private-test-secret'   # 分段組成，避免分享封存的金鑰掃描器把測試字串當成真金鑰
         private_body = '供應商錯誤本文不得留存'
 
         def denied(payload):
