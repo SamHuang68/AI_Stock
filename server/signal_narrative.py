@@ -69,8 +69,9 @@ def _trace(event: str, request_id: str, **details: Any) -> None:
         import ai_local
         ai_local.trace_event(event, request_id=request_id, mode='cloud-narrative',
                              provider='anthropic', **details)
-    except Exception:
-        pass  # 診斷寫入失敗不能中斷規則解讀。
+    except Exception as error:   # 診斷寫入失敗不能中斷規則解讀，但要留下限頻記錄。
+        from log_once import log_once
+        log_once('signal-narrative-trace', '診斷寫入失敗', exc=error)
 
 
 def _requires_workspace(exc: urllib.error.HTTPError) -> bool:
@@ -81,7 +82,7 @@ def _requires_workspace(exc: urllib.error.HTTPError) -> bool:
         body = json.loads(exc.read(4096).decode('utf-8', 'replace'))
         message = str((body.get('error') or {}).get('message') or '').lower()
         return 'anthropic-workspace-id' in message and 'not scoped to a workspace' in message
-    except Exception:
+    except (OSError, ValueError, AttributeError):   # 讀不到本文或本文不是預期的 JSON：視為不是工作區要求
         return False
 
 
