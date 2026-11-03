@@ -1,3 +1,18 @@
+## 2026-11-03 補記 f7ef0fc 發布狀態（含 #279、#280、#281）
+
+- 基底：`f7ef0fc92396aa2d412f46a173c632fe30bfae24`（origin/main）；分支 `claude/revision-f7ef0fc-release`。
+- 授權：Sam 2026-11-03「合併並發布 #279 #280 #281」。
+- 合併（合併前 CI ubuntu、windows 皆通過）：#279 情境缺漏改用不含情境的分箱，實作 `28cec06`，合併 `c783db448b9911af392a302c445eb860164751be`；#280 每日來源 partial 分兩層，實作 `9729f70`（已含 main 同步），合併 `339032807f6e5638e18c40781118b751c865be1e`；#281 啟動器在查不到 listener 時仍能核對與 b5174f0 發布紀錄，實作 `3207172`（已含 main 同步），合併 `f7ef0fc92396aa2d412f46a173c632fe30bfae24`。main push CI（run 41563757757）對 `f7ef0fc` 成功。
+- 發布：release id `f7ef0fc92396`，前一版 `b5174f04e221cbdc877dd7d8c1649281af83fde1`。stage `tests: passed`（組合驗證計畫涵蓋 `b5174f0→f7ef0fc` 全部程式變更，5 個驗證指令）。流程與 b5174f0 相同（見上一則紀錄）：預檢 → 停止 → 停止後備份 14 個 SQLite → promote → 啟動 → 驗證。這次正式站的 supervisor 正常，沒有孤兒程序。
+- 實測：正式站 2026-11-03 10:06 停止、10:10 啟動（停機約 4 分鐘）；`/health` 的 `runtimeCommit` 與啟動證據皆為 `f7ef0fc…`，閘道 `isolated-host`、upstream 正常；發布前後 329 個資料檔雜湊完全一致。本機 18432 於 10:11～10:13 同步（本機資料已備份）並由修正後的 `start_local.ps1` 啟動，**結束碼 0**（#281 的修正在實機生效），`runtimeCommit` 為 `f7ef0fc…`，`/selftest` 21／21；未登入的閘道回 401。
+- 本次變更的實機效果**尚未觀察**（需等收盤後排程與下一輪時段）：#280 的 TWSE／TPEx 兩列是否變為 `completed`、`state.noPriceSymbols` 是否填入；#277 的還原快照被拒收數與 `savedSnapshot`、`stock-daily-sources` 是否不再 `timed_out`；#278 的 `decision_regime_daily` 是否逐日累積；#279 因旗標 `ST_SHADOW_CONDITIONAL_EXPECTATION` 兩端關閉，無使用者可見變化。
+- 未驗證：開機自啟（工作排程 `StockTerminal_Local_Host`）在真正重開機後的行為；閘道／Tailscale 端版本（需 Owner token）、手機尺寸畫面。
+- 已知未處理：`tests.test_launcher_safety` 一案（真實 listener 擁有者查詢）在這台機器失敗，於未修改的 main 同樣失敗；`go.ps1`、`diagnose_tip.ps1`、`CHECK_WAVEDECK.ps1` 讀取 listener 擁有者，在作業系統回報 0 時的行為未驗證；單一 worker 被 `stock-daily-sources` 占用的問題（全市場重算與證據報告未拆分）；正式站日線的 07-10 填充列未清除；8D 0030 仍 open。
+- 驗證：只改文件；`tests.test_dist_scrub` 通過。
+- 發布狀態：文件變更，不涉及發布。
+
+---
+
 ## 2026-11-03 補記 b5174f0 發布狀態；啟動器在查不到 listener 時仍能核對
 
 - 基底：`b5174f04e221cbdc877dd7d8c1649281af83fde1`（origin/main）；分支 `claude/launcher-hidden-listeners`。實作與合併 SHA 待 PR 合併後補記。
