@@ -144,6 +144,15 @@ def load_server_function(name, namespace):
     return namespace[name]
 
 
+def load_server_constant(name):
+    tree = ast.parse((Path(__file__).resolve().parents[1] / 'server/server.py').read_text(encoding='utf-8'))
+    node = next(n for n in tree.body if isinstance(n, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == name for target in n.targets))
+    namespace = {}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), '<正式類股常數>', 'exec'), namespace)
+    return namespace[name]
+
+
 def test_day_movers_denominator_keeps_unclassified_and_no_trade_members():
     raw = [
         {'Code': '2330', 'Name': '台積電', 'ClosingPrice': '100', 'Change': '0', 'TradeValue': '6000000000', 'Date': '20261002'},
@@ -193,7 +202,8 @@ def test_members_route_uses_full_snapshot_and_unavailable_us_without_fetch():
         calls.append(kwargs)
         return snapshot
     ns = {'json': json, 'parse_qs': parse_qs, 'urlparse': urlparse,
-          '_cache': Cache(), '_fetch_day_movers': fetch}
+          '_cache': Cache(), '_fetch_day_movers': fetch,
+          '_US_SECTOR_ETFS': load_server_constant('_US_SECTOR_ETFS')}
     method = load_server_function('_handle_sector_members', ns)
     class Handler:
         def _ok(self, data): self.result = json.loads(data)
@@ -209,3 +219,40 @@ def test_members_route_uses_full_snapshot_and_unavailable_us_without_fetch():
     method(handler)
     assert handler.result['scope'] == 'UNAVAILABLE' and handler.result['rows'] == []
     assert calls == [{'include_rows': True}]
+
+
+def test_us_members_come_from_etf_holdings_and_shared_batch_quotes():
+    seen = {}
+    def get_members(symbol, quote_fetcher):
+        seen['symbol'], seen['fetcher'] = symbol, quote_fetcher
+        return {'ok': True, 'market': 'US', 'sectorKey': symbol, 'rows': [{'code': 'NVDA'}], 'count': 1}
+    def quote_fetcher(symbols):
+        return []
+    fake_members = SimpleNamespace(get_members=get_members)
+    fake_pulse = SimpleNamespace(yf_batch_quotes=quote_fetcher)
+    ns = {'json': json, 'parse_qs': parse_qs, 'urlparse': urlparse, '_cache': None,
+          '_fetch_day_movers': lambda **kwargs: (_ for _ in ()).throw(AssertionError('美股成員不得抓台股快照')),
+          '_US_SECTOR_ETFS': load_server_constant('_US_SECTOR_ETFS')}
+    method = load_server_function('_handle_sector_members', ns)
+    class Handler:
+        def _ok(self, data): self.result = json.loads(data)
+        def _err(self, message, status): self.error = (message, status)
+    handler = Handler()
+    with patch.dict(sys.modules, {'美股類股成員': fake_members, 'pulse_global': fake_pulse}):
+        for sector, expected in (('科技 Technology', 'XLK'), ('科技', 'XLK'), ('xle', 'XLE'), ('不動產', 'XLRE')):
+            seen.clear()
+            handler.path = '/sector-members?market=US&sector=' + sector
+            method(handler)
+            assert seen['symbol'] == expected, (sector, seen)
+            assert seen['fetcher'] is quote_fetcher             # 沿用 Pulse 的批次報價，不另建抓取
+            assert handler.result['sector'] == sector and handler.result['rows'] == [{'code': 'NVDA'}]
+        seen.clear()
+        handler.path = '/sector-members?market=US&sector=Technology'   # 熱力圖沒有這個名稱
+        method(handler)
+        assert not seen and handler.result['scope'] == 'UNAVAILABLE' and handler.result['rows'] == []
+    def broken(symbol, quote_fetcher): raise RuntimeError('持股來源逾時')
+    with patch.dict(sys.modules, {'美股類股成員': SimpleNamespace(get_members=broken), 'pulse_global': fake_pulse}):
+        handler.path = '/sector-members?market=US&sector=' + '科技'
+        method(handler)
+        assert handler.result['ok'] is False and handler.result['rows'] == []
+

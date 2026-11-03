@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +13,25 @@ from server import ai_api, alert_daemon
 
 
 class SecretMigrationTests(unittest.TestCase):
+    def test_workspace_and_key_round_trip_together_without_plaintext(self):
+        with tempfile.TemporaryDirectory() as temp:
+            protected = Path(temp) / 'ai_key.bin'
+            with mock.patch.object(ai_api, '_AI_KEY_FILE', str(protected)), \
+                    mock.patch.object(ai_api, '_AI_KEY_LEGACY_FILE', str(Path(temp) / 'absent.txt')):
+                ai_api.save_ai_key('test-secret-value', workspace_id='wrkspc_test')
+                self.assertEqual(ai_api.load_ai_key(), 'test-secret-value')
+                self.assertEqual(ai_api.load_ai_workspace(), 'wrkspc_test')
+                if os.name == 'nt':
+                    self.assertNotIn(b'test-secret-value', protected.read_bytes())
+                ai_api.save_ai_key('test-secret-value')
+                self.assertEqual(ai_api.load_ai_workspace(), 'wrkspc_test')
+                ai_api.save_ai_key('replacement-secret')
+                self.assertEqual(ai_api.load_ai_workspace(), '')
+                ai_api.save_ai_key('replacement-secret', workspace_id='wrkspc_new')
+                ai_api.save_ai_key('')
+                self.assertEqual(ai_api.load_ai_key(), '')
+                self.assertEqual(ai_api.load_ai_workspace(), '')
+
     def test_legacy_ai_key_moves_out_of_plaintext(self):
         with tempfile.TemporaryDirectory() as temp:
             legacy = Path(temp) / 'ai_key.txt'

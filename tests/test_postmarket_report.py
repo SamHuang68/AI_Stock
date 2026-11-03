@@ -137,7 +137,8 @@ class PostmarketBase(unittest.TestCase):
         llm_gate.GATE_PATH = Path(self.tmp.name) / 'llm_gate.json'
         today = datetime.now().strftime('%Y%m%d')
         self._old_model_cache = dict(ai_api._MODEL_CACHE)
-        ai_api._MODEL_CACHE.update({'date': today, 'id': 'claude-sonnet-4-6'})
+        ai_api._MODEL_CACHE.update({'date': today, 'id': 'claude-sonnet-4-6',
+                                    'credential': ai_api._model_cache_key('sk-test')})
         pr.configure(
             bars_fn=lambda code: _bars(),
             chip_fn=lambda code: _chip(),
@@ -647,7 +648,8 @@ class GenerateReportTest(PostmarketBase):
     def test_resolve_model_hint_opus_optin_default_sonnet(self):
         today = datetime.now().strftime('%Y%m%d')
         old_opus = dict(ai_api._OPUS_CACHE)
-        ai_api._OPUS_CACHE.update({'date': today, 'id': 'claude-opus-4-1'})
+        ai_api._OPUS_CACHE.update({'date': today, 'id': 'claude-opus-4-1',
+                                   'credential': ai_api._model_cache_key('sk-test')})
         try:
             self.assertEqual(ai_api.resolve_model_hint('sk-test', 'sonnet'),
                              'claude-sonnet-4-6')

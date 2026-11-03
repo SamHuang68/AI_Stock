@@ -15,8 +15,21 @@ const sandbox = {
 };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
-vm.runInContext(source, sandbox);
+vm.runInContext(source.replace('renderInto: renderInto,', 'aiHtmlForTest: aiHtml, renderInto: renderInto,'), sandbox);
 const H = sandbox.StockHealthV5;
+const authTemplate = { source: 'template', sentences: [{ text: '原有規則證據仍保留。', evidenceIds: ['health.summary'] }],
+  note: 'AI 呼叫失敗（HTTP 401），改用規則模板' };
+const authMarkup = H.aiHtmlForTest(authTemplate);
+if (!authMarkup.includes('原有規則證據仍保留') || !authMarkup.includes('HTTP 401') ||
+    !authMarkup.includes('更新有效的 Anthropic 金鑰') || !authMarkup.includes('role="alert"')) {
+  throw new Error('驗證失敗須保留規則內容並提供金鑰修復提示');
+}
+if (H.aiHtmlForTest({ ...authTemplate, recovery: '<script>不可信內容</script>' }).includes('<script>')) {
+  throw new Error('金鑰修復提示必須安全跳脫');
+}
+if (H.aiHtmlForTest({ ...authTemplate, note: 'AI 呼叫失敗（HTTP 529），改用規則模板' }).includes('更新有效的 Anthropic 金鑰')) {
+  throw new Error('供應商忙碌不可誤判為金鑰無效');
+}
 
 const qualityMarkup = H.qualityHtml({ label: '資料需留意', referenceSession: '2026-09-24',
   items: [{ label: '籌碼', status: 'missing', impact: '只影響籌碼<script>' },

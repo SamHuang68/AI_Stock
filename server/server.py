@@ -2016,6 +2016,22 @@ def _twse_mis_index(ex_ch):
     return out
 
 
+# 熱力圖美股產業（SPDR Select Sector ETF）；熱力圖與類股成員共用同一份對照。
+_US_SECTOR_ETFS = (
+    ('XLE',  '能源 Energy'),
+    ('XLF',  '金融 Financials'),
+    ('XLK',  '科技 Technology'),
+    ('XLV',  '醫療 Healthcare'),
+    ('XLY',  '非必需消費 Cons. Discr.'),
+    ('XLP',  '必需消費 Cons. Staples'),
+    ('XLI',  '工業 Industrials'),
+    ('XLB',  '原物料 Materials'),
+    ('XLU',  '公用事業 Utilities'),
+    ('XLRE', '不動產 Real Estate'),
+    ('XLC',  '通訊 Communication'),
+)
+
+
 def _fetch_day_movers(n=8, target_date=None, include_rows=False):
     """輕量漲跌幅排行：TWSE STOCK_DAY_ALL + TPEx 上櫃日收盤。
        回 {ok,date,gainers:[{code,name,price,change,changePct,value}], losers:[...], source}。
@@ -4987,7 +5003,22 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
         if not sector or len(sector) > 160:
             self._err('請提供有效的類股名稱。', 400); return
         if market == 'US':
-            out = empty_payload('US', sector, '尚無可核對的完整美股產業成員來源。')
+            # 熱力圖的美股格子是 SPDR 產業 ETF；成員取 State Street 官方每日持股，行情沿用 Pulse 的批次報價。
+            known = {symbol for symbol, _ in _US_SECTOR_ETFS}
+            by_name = {name: symbol for symbol, name in _US_SECTOR_ETFS}
+            by_name.update({name.split(' ')[0]: symbol for symbol, name in _US_SECTOR_ETFS})
+            etf = sector.upper() if sector.upper() in known else by_name.get(sector)
+            if not etf:
+                out = empty_payload('US', sector, '尚無可核對的完整美股產業成員來源。')
+                self._ok(json.dumps(out, ensure_ascii=False).encode()); return
+            try:
+                from 美股類股成員 import get_members
+                from pulse_global import yf_batch_quotes
+                out = dict(get_members(etf, yf_batch_quotes))
+                out['sector'] = sector
+            except Exception as error:
+                print('[美股類股成員] 來源不可用：', type(error).__name__)
+                out = empty_payload('US', sector, '美股產業 ETF 持股與報價暫時無法取得，請稍後重新整理。', ok=False)
             self._ok(json.dumps(out, ensure_ascii=False).encode()); return
         refresh = qs.get('refresh', qs.get('nocache', ['0']))[0] in ('1', 'true', 'yes')
         key = 'sector-members-source:v2:' + datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d')
@@ -5026,21 +5057,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
             cached = _cache.get(key)
             if cached is not None:
                 self._ok(cached); return
-        SPDR = [
-            ('XLE',  '能源 Energy'),
-            ('XLF',  '金融 Financials'),
-            ('XLK',  '科技 Technology'),
-            ('XLV',  '醫療 Healthcare'),
-            ('XLY',  '非必需消費 Cons. Discr.'),
-            ('XLP',  '必需消費 Cons. Staples'),
-            ('XLI',  '工業 Industrials'),
-            ('XLB',  '原物料 Materials'),
-            ('XLU',  '公用事業 Utilities'),
-            ('XLRE', '不動產 Real Estate'),
-            ('XLC',  '通訊 Communication'),
-        ]
         sectors = []
-        for sym, name in SPDR:
+        for sym, name in _US_SECTOR_ETFS:
             try:
                 # 改 range=5d：用多根 K 線交叉驗證 Yahoo 落後狀況。
                 # 原本 range=1d + chartPreviousClose 在 Yahoo 雙伺服器資料不同步時

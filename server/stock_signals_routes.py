@@ -610,7 +610,8 @@ class StockSignalsRoutesMixin:
         market = infer_market(code, (body or {}).get('market'))
         try:
             result = analyze_symbol(code, market, allow_network=False)
-            narrative = signal_narrative.explain(result, ai_api.load_ai_key())
+            narrative = signal_narrative.explain(result, ai_api.load_ai_key(),
+                                                  request_id=self._ensure_trace_id())
         except Exception as exc:
             self._err(f'explain failed: {type(exc).__name__}', 500)
             return

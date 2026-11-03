@@ -2,6 +2,7 @@
 """AI 金鑰 / 模型 / Anthropic 呼叫（從 server.py 拆出 · H2 續）"""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -31,45 +32,80 @@ _ai_key_lock = threading.Lock()
 
 # 預設 Sonnet 家族（opus 為 opt-in）；/v1/models 查不到時的後備改為當代的 Sonnet 5
 DEFAULT_MODEL = 'claude-sonnet-5'
-_MODEL_CACHE = {'date': '', 'id': DEFAULT_MODEL}
-_OPUS_CACHE = {'date': '', 'id': ''}
+_MODEL_CACHE = {'date': '', 'id': DEFAULT_MODEL, 'credential': ''}
+_OPUS_CACHE = {'date': '', 'id': '', 'credential': ''}
 
 
-def load_ai_key() -> str:
+def _model_cache_key(api_key: Optional[str]) -> str:
+    """只供記憶體內辨識帳戶；不輸出、不留存金鑰或摘要。"""
+    return hashlib.sha256(json.dumps([api_key or '', _workspace_for(api_key)],
+                                     separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
+def _load_ai_credentials() -> Dict[str, str]:
     try:
         if os.path.isfile(_AI_KEY_FILE):
-            return load_secret(_AI_KEY_FILE).strip()
-        if os.path.isfile(_AI_KEY_LEGACY_FILE):
+            raw = load_secret(_AI_KEY_FILE).strip()
+        elif os.path.isfile(_AI_KEY_LEGACY_FILE):
             with open(_AI_KEY_LEGACY_FILE, encoding='utf-8-sig') as f:
-                legacy = f.read().strip()
-            save_secret(_AI_KEY_FILE, legacy)
+                raw = f.read().strip()
+            save_secret(_AI_KEY_FILE, raw)
             # Only remove legacy plaintext after the protected copy round-trips.
-            if load_secret(_AI_KEY_FILE).strip() == legacy:
+            if load_secret(_AI_KEY_FILE).strip() == raw:
                 os.unlink(_AI_KEY_LEGACY_FILE)
-            return legacy
+        else:
+            raw = ''
+        if raw.startswith('{'):
+            value = json.loads(raw)
+            return {'key': str(value.get('key') or '').strip(),
+                    'workspaceId': str(value.get('workspaceId') or '').strip()}
+        return {'key': raw, 'workspaceId': ''}
     except Exception as exc:
         if log:
             log.warning('AI credential unavailable: %s', type(exc).__name__)
-        return ''
-    return ''
+        return {'key': '', 'workspaceId': ''}
 
 
-def save_ai_key(k: str) -> None:
+def load_ai_key() -> str:
+    return _load_ai_credentials()['key']
+
+
+def load_ai_workspace() -> str:
+    return _load_ai_credentials()['workspaceId']
+
+
+def _workspace_for(api_key: Optional[str]) -> str:
+    credentials = _load_ai_credentials()
+    return credentials['workspaceId'] if api_key and api_key == credentials['key'] else ''
+
+
+def save_ai_key(k: str, *, workspace_id: Optional[str] = None) -> None:
     with _ai_key_lock:
-        save_secret(_AI_KEY_FILE, (k or '').strip())
+        key = (k or '').strip()
+        previous = _load_ai_credentials()
+        workspace = (previous['workspaceId'] if key == previous['key'] else '') if workspace_id is None else workspace_id.strip()
+        # 同一份加密資料原子寫入，避免金鑰與工作區分別更新造成配對錯誤。
+        value = json.dumps({'key': key, 'workspaceId': workspace}, ensure_ascii=False) if key and workspace else key
+        save_secret(_AI_KEY_FILE, value)
+        # 新金鑰可能屬於不同帳戶；不得沿用舊金鑰驗證失敗時的後備模型。
+        _MODEL_CACHE.update(date='', id=DEFAULT_MODEL, credential='')
+        _OPUS_CACHE.update(date='', id='', credential='')
 
 
 def resolve_model(api_key: Optional[str]) -> str:
     from datetime import date as _d
     today = _d.today().strftime('%Y%m%d')
-    if _MODEL_CACHE['date'] == today and _MODEL_CACHE['id']:
-        return _MODEL_CACHE['id']
+    identity = _model_cache_key(api_key)
+    with _ai_key_lock:
+        if (_MODEL_CACHE['date'] == today and _MODEL_CACHE['id']
+                and _MODEL_CACHE.get('credential') == identity):
+            return _MODEL_CACHE['id']
     model = DEFAULT_MODEL
     if api_key:
         try:
             req = urllib.request.Request(
                 'https://api.anthropic.com/v1/models?limit=100',
-                headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01'},
+                headers=_headers(api_key),
             )
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.loads(r.read())
@@ -84,8 +120,8 @@ def resolve_model(api_key: Optional[str]) -> str:
         except Exception as e:
             if log:
                 log.warning('resolve_model: %s', e)
-    _MODEL_CACHE['date'] = today
-    _MODEL_CACHE['id'] = model
+    with _ai_key_lock:
+        _MODEL_CACHE.update(date=today, id=model, credential=identity)
     return model
 
 
@@ -98,21 +134,24 @@ def resolve_model_hint(api_key: Optional[str], hint: Optional[str] = None) -> st
     if str(hint or '').strip().lower() != 'opus':
         return resolve_model(api_key)
     today = _d.today().strftime('%Y%m%d')
-    if _OPUS_CACHE['date'] == today and _OPUS_CACHE['id']:
-        return _OPUS_CACHE['id']
+    identity = _model_cache_key(api_key)
+    with _ai_key_lock:
+        if (_OPUS_CACHE['date'] == today and _OPUS_CACHE['id']
+                and _OPUS_CACHE.get('credential') == identity):
+            return _OPUS_CACHE['id']
     if api_key:
         try:
             req = urllib.request.Request(
                 'https://api.anthropic.com/v1/models?limit=100',
-                headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01'},
+                headers=_headers(api_key),
             )
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.loads(r.read())
             pick = next((m for m in (data.get('data') or [])
                          if m.get('id') and 'opus' in m['id'].lower()), None)
             if pick:
-                _OPUS_CACHE['date'] = today
-                _OPUS_CACHE['id'] = pick['id']
+                with _ai_key_lock:
+                    _OPUS_CACHE.update(date=today, id=pick['id'], credential=identity)
                 return pick['id']
         except Exception as e:
             if log:
@@ -121,11 +160,15 @@ def resolve_model_hint(api_key: Optional[str], hint: Optional[str] = None) -> st
 
 
 def _headers(api_key: str) -> Dict[str, str]:
-    return {
+    headers = {
         'Content-Type': 'application/json',
         'x-api-key': api_key,
         'anthropic-version': '2023-06-01',
     }
+    workspace = _workspace_for(api_key)
+    if workspace:
+        headers['anthropic-workspace-id'] = workspace
+    return headers
 
 
 def anthropic_messages(api_key: str, messages: List[Dict[str, Any]],
