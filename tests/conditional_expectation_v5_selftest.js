@@ -102,4 +102,10 @@ var html2 = sandbox.window.ConditionalExpectationV5.renderHtml(ready);
 assert(/短期指標<\/th>/.test(html2) && /長期指標 · 樣本未達門檻/.test(html2), 'long group must be withheld independently of the short group');
 assert(/\+1\.10%|1\.1/.test(html2), 'short group stats must remain visible when long is withheld');
 
+var agnostic = JSON.parse(JSON.stringify(ready));
+agnostic.statsBin = { scope: 'regime_agnostic', binLabel: 'RSI 30-40 · 法人3日淨買', matchedObservations: 40, regimeUnknownObservations: 38 };
+var html3 = sandbox.window.ConditionalExpectationV5.renderHtml(agnostic);
+assert(/data-ce-scope="regime_agnostic"/.test(html3) && /市場情境歷史不足/.test(html3) && /40 筆歷史觀測中 38 筆沒有情境標籤/.test(html3), 'fallback bin must be disclosed with its counts');
+assert(!/data-ce-scope/.test(html2), 'regime-aware stats must not show the fallback notice');
+
 console.log('conditional_expectation_v5 self-test PASSED');
