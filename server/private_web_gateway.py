@@ -647,6 +647,14 @@ class Settings:
             raise ValueError(
                 f"owner token missing; run scripts/setup_private_web.py (expected {owner_path})"
             )
+        allowed_host_suffixes = _string_list(cfg.get("allowed_host_suffixes"), (".ts.net",))
+        if dev_bypass and allowed_host_suffixes:
+            # Tailscale Serve 會原樣轉發用戶端的 Host，gateway 無法靠主機名分辨本機與 tailnet；
+            # 開發捷徑會直接給 owner，所以只能在設定明確不收 tailnet 主機名時啟用。
+            raise ValueError(
+                "ST_WEB_DEV_BYPASS requires allowed_host_suffixes to be an empty list "
+                "(loopback host names only); it must not be combined with tailnet publishing"
+            )
 
         listen_host = os.environ.get("ST_WEB_LISTEN_HOST", str(cfg.get("listen_host") or "127.0.0.1"))
         if listen_host not in {"127.0.0.1", "localhost", "::1"}:
@@ -687,7 +695,7 @@ class Settings:
             owner_token=owner,
             read_token=reader,
             allowed_hosts=_string_list(cfg.get("allowed_hosts"), ("localhost", "127.0.0.1", "::1")),
-            allowed_host_suffixes=_string_list(cfg.get("allowed_host_suffixes"), (".ts.net",)),
+            allowed_host_suffixes=allowed_host_suffixes,
             max_body_bytes=_env_int(
                 "ST_WEB_MAX_BODY_BYTES", int(cfg.get("max_body_bytes") or 1_048_576),
                 minimum=1024, maximum=8_388_608,

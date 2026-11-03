@@ -9,7 +9,7 @@
   - M-1：MOPS 月營收改為逐月份鎖，待送匣逐筆送出時不持有 outbox 鎖。
   - M-2：`datastore.fetch_tw_universe` 只取具名代號欄位，與 `server._extract_tw_stock_codes` 同一契約。
   - M-3：ETF 更新預設驗證 TLS 憑證，只有 `ST_ETF_INSECURE_HOSTS` 明列的主機才降級。ETF 的兩個來源（`www.moneydj.com`、`www.twse.com.tw`）已在這台機器以預設憑證驗證握手實測成功（TLSv1.3）；若日後來源憑證鏈異常，ETF 更新會失敗並留下記錄，須把該主機名加進該環境變數。
-  - M-4：dev bypass 不套用到 tailnet 主機名；`/gateway/logout` 檢查來源；審計檔 32 MB 換檔。
+  - M-4：`ST_WEB_DEV_BYPASS` 只能在 `allowed_host_suffixes` 為空（只收 loopback 主機名）時啟動，否則 gateway 拒絕啟動；原報告修法是檢查 Host 為 localhost，但審查指出 Tailscale Serve 會原樣轉發用戶端自填的 Host，可被偽造，所以改在設定層拒絕（Host 檢查保留為第二層）。此變更使「只設 `ST_WEB_DEV_BYPASS=1`、沒清空 suffix」的啟動方式不再可用；repo 內沒有腳本或文件使用該旗標。`/gateway/logout` 檢查來源；審計檔 32 MB 換檔。
   - M-5：`/market-snapshot` 10 秒快取；景氣燈號先試主來源再查中繼資料；`/inst-rank` 逐日往前試探總預算 45 秒、單次逾時 8 秒。
   - M-6：三處確認的未逸出 `innerHTML`（多圖空狀態、條件組下拉、精靈錯誤訊息）改用 DOM 文字節點。
   - L-1、L-2、L-4、L-5、L-6、L-9、L-10、L-11：變化量為 0 時照算、去重改 set、WaveDeck 匯流排改用加鎖原子寫入、ETF 報告直接呼叫計算函式（不再自我發 HTTP）、裸 `except` 收窄並降低棘輪基準、登出來源檢查、`_hc` 匯入移到 `try` 之前、移除未用變數。

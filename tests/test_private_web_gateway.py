@@ -611,6 +611,27 @@ class PrivateWebGatewayTests(unittest.TestCase):
         conn.close()
         self.assertEqual(response.status, 401)
 
+    def test_dev_bypass_is_refused_while_tailnet_host_names_are_allowed(self):
+        # Serve 會轉發用戶端自填的 Host（例如 localhost），Host 檢查擋不住偽造；
+        # 所以設定層就不許把開發捷徑和 tailnet 主機名並用。
+        import json
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        env = {"ST_WEB_DEV_BYPASS": "1", "ST_WEB_OWNER_TOKEN": "", "ST_WEB_READ_TOKEN": ""}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, env):
+            for suffixes, allowed in ((None, False), ([".ts.net"], False), ([], True)):
+                config = {} if suffixes is None else {"allowed_host_suffixes": suffixes}
+                path = Path(tmp) / "gateway.json"
+                path.write_text(json.dumps(config), encoding="utf-8")
+                with self.subTest(suffixes=suffixes):
+                    if allowed:
+                        self.assertTrue(gateway.Settings.load(path).dev_bypass)
+                    else:
+                        with self.assertRaises(ValueError):
+                            gateway.Settings.load(path)
+
     def test_logout_rejects_cross_origin_post(self):
         status, _ = _request(self.base + "/gateway/logout", method="POST", token="owner-secret",
                              origin="https://evil.example", body={})
