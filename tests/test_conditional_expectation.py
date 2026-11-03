@@ -183,6 +183,67 @@ class ConditionalExpectationBinTests(unittest.TestCase):
         self.assertEqual(stats['5']['independentEvents'], 5)
         self.assertEqual(stats['1']['independentEvents'], 25)
 
+    def _obs(self, count, *, regime, plain='p', full=None):
+        outcomes = {'1': {'returnPct': 1.0, 'maxDrawdownPct': -0.5},
+                    '5': {'returnPct': 2.0, 'maxDrawdownPct': -1.0},
+                    '20': {'returnPct': 3.0, 'maxDrawdownPct': -2.0}}
+        return [{'barIndex': i, 'binId': full or f'{plain}_reg{regime}', 'binIdNoRegime': plain,
+                 'regime': regime, 'outcomes': outcomes} for i in range(count)]
+
+    def test_missing_regime_history_falls_back_to_the_regime_free_bin_and_says_so(self):
+        observations = self._obs(40, regime='UNKNOWN') + self._obs(3, regime='CONFLICT')
+        state = {'binId': 'p_regCONFLICT', 'binIdNoRegime': 'p', 'binLabelNoRegime': '標籤'}
+        horizons = ce.aggregate_bin_stats(observations, state['binId'])
+        self.assertEqual(horizons['1']['n'], 3)
+        stats, info = ce._regime_agnostic_fallback(observations, state, horizons)
+        self.assertEqual(stats['1']['n'], 43)
+        self.assertTrue(stats['1']['ratesAvailable'])
+        self.assertEqual(info['scope'], 'regime_agnostic')
+        self.assertEqual(info['reason'], 'regime_history_missing')
+        self.assertEqual(info['binModelId'], ce.BIN_MODEL_ID_NO_REGIME)
+        self.assertEqual((info['matchedObservations'], info['regimeUnknownObservations']), (43, 40))
+        self.assertEqual(info['regimeBinSamples']['1'], 3)
+
+    def test_fallback_is_not_used_when_regime_labels_are_present_or_sample_is_enough(self):
+        state = {'binId': 'p_regCONFLICT', 'binIdNoRegime': 'p', 'binLabelNoRegime': '標籤'}
+        # 情境標籤齊全、只是這個情境很少見：不改用，避免掩蓋情境的影響
+        labelled = self._obs(40, regime='BROAD_RISK_ON') + self._obs(3, regime='CONFLICT')
+        self.assertIsNone(ce._regime_agnostic_fallback(labelled, state, ce.aggregate_bin_stats(labelled, state['binId'])))
+        # 含情境的分箱樣本已足夠：不改用
+        enough = self._obs(30, regime='CONFLICT') + self._obs(40, regime='UNKNOWN')
+        self.assertIsNone(ce._regime_agnostic_fallback(enough, state, ce.aggregate_bin_stats(enough, state['binId'])))
+        # 沒有不含情境的分箱 id（K 線不足）：不改用
+        self.assertIsNone(ce._regime_agnostic_fallback(labelled, {'binId': 'x'}, ce._empty_horizons()))
+
+    def test_compute_card_stats_marks_the_scope_and_keeps_regime_aware_stats_unchanged(self):
+        bars = _synthetic_bars(120)
+        chip_map = {ce._session_date_from_ts(row[0]).isoformat(): 10.0 for row in bars[::3]}
+        as_of = ce._session_date_from_ts(bars[-1][0])
+        # 今天有情境、歷史沒有：每個歷史觀測都是 UNKNOWN
+        state, horizons = ce.compute_card_stats('2330', bars=bars, chip_inst_by_date=chip_map, as_of_date=as_of,
+                                                regime_lookup=lambda d: 'CONFLICT' if d == as_of else 'UNKNOWN')
+        regime_aware = ce.aggregate_bin_stats(
+            ce.collect_pit_observations('2330', bars, chip_inst_by_date=chip_map,
+                                        regime_lookup=lambda d: 'CONFLICT' if d == as_of else 'UNKNOWN'), state['binId'])
+        self.assertEqual([regime_aware[k]['n'] for k in ('1', '5', '20')], [0, 0, 0])   # 歷史全是 UNKNOWN，對不上今天的分箱
+        self.assertEqual(state['statsBin']['scope'], 'regime_agnostic')
+        self.assertEqual(state['statsBin']['regimeUnknownObservations'], state['statsBin']['matchedObservations'])
+        self.assertEqual([horizons[k]['n'] for k in ('1', '5', '20')], [40, 36, 21])
+        self.assertTrue(all(horizons[k]['ratesAvailable'] for k in ('1', '5', '20')))
+        # 歷史與今天情境一致（含情境的分箱本來就夠）：不改用，數字與原本完全相同
+        state2, horizons2 = ce.compute_card_stats('2330', bars=bars, chip_inst_by_date=chip_map, as_of_date=as_of,
+                                                  regime_lookup=lambda d: 'BROAD_RISK_ON')
+        self.assertNotIn('statsBin', state2)
+        self.assertEqual(horizons2, ce.aggregate_bin_stats(
+            ce.collect_pit_observations('2330', bars, chip_inst_by_date=chip_map,
+                                        regime_lookup=lambda d: 'BROAD_RISK_ON'), state2['binId']))
+        card = ce.build_card('2330', quote={'asOf': datetime.fromtimestamp(bars[-1][0], TZ_TPE).isoformat(), 'session': 'closed'},
+                             chips={'asOf': as_of.isoformat()}, bars=bars, chip_inst_by_date=chip_map,
+                             now=datetime.fromtimestamp(bars[-1][0], TZ_TPE) + timedelta(hours=2),
+                             regime_lookup=lambda _d: 'BROAD_RISK_ON')
+        self.assertEqual(card['statsBin']['scope'], 'with_regime')
+        self.assertEqual(card['binModelId'], ce.BIN_MODEL_ID)
+
     def test_max_drawdown_q90_reports_the_adverse_tail_not_the_mildest_end(self):
         # 20 筆樣本：一半沒有回撤（0），其餘 −1 到 −10；90% 樣本不劣於的回撤應為尾端的負值。
         drawdowns = [0.0] * 10 + [-float(k) for k in range(1, 11)]

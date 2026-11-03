@@ -17,6 +17,22 @@
 
 ---
 
+## 2026-11-03 條件期望：情境缺漏時改用不含情境的分箱
+
+- 基底：`b5174f04e221cbdc877dd7d8c1649281af83fde1`（origin/main，含 #276～#278）；分支 `claude/regime-agnostic-bin`。實作與合併 SHA 待 PR 合併後補記。依據：Sam 2026-11-03 對「情境缺漏時的分箱」回覆「改用不含情境的分箱」。
+- 問題：市場情境是分箱 id 的一部分（`rsi14×devz×rs×inst3d×regime/v2`）。#278 之前逐日情境沒有被保存，歷史觀測全是 `UNKNOWN`；之後情境標籤也只從啟用日起累積，所以今天有真實情境的分箱，與絕大多數歷史觀測永遠對不上，樣本數偏低、卡片顯示樣本不足。
+- 修正（`server/conditional_expectation.py`）：
+  - `bin_state` 與每筆觀測新增 `binIdNoRegime`（同樣的 RSI、偏離 Z、相對強度、法人 3 日條件，不含情境）與觀測的 `regime`。
+  - 新增 `_regime_agnostic_fallback`：只有**同時**符合下列條件才改用不含情境的統計：(1) 含情境的分箱在任一週期樣本不足（< `MIN_SAMPLE`）；(2) 相同技術條件的歷史觀測中，情境為 `UNKNOWN` 的超過一半；(3) 不含情境的分箱樣本數確實較多。情境標籤齊全、只是這個情境很少見時**不**改用，避免掩蓋情境的影響；含情境的樣本已足夠時數字與原本完全相同。
+  - 卡片新增 `statsBin`：預設 `{scope: 'with_regime', ...}`；改用時為 `{scope: 'regime_agnostic', reason: 'regime_history_missing', binModelId: 'rsi14×devz×rs×inst3d/v2', binId, binLabel, matchedObservations, regimeUnknownObservations, regimeBinSamples}`。`binId`、`binLabel`、`binModelId`、`horizons`、`invalidIf`、`horizonGroups` 等原有欄位名稱與型別不變；改用時 `horizons` 內是不含情境的統計。
+- 前端（`src/ui/conditional_expectation_v5.js`）：改用時在分箱標籤下顯示「市場情境歷史不足：下列統計改用不含情境的分箱（…；相同技術條件的 N 筆歷史觀測中 K 筆沒有情境標籤）」。沒有備援時畫面與原本相同。已重建 `stock_terminal_v2.html`（只有資源版本雜湊變動）。
+- 限制：統計定義在備援時改變（不依情境分層），這是 Sam 對此項的決定；卡片仍是 shadow 研究、`actionAuthority: none`，且旗標 `ST_SHADOW_CONDITIONAL_EXPECTATION` 在兩端目前是關閉的，所以對使用者畫面沒有立即影響。情境標籤累積到足夠後，含情境的分箱會自然恢復使用。
+- 沒有降級：含情境的統計路徑、樣本門檻、短期／長期分組都不變。
+- 驗證：新增 3 案 Python（備援與揭露、不該備援的情況、`compute_card_stats` 整合與數字不變）、1 組 JS 斷言；`tests.test_conditional_expectation` 18 案、`conditional_expectation_v5_selftest.js` 通過。
+- 發布狀態：**未合併、未發布**。
+
+---
+
 ## 2026-11-03 條件期望的逐日市場情境改存永久的每日表
 
 - 基底：`cda001c9ffbfff900179a3cbdd3d21b60c87b37c`（origin/main）；分支 `claude/regime-history`。實作與合併 SHA 待 PR 合併後補記。依據：2026-10-29 唯讀調查（共用記憶 gotchas/0030 的 2026-10-29 補記），Sam 2026-11-03「照你建議執行」。
