@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "b5174f04e221cbdc877dd7d8c1649281af83fde1",
+  "baseCommit": "c783db448b9911af392a302c445eb860164751be",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -25,63 +25,27 @@
       ]
     },
     {
-      "id": "條件期望情境缺漏改用不含情境的分箱",
+      "id": "每日來源partial分兩層",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "含情境的分箱樣本不足、且同技術條件的歷史觀測多數缺情境標籤時，統計改用不含情境的分箱並在 statsBin 標明；其餘情況的數字與原本相同",
+      "reason": "官方當日檔列出但無價的代號（unavailableSymbols）不再讓來源降級為 partial，改記在 noPriceSymbols；不在官方檔內（unconfirmedSymbols）、衝突與來源 partial 仍降級",
       "targets": [
-        "tests.test_conditional_expectation",
-        "tests.test_conditional_expectation_p1",
-        "tests.test_shadow_multifactor"
+        "tests.test_三項限制解方",
+        "tests.test_全檢資料邊界",
+        "tests.test_全市場日線缺口",
+        "tests.test_研究品質與留存"
       ],
       "changes": [
-        "server/conditional_expectation.py",
-        "tests/test_conditional_expectation.py"
+        "server/個股每日資料.py",
+        "tests/test_三項限制解方.py"
       ],
       "inputs": [
-        "server/conditional_expectation.py",
-        "server/conditional_expectation_p1.py",
-        "server/shadow_multifactor.py",
-        "tests/test_conditional_expectation.py",
-        "tests/test_conditional_expectation_p1.py",
-        "tests/test_shadow_multifactor.py"
-      ]
-    },
-    {
-      "id": "條件期望前端顯示備援分箱",
-      "kind": "node",
-      "timeoutSeconds": 60,
-      "reason": "卡片在統計改用不含情境的分箱時顯示說明與觀測數；其餘顯示不變",
-      "targets": [
-        "tests/conditional_expectation_v5_selftest.js"
-      ],
-      "changes": [
-        "src/ui/conditional_expectation_v5.js",
-        "tests/conditional_expectation_v5_selftest.js"
-      ],
-      "inputs": [
-        "src/ui/conditional_expectation_v5.js",
-        "tests/conditional_expectation_v5_selftest.js",
-        "build_v2.py"
-      ]
-    },
-    {
-      "id": "打包產物與原始碼一致",
-      "kind": "unittest",
-      "timeoutSeconds": 300,
-      "reason": "src 變更後重建 stock_terminal_v2.html",
-      "targets": [
-        "tests.test_bundle_fresh",
-        "tests.test_build_reproducibility"
-      ],
-      "changes": [
-        "stock_terminal_v2.html"
-      ],
-      "inputs": [
-        "stock_terminal_v2.html",
-        "build_v2.py",
-        "tests/test_bundle_fresh.py",
-        "tests/test_build_reproducibility.py"
+        "server/個股每日資料.py",
+        "server/個股研究維護.py",
+        "tests/test_三項限制解方.py",
+        "tests/test_全檢資料邊界.py",
+        "tests/test_全市場日線缺口.py",
+        "tests/test_研究品質與留存.py"
       ]
     }
   ]
