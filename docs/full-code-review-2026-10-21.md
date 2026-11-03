@@ -1,7 +1,7 @@
 # Stock Terminal 完整程式碼審查報告（2026-10-21）
 
 - 審查類型：作者外的同供應商單執行緒審查（Claude；無子代理、無並行工作流）。只讀，不改程式、不提交、不推送。
-- 受審工作樹：`C:\Users\Sam\AI-Workspace\worktrees\stock-terminal\equilens-learnings`，分支 `claude/heat-industry-sectors-only`，HEAD `e47be84`（工作樹乾淨）。主工作階段告知 `origin/main` 與正式站、本機皆為 `6caa8b96`（#256）；本報告的行號以 `e47be84` 為準，核對時請對照該 SHA。
+- 受審工作樹：`<AI-Workspace>/worktrees/stock-terminal/equilens-learnings`，分支 `claude/heat-industry-sectors-only`，HEAD `e47be84`（工作樹乾淨）。主工作階段告知 `origin/main` 與正式站、本機皆為 `6caa8b96`（#256）；本報告的行號以 `e47be84` 為準，核對時請對照該 SHA。
 - 倉庫規模：861 個追蹤檔；Python 約 48,000 行（`server/` 289 檔）、JavaScript 約 42,800 行（`src/` 130 檔）、測試 291 檔。
 - 已執行的驗證：`python -m unittest tests.test_no_new_silent_exceptions`（2 個測試通過，基準與現狀相符）；以 Python 片段實測 `_safe_sym` 二次解碼繞過（見 H-2）。其餘發現為程式閱讀推論，未做瀏覽器或整合實測。
 
