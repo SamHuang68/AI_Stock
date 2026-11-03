@@ -11,7 +11,7 @@
     {
       "id": "伺服器同源檢查與代號單次解碼",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "帶副作用的 GET 套用同源檢查；/quote 只解碼一次；/holders weeks 限範圍；ETF 報告不再自我發 HTTP；快照 10 秒快取；MOPS 逐月鎖；寬鬆例外基準",
       "targets": [
         "tests.test_server_http_security",
@@ -47,7 +47,7 @@
     {
       "id": "私有閘道owner控制與開發繞過限制",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "閘道把 /holders 的刷新與回補限 owner；dev bypass 不套用到 tailnet 主機名；登出檢查來源；審計檔換檔",
       "targets": [
         "tests.test_private_web_gateway",
@@ -68,7 +68,7 @@
     {
       "id": "警報待送匣不持鎖送出",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "待送匣逐筆送出時不持有 outbox 鎖，deliver 與測試通知不再被擋",
       "targets": [
         "tests.test_alert_conditions",
@@ -86,7 +86,7 @@
     {
       "id": "ETF更新預設驗證TLS憑證",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "ETF 來源預設驗證憑證，僅 ST_ETF_INSECURE_HOSTS 明列的主機降級",
       "targets": [
         "tests.test_etf_delta_tracker",
@@ -104,7 +104,7 @@
     {
       "id": "宇集代號只取具名欄位",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "datastore.fetch_tw_universe 與 server 同一契約，不從價格或筆數猜代號",
       "targets": [
         "tests.test_datastore_universe_codes"
@@ -121,7 +121,7 @@
     {
       "id": "WaveDeck匯流排原子寫入",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "狀態檔改用 atomic_store 的加鎖原子寫入，避免多執行緒共用同一個暫存檔",
       "targets": [
         "tests.test_wavedeck_bus"
@@ -138,7 +138,7 @@
     {
       "id": "發布完整性測試以UTF-8讀清單",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "測試讀取 manifest 明列 utf-8，避免 Windows 本機碼頁",
       "targets": [
         "tests.test_發布完整性"
@@ -191,7 +191,7 @@
     {
       "id": "首頁打包產物與來源一致",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "stock_terminal_v2.html 由 build_v2.py 依 src 重建",
       "targets": [
         "tests.test_bundle_fresh"
@@ -211,7 +211,7 @@
     {
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
-      "timeoutSeconds": 900,
+      "timeoutSeconds": 600,
       "reason": "審查報告與修訂紀錄為文件；分享封存掃描",
       "targets": [
         "tests.test_dist_scrub"
