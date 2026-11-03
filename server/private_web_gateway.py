@@ -566,6 +566,18 @@ def _tcp_port_snapshot(port: int) -> list[dict[str, object]]:
     return rows[:50]
 
 
+AUDIT_ROTATE_BYTES = 32 * 1024 * 1024
+
+
+def _rotate_if_large(path: Path) -> None:
+    """審計與前端追蹤檔超過上限就換檔，只保留一份舊檔；呼叫端須已持有寫入鎖。"""
+    try:
+        if path.stat().st_size >= AUDIT_ROTATE_BYTES:
+            os.replace(path, path.with_name(path.name + ".1"))
+    except OSError:
+        pass
+
+
 def _startup_event(event: str, **details: object) -> None:
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -789,6 +801,9 @@ def route_permission(method: str, path: str, role: str, settings: Settings) -> b
             return False
         if path in STATIC_EXACT or path.startswith(STATIC_PREFIXES):
             return True
+        # TDCC 更新／回補是會啟動背景抓取的 GET；唯讀角色不可觸發。
+        if path.startswith("/holders/") and path[9:].strip("/") in {"refresh", "update", "backfill", "archive"}:
+            return role == "owner"
         if _path_matches(path, OWNER_GET_EXACT, OWNER_GET_PREFIXES):
             return role == "owner"
         if _path_matches(path, READ_GET_EXACT, READ_GET_PREFIXES):
@@ -1243,8 +1258,10 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         try:
             self.settings.audit_path.parent.mkdir(parents=True, exist_ok=True)
             lock = self.server.audit_lock  # type: ignore[attr-defined]
-            with lock, self.settings.audit_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            with lock:
+                _rotate_if_large(self.settings.audit_path)
+                with self.settings.audit_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
         except OSError:
             pass
 
@@ -1311,8 +1328,10 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         try:
             self.settings.client_trace_path.parent.mkdir(parents=True, exist_ok=True)
             lock = self.server.audit_lock  # type: ignore[attr-defined]
-            with lock, self.settings.client_trace_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            with lock:
+                _rotate_if_large(self.settings.client_trace_path)
+                with self.settings.client_trace_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
         except OSError:
             self._json(503, {"error": "client trace unavailable"})
             return
@@ -1330,8 +1349,18 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             return True
         return any(hostname.endswith(suffix) for suffix in self.settings.allowed_host_suffixes)
 
+    def _host_is_local(self) -> bool:
+        raw = (self.headers.get("Host") or "").strip().lower()
+        try:
+            return (urlsplit("//" + raw).hostname or "") in {"localhost", "127.0.0.1", "::1"}
+        except ValueError:
+            return False
+
     def _auth(self) -> tuple[str, str]:
-        if self.settings.dev_bypass and self.client_address[0] in {"127.0.0.1", "::1"}:
+        # 經 Tailscale Serve 進來的請求 peer 也是 loopback，但 Host 是 .ts.net 名稱；
+        # 開發捷徑只對直接以 localhost 開啟的請求有效，避免對整個 tailnet 開放 owner。
+        if (self.settings.dev_bypass and self.client_address[0] in {"127.0.0.1", "::1"}
+                and self._host_is_local()):
             return "owner", "dev-bypass"
         header = (self.headers.get("Authorization") or "").strip()
         scheme, _, credential = header.partition(" ")
@@ -1624,6 +1653,10 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             self._json(405, {"error": "GET or POST required"})
             return
         if path == "/gateway/logout" and self.command == "POST":
+            if not self._form_origin_allowed():
+                self._audit("logout_origin_rejected", 403)
+                self._json(403, {"error": "same-origin browser request required"})
+                return
             self._logout()
             return
         role, auth_kind = self._auth()

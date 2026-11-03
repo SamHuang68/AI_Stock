@@ -1,3 +1,26 @@
+## 2026-11-03 整合 2026-10-21 完整程式碼審查的修正（安全與鎖範圍）
+
+- 基底：`b01da39c45d9e40be1bce9c6c5fae32f3f1d7af6`（origin/main）；分支 `claude/security-review-fixes`。來源是分支 `claude/heat-industry-sectors-only` 的保存提交 `d0f6410`（2026-10-26，當時標為「未驗證、未審查」；審查報告 `docs/full-code-review-2026-10-21.md`）。
+- 授權：Sam 2026-11-03「有價值的全部整合 其餘刪掉」。這是整合；未合併、未發布。
+- 來源核對：保存提交對最新 main 乾淨套用（`server.py` 與 `etf_delta_tracker.py` 自動合併，無衝突）；修正逐項對照 main 現況後保留，沒有重複既有實作。
+- 修正內容（報告編號）：
+  - H-1：會觸發抓取、回補或快取失效的 GET（`/holders/refresh|update|backfill|archive`、`refresh=1`、`nocache=1`、`action=…`）套用同源檢查，瀏覽器明示的跨站請求（`Sec-Fetch-Site: cross-site`）或 Origin／Referer 非本站回 403；沒有這些標頭的本機呼叫與同源前端照舊。私有閘道把 `/holders/` 的刷新與回補限 owner，`weeks` 限 1～520 且非整數回 400。前端仍用 GET，契約不變。
+  - H-2：`/quote/<sym>` 只在路由層解碼一次，handler 不再二次解碼，含 `%`、`/`、`?` 的代號回 400。
+  - M-1：MOPS 月營收改為逐月份鎖，待送匣逐筆送出時不持有 outbox 鎖。
+  - M-2：`datastore.fetch_tw_universe` 只取具名代號欄位，與 `server._extract_tw_stock_codes` 同一契約。
+  - M-3：ETF 更新預設驗證 TLS 憑證，只有 `ST_ETF_INSECURE_HOSTS` 明列的主機才降級。ETF 的兩個來源（`www.moneydj.com`、`www.twse.com.tw`）已在這台機器以預設憑證驗證握手實測成功（TLSv1.3）；若日後來源憑證鏈異常，ETF 更新會失敗並留下記錄，須把該主機名加進該環境變數。
+  - M-4：dev bypass 不套用到 tailnet 主機名；`/gateway/logout` 檢查來源；審計檔 32 MB 換檔。
+  - M-5：`/market-snapshot` 10 秒快取；景氣燈號先試主來源再查中繼資料；`/inst-rank` 逐日往前試探總預算 45 秒、單次逾時 8 秒。
+  - M-6：三處確認的未逸出 `innerHTML`（多圖空狀態、條件組下拉、精靈錯誤訊息）改用 DOM 文字節點。
+  - L-1、L-2、L-4、L-5、L-6、L-9、L-10、L-11：變化量為 0 時照算、去重改 set、WaveDeck 匯流排改用加鎖原子寫入、ETF 報告直接呼叫計算函式（不再自我發 HTTP）、裸 `except` 收窄並降低棘輪基準、登出來源檢查、`_hc` 匯入移到 `try` 之前、移除未用變數。
+- 不在本次範圍（報告原已列未改）：Yahoo crumb 鎖、`X-Forwarded-For` 信任、`/health` 對 reader 的資訊揭露、L-3、L-7、L-8、L-12；M-6 其餘 16 處經核對多為數字或常數串接。
+- 新增：`tests/test_datastore_universe_codes.py`（`fetch_tw_universe` 原本沒有測試；此測試對舊版 `datastore.py` 失敗、對新版通過）；`stock_terminal_v2.html` 由 `build_v2.py` 依 src 重建（96 行差異，皆來自上列三處前端修改）。
+- 驗證：局部驗證，逐項見 `.github/驗證計畫.json` 的 11 個案例；相關 Python 測試 159 項＋`tests.test_台股基本面`／`tests.test_發布完整性` 35 項＋`tests.test_datastore_universe_codes`＋三個 Node 自測＋`tests.test_bundle_fresh` 全數通過；未跑完整套件。
+- 未驗證：前三處前端修改沒有瀏覽器實測（既有自測只證明模組仍能載入並通過原斷言，不證明新節點的顯示）；GET 同源檢查未對正式站閘道路徑實測（程式面：閘道轉送時移除 Origin／Referer、保留 `Sec-Fetch-Site`，同源前端為 `same-origin`，不會被擋）。
+- 發布狀態：**未合併、未發布**。
+
+---
+
 ## 2026-11-03 補記 f7ef0fc 發布狀態（含 #279、#280、#281）
 
 - 基底：`f7ef0fc92396aa2d412f46a173c632fe30bfae24`（origin/main）；分支 `claude/revision-f7ef0fc-release`。

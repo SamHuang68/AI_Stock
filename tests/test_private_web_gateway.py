@@ -599,6 +599,32 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(UpstreamHandler.seen, [])
 
+    def test_dev_bypass_does_not_grant_owner_to_tailnet_hostnames(self):
+        self.gateway.settings = gateway.Settings(**{**self.gateway.settings.__dict__, "dev_bypass": True})
+        status, _ = _request(self.base + "/alert/status")
+        self.assertEqual(status, 200)   # 直接以 127.0.0.1 開啟仍可用於本機開發
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/alert/status", headers={"Host": "node.example.ts.net"})
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+        self.assertEqual(response.status, 401)
+
+    def test_logout_rejects_cross_origin_post(self):
+        status, _ = _request(self.base + "/gateway/logout", method="POST", token="owner-secret",
+                             origin="https://evil.example", body={})
+        self.assertEqual(status, 403)
+
+    def test_reader_cannot_start_holders_refresh_or_backfill(self):
+        for path in ('/holders/refresh', '/holders/update', '/holders/backfill?weeks=104', '/holders/archive'):
+            with self.subTest(path=path):
+                status, _ = _request(self.base + path, token='reader-secret')
+                self.assertEqual(status, 403)
+        self.assertEqual(UpstreamHandler.seen, [])
+        status, _ = _request(self.base + '/holders/2330', token='reader-secret')
+        self.assertEqual(status, 200)
+
     def test_macro_refresh_owner_post_requires_browser_origin(self):
         path = self.base + '/macro/refresh/__TW_MARGIN_MIX__'
         for method, token, basic, origin, expected in (
