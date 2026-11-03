@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "c783db448b9911af392a302c445eb860164751be",
+  "baseCommit": "339032807f6e5638e18c40781118b751c865be1e",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -25,27 +25,20 @@
       ]
     },
     {
-      "id": "每日來源partial分兩層",
+      "id": "本機啟動器查不到listener時仍能核對",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "官方當日檔列出但無價的代號（unavailableSymbols）不再讓來源降級為 partial，改記在 noPriceSymbols；不在官方檔內（unconfirmedSymbols）、衝突與來源 partial 仍降級",
+      "reason": "start_local.ps1 在 listener 查不到時，以登記程序身分與 /health 核對；listener 查得到時的規則、外部 listener 與公開綁定的拒絕條件不變",
       "targets": [
-        "tests.test_三項限制解方",
-        "tests.test_全檢資料邊界",
-        "tests.test_全市場日線缺口",
-        "tests.test_研究品質與留存"
+        "tests.test_local_release"
       ],
       "changes": [
-        "server/個股每日資料.py",
-        "tests/test_三項限制解方.py"
+        "scripts/start_local.ps1"
       ],
       "inputs": [
-        "server/個股每日資料.py",
-        "server/個股研究維護.py",
-        "tests/test_三項限制解方.py",
-        "tests/test_全檢資料邊界.py",
-        "tests/test_全市場日線缺口.py",
-        "tests/test_研究品質與留存.py"
+        "scripts/start_local.ps1",
+        "scripts/local_release.py",
+        "tests/test_local_release.py"
       ]
     }
   ]
