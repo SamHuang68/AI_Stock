@@ -1,3 +1,21 @@
+## 2026-11-03 補記 3b844d4 發布狀態（含 #283、#284）
+
+- 基底：`3b844d4d25bdca4bfd7dd65df28677df4b014a63`（origin/main）；分支 `claude/revision-3b844d4-release`。
+- 授權：Sam 2026-11-03「合併 #283 和 #284」、「發布 3b844d4」。
+- 合併（合併前 CI ubuntu、windows 皆通過）：#283 完整程式碼審查修正，實作 `9c801f3`，合併 `2108eaa0c8c39c5256992bb021cee9dc4b779d3f`；#284 AI 金鑰工作區 ID 與美股產業成員（含舊分支處置紀錄），實作 `924f0e8`（已含 main 同步），合併 `3b844d4d25bdca4bfd7dd65df28677df4b014a63`。main push CI（run 41635818950）對 `3b844d4` 成功。#283 合併前，自動安全審查連續指出兩個真問題並已修正：`/holders/` 動作名稱的百分比編碼變體可繞過 owner 檢查（reader 實測回 200，改為先解碼再比對後回 403）；`ST_WEB_DEV_BYPASS` 的 Host 檢查可被 Serve 轉發的 Host 偽造（改為與 tailnet 主機名並用時拒絕啟動）。
+- 發布時機：2026-11-03 20:54 發現正式站正在跑盤後的 `legacy:stock-daily-sources`（20:30 開始，上限 30 分鐘，後面排著 3 個工作），而每日排程只在平日 14–21 點的窗口處理當天，停機會丟掉今天的資料。因此 stage 與預檢先做，等該批工作全部完成（20:55 完成，其後 3 個排隊工作 21:00 前完成；發布前只剩每分鐘一次、不到 1 秒的 `margin_ratio` 短工作）才停機。
+- 發布：release id `3b844d4d25bd`，前一版 `f7ef0fc92396`。stage `tests: passed`；因本次涵蓋 `f7ef0fc→3b844d4`（#282、#283、#284），驗證計畫是把 #283 與 #284 合併後各自通過的案例聯集（共 15 個，同 id 者聯集 changes／inputs／targets，`.github/驗證計畫.json` 本身列入文件案例），基底改為前一版正式 SHA；#284 的案例沿用本機已通過的證據。流程與 f7ef0fc 相同：預檢 → 停止 → 停止後備份 14 個 SQLite → promote → 啟動 → 驗證。
+- 實測：正式站 21:01:24（台北）停止、21:06:49 要求啟動（停機約 5.5 分鐘）；`/health` 的 `runtimeCommit` 為 `3b844d4…`，閘道 `isolated-host`、upstream 正常，未登入回 401；發布前後 332 個資料檔雜湊完全一致（無變動、無缺漏），promote 後資料庫檢查通過（bars 1,525,034 列）。本機 18432 於 21:13 同步（本機資料已備份）並啟動，`runtimeCommit` 為 `3b844d4…`，`/selftest` 21／21。
+- 新功能在正式站的實測：`/sector-members?market=US&sector=科技 Technology` 回 XLK 的 75 檔成員、75 檔皆有報價（持股資料日 2026-11-02、`diagnostics` 為空）；對不到熱力圖名稱的 `Technology` 仍回 UNAVAILABLE；台股成員 `半導體業` 回 96 檔。這證明後端端點與來源在正式環境可用，不證明熱力圖畫面的點擊與呈現（未在瀏覽器實測）。
+- 今晚盤後的 `f7ef0fc` 變更觀察（唯讀）：`stock-daily-sources` 成功、耗時 24.6 分鐘（未超過 30 分鐘上限）；run 內 TWSE 日線與 TPEx 日線兩列仍是 `partial`（不是 `completed`），各有 `unavailableSymbols`（TWSE 12 檔、TPEx 20 檔）與 `unconfirmedSymbols`，大盤日線與上市法人兩列 `completed`。#280 預期的狀態變化沒有在今晚觀察到，原因尚未查；還原快照被拒收數與 `decision_regime_daily` 的累積今晚沒有查，仍待觀察。近 24 小時有 1 個 `timed_out` 工作，種類未查。
+- 工具注意：用 PowerShell 工具直接執行 `local_restart.ps1` 時，新啟動的本機伺服器會沿用該呼叫的輸出控制代碼，工具呼叫不會返回（本機其實已就緒，日誌與 `/health` 可證）；不要終止那個工作，會連伺服器一起結束。
+- 未驗證：開機自啟（工作排程 `StockTerminal_Local_Host`）在真正重開機後的行為；閘道／Tailscale 端版本（需 Owner token）、手機尺寸畫面；AI 金鑰工作區 ID 對真實工作區金鑰的呼叫（沒有使用真實金鑰）；美股成員在熱力圖的實際操作。
+- 已知未處理：同 f7ef0fc 段落所列（`tests.test_launcher_safety` 一案在這台機器失敗、單一 worker 被 `stock-daily-sources` 占用、正式站日線 07-10 填充列未清除、8D 0030 仍 open）；另有 4 個保留分支與 82 個 stash 等待決定（見 `docs/legacy-branch-disposition-2026-11-03.md`）。
+- 驗證：只改文件；`tests.test_dist_scrub` 通過。
+- 發布狀態：文件變更，不涉及發布。
+
+---
+
 ## 2026-11-03 整合舊分支的未合併功能（AI 金鑰工作區、美股產業成員）與舊分支處置紀錄
 
 - 基底：`2108eaa0c8c39c5256992bb021cee9dc4b779d3f`（origin/main，已含 #283）；分支 `claude/integrate-ai-key-and-us-members`。
