@@ -186,7 +186,7 @@
     if (!active || p.request !== request || !panels.includes(p) || !p.body.isConnected
         || p.sym !== sym || p.mkt !== mkt || p.rg !== rg) return;
     p.body.innerHTML = '';
-    if (!parsed || !parsed.candles.length) { p.body.innerHTML = '<div class="mc-empty">無資料: ' + p.sym + '</div>'; return; }
+    if (!parsed || !parsed.candles.length) { var emptyBox = document.createElement('div'); emptyBox.className = 'mc-empty'; emptyBox.textContent = '無資料: ' + p.sym; p.body.appendChild(emptyBox); return; }
     if (p.nameEl) p.nameEl.textContent = parsed.name || '';
     buildPanelChart(p, parsed);
   }

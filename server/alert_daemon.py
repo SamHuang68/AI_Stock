@@ -505,45 +505,52 @@ def deliver(cfg, text, subject='Stock Terminal 警報', *, source='alert', now=N
 
 
 def retry_outbox(cfg=None, now=None):
-    """重送待送匣；本輪只要有一筆仍全部失敗就停止，避免網路中斷時逐筆等候逾時。"""
+    """重送待送匣；本輪只要有一筆仍全部失敗就停止，避免網路中斷時逐筆等候逾時。
+
+    網路送出不持有 _outbox_lock（單筆最長約 35 秒），否則 deliver() 與 /notify 會被擋住；
+    送完後重新讀檔，只套用本輪處理過的項目，期間新加入的待送項目不會被覆寫。"""
     now = time.time() if now is None else now
     out = {'sent': 0, 'pending': 0, 'dropped': 0}
     with _outbox_lock:
         items = _outbox_load()
-        if not items:
-            return out
-        cfg = cfg if cfg is not None else load_config()
-        keep, stalled = [], False
-        for item in items:
-            if now - float(item.get('createdAt') or 0) > OUTBOX_MAX_AGE_SECONDS:
-                _log(f"放棄送出（{item.get('source')}，逾 {OUTBOX_MAX_AGE_SECONDS // 60} 分鐘未送達）：{item['text']}")
-                _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'), 'status': 'failed',
-                                'attempts': item.get('attempts'), 'failed': item.get('lastError') or {}})
-                out['dropped'] += 1
-                continue
-            if stalled or now < float(item.get('nextAt') or 0):
-                keep.append(item)
-                continue
-            ok, results = notify(cfg, item['text'], item.get('subject') or 'Stock Terminal 警報')
-            item['attempts'] = int(item.get('attempts') or 0) + 1
-            failed = _failures(cfg, results)
-            if ok or not failed:
-                _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'),
-                                'status': 'sent' if ok else 'no_channel', 'attempts': item['attempts'],
-                                'failed': failed})
-                out['sent'] += int(ok)
-                continue
-            _log(f"送出失敗（{item.get('source')}，第 {item['attempts']} 次）："
-                 + '；'.join(f'{k}={v}' for k, v in failed.items()))
-            if item['attempts'] >= OUTBOX_MAX_ATTEMPTS:
-                _log(f"放棄送出（{item.get('source')}，已試 {item['attempts']} 次）：{item['text']}")
-                _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'), 'status': 'failed',
-                                'attempts': item['attempts'], 'failed': failed})
-                out['dropped'] += 1
-                continue
-            item.update(nextAt=now + OUTBOX_RETRY_GAP_SECONDS, lastError=failed)
-            keep.append(item)
-            stalled = True
+    if not items:
+        return out
+    cfg = cfg if cfg is not None else load_config()
+    removed, updated, stalled = set(), {}, False
+    for item in items:
+        if now - float(item.get('createdAt') or 0) > OUTBOX_MAX_AGE_SECONDS:
+            _log(f"放棄送出（{item.get('source')}，逾 {OUTBOX_MAX_AGE_SECONDS // 60} 分鐘未送達）：{item['text']}")
+            _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'), 'status': 'failed',
+                            'attempts': item.get('attempts'), 'failed': item.get('lastError') or {}})
+            out['dropped'] += 1
+            removed.add(item['id'])
+            continue
+        if stalled or now < float(item.get('nextAt') or 0):
+            continue
+        ok, results = notify(cfg, item['text'], item.get('subject') or 'Stock Terminal 警報')
+        item['attempts'] = int(item.get('attempts') or 0) + 1
+        failed = _failures(cfg, results)
+        if ok or not failed:
+            _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'),
+                            'status': 'sent' if ok else 'no_channel', 'attempts': item['attempts'],
+                            'failed': failed})
+            out['sent'] += int(ok)
+            removed.add(item['id'])
+            continue
+        _log(f"送出失敗（{item.get('source')}，第 {item['attempts']} 次）："
+             + '；'.join(f'{k}={v}' for k, v in failed.items()))
+        if item['attempts'] >= OUTBOX_MAX_ATTEMPTS:
+            _log(f"放棄送出（{item.get('source')}，已試 {item['attempts']} 次）：{item['text']}")
+            _note_delivery({'t': now, 'id': item['id'], 'source': item.get('source'), 'status': 'failed',
+                            'attempts': item['attempts'], 'failed': failed})
+            out['dropped'] += 1
+            removed.add(item['id'])
+            continue
+        item.update(nextAt=now + OUTBOX_RETRY_GAP_SECONDS, lastError=failed)
+        updated[item['id']] = item
+        stalled = True
+    with _outbox_lock:
+        keep = [updated.get(row['id'], row) for row in _outbox_load() if row['id'] not in removed]
         atomic_write_json(OUTBOX_FILE, keep, private=True)
         out['pending'] = len(keep)
     return out

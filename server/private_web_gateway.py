@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from private_web_access import (
     AccessRequestStore,
@@ -566,6 +566,18 @@ def _tcp_port_snapshot(port: int) -> list[dict[str, object]]:
     return rows[:50]
 
 
+AUDIT_ROTATE_BYTES = 32 * 1024 * 1024
+
+
+def _rotate_if_large(path: Path) -> None:
+    """審計與前端追蹤檔超過上限就換檔，只保留一份舊檔；呼叫端須已持有寫入鎖。"""
+    try:
+        if path.stat().st_size >= AUDIT_ROTATE_BYTES:
+            os.replace(path, path.with_name(path.name + ".1"))
+    except OSError:
+        pass
+
+
 def _startup_event(event: str, **details: object) -> None:
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -635,6 +647,14 @@ class Settings:
             raise ValueError(
                 f"owner token missing; run scripts/setup_private_web.py (expected {owner_path})"
             )
+        allowed_host_suffixes = _string_list(cfg.get("allowed_host_suffixes"), (".ts.net",))
+        if dev_bypass and allowed_host_suffixes:
+            # Tailscale Serve 會原樣轉發用戶端的 Host，gateway 無法靠主機名分辨本機與 tailnet；
+            # 開發捷徑會直接給 owner，所以只能在設定明確不收 tailnet 主機名時啟用。
+            raise ValueError(
+                "ST_WEB_DEV_BYPASS requires allowed_host_suffixes to be an empty list "
+                "(loopback host names only); it must not be combined with tailnet publishing"
+            )
 
         listen_host = os.environ.get("ST_WEB_LISTEN_HOST", str(cfg.get("listen_host") or "127.0.0.1"))
         if listen_host not in {"127.0.0.1", "localhost", "::1"}:
@@ -675,7 +695,7 @@ class Settings:
             owner_token=owner,
             read_token=reader,
             allowed_hosts=_string_list(cfg.get("allowed_hosts"), ("localhost", "127.0.0.1", "::1")),
-            allowed_host_suffixes=_string_list(cfg.get("allowed_host_suffixes"), (".ts.net",)),
+            allowed_host_suffixes=allowed_host_suffixes,
             max_body_bytes=_env_int(
                 "ST_WEB_MAX_BODY_BYTES", int(cfg.get("max_body_bytes") or 1_048_576),
                 minimum=1024, maximum=8_388_608,
@@ -775,6 +795,15 @@ def _is_static_navigation(path: str) -> bool:
     return path.lower().endswith(".html") and path.startswith(STATIC_NAV_PREFIXES)
 
 
+_HOLDERS_ACTIONS = {"refresh", "update", "backfill", "archive"}
+
+
+def _holders_action(path: str) -> str:
+    """/holders/ 之後的動作名稱。上游 _handle_holders 先解碼一次、再去掉斜線與空白，
+    所以 %72efresh、backfill%2F、%20refresh 都會執行；這裡用同樣（略寬）的正規化，寧可多擋。"""
+    return unquote(path[9:]).strip(" \t\r\n/").lower()
+
+
 def route_permission(method: str, path: str, role: str, settings: Settings) -> bool:
     if path.startswith('/macro/refresh/'):
         # Sam 核准單一 id 更新；拒絕多段及編碼分隔符，不擴成其他控制路徑。
@@ -789,6 +818,9 @@ def route_permission(method: str, path: str, role: str, settings: Settings) -> b
             return False
         if path in STATIC_EXACT or path.startswith(STATIC_PREFIXES):
             return True
+        # TDCC 更新／回補是會啟動背景抓取的 GET；唯讀角色不可觸發。
+        if path.startswith("/holders/") and _holders_action(path) in _HOLDERS_ACTIONS:
+            return role == "owner"
         if _path_matches(path, OWNER_GET_EXACT, OWNER_GET_PREFIXES):
             return role == "owner"
         if _path_matches(path, READ_GET_EXACT, READ_GET_PREFIXES):
@@ -1243,8 +1275,10 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         try:
             self.settings.audit_path.parent.mkdir(parents=True, exist_ok=True)
             lock = self.server.audit_lock  # type: ignore[attr-defined]
-            with lock, self.settings.audit_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            with lock:
+                _rotate_if_large(self.settings.audit_path)
+                with self.settings.audit_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
         except OSError:
             pass
 
@@ -1311,8 +1345,10 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
         try:
             self.settings.client_trace_path.parent.mkdir(parents=True, exist_ok=True)
             lock = self.server.audit_lock  # type: ignore[attr-defined]
-            with lock, self.settings.client_trace_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            with lock:
+                _rotate_if_large(self.settings.client_trace_path)
+                with self.settings.client_trace_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
         except OSError:
             self._json(503, {"error": "client trace unavailable"})
             return
@@ -1330,8 +1366,18 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             return True
         return any(hostname.endswith(suffix) for suffix in self.settings.allowed_host_suffixes)
 
+    def _host_is_local(self) -> bool:
+        raw = (self.headers.get("Host") or "").strip().lower()
+        try:
+            return (urlsplit("//" + raw).hostname or "") in {"localhost", "127.0.0.1", "::1"}
+        except ValueError:
+            return False
+
     def _auth(self) -> tuple[str, str]:
-        if self.settings.dev_bypass and self.client_address[0] in {"127.0.0.1", "::1"}:
+        # 經 Tailscale Serve 進來的請求 peer 也是 loopback，但 Host 是 .ts.net 名稱；
+        # 開發捷徑只對直接以 localhost 開啟的請求有效，避免對整個 tailnet 開放 owner。
+        if (self.settings.dev_bypass and self.client_address[0] in {"127.0.0.1", "::1"}
+                and self._host_is_local()):
             return "owner", "dev-bypass"
         header = (self.headers.get("Authorization") or "").strip()
         scheme, _, credential = header.partition(" ")
@@ -1624,6 +1670,10 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             self._json(405, {"error": "GET or POST required"})
             return
         if path == "/gateway/logout" and self.command == "POST":
+            if not self._form_origin_allowed():
+                self._audit("logout_origin_rejected", 403)
+                self._json(403, {"error": "same-origin browser request required"})
+                return
             self._logout()
             return
         role, auth_kind = self._auth()
