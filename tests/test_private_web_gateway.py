@@ -599,6 +599,56 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(UpstreamHandler.seen, [])
 
+    def test_dev_bypass_does_not_grant_owner_to_tailnet_hostnames(self):
+        self.gateway.settings = gateway.Settings(**{**self.gateway.settings.__dict__, "dev_bypass": True})
+        status, _ = _request(self.base + "/alert/status")
+        self.assertEqual(status, 200)   # 直接以 127.0.0.1 開啟仍可用於本機開發
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/alert/status", headers={"Host": "node.example.ts.net"})
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+        self.assertEqual(response.status, 401)
+
+    def test_dev_bypass_is_refused_while_tailnet_host_names_are_allowed(self):
+        # Serve 會轉發用戶端自填的 Host（例如 localhost），Host 檢查擋不住偽造；
+        # 所以設定層就不許把開發捷徑和 tailnet 主機名並用。
+        import json
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        env = {"ST_WEB_DEV_BYPASS": "1", "ST_WEB_OWNER_TOKEN": "", "ST_WEB_READ_TOKEN": ""}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, env):
+            for suffixes, allowed in ((None, False), ([".ts.net"], False), ([], True)):
+                config = {} if suffixes is None else {"allowed_host_suffixes": suffixes}
+                path = Path(tmp) / "gateway.json"
+                path.write_text(json.dumps(config), encoding="utf-8")
+                with self.subTest(suffixes=suffixes):
+                    if allowed:
+                        self.assertTrue(gateway.Settings.load(path).dev_bypass)
+                    else:
+                        with self.assertRaises(ValueError):
+                            gateway.Settings.load(path)
+
+    def test_logout_rejects_cross_origin_post(self):
+        status, _ = _request(self.base + "/gateway/logout", method="POST", token="owner-secret",
+                             origin="https://evil.example", body={})
+        self.assertEqual(status, 403)
+
+    def test_reader_cannot_start_holders_refresh_or_backfill(self):
+        for path in ('/holders/refresh', '/holders/update', '/holders/backfill?weeks=104', '/holders/archive',
+                     # 上游先解碼一次再比對，編碼變體不可繞過 owner 檢查
+                     '/holders/%72efresh', '/holders/%62ackfill?weeks=104', '/holders/backfill%2F',
+                     '/holders/%20refresh', '/holders/refresh%20', '/holders/UPDATE', '/holders//archive/'):
+            with self.subTest(path=path):
+                status, _ = _request(self.base + path, token='reader-secret')
+                self.assertEqual(status, 403)
+        self.assertEqual(UpstreamHandler.seen, [])
+        status, _ = _request(self.base + '/holders/2330', token='reader-secret')
+        self.assertEqual(status, 200)
+
     def test_macro_refresh_owner_post_requires_browser_origin(self):
         path = self.base + '/macro/refresh/__TW_MARGIN_MIX__'
         for method, token, basic, origin, expected in (

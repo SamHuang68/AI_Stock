@@ -466,7 +466,7 @@
     try {
       done = await applyCore(wz.sym, wz.mkt, wz.diag, s, sel);
       if (typeof renderRpanel === 'function' && typeof S !== 'undefined' && S.tab === 'watch') { try { renderRpanel(); } catch {} }
-    } catch (e) { msg.innerHTML = '<span style="color:#f87171">套用部分失敗：' + e.message + '</span>'; return; }
+    } catch (e) { msg.textContent = ''; var failBox = document.createElement('span'); failBox.style.color = '#f87171'; failBox.textContent = '套用部分失敗：' + e.message; msg.appendChild(failBox); return; }
     msg.innerHTML = `<span style="color:#86efac">✅ 已套用：${done.join('、') || '（無）'}</span>`;
     setTimeout(close, 900);
   }
