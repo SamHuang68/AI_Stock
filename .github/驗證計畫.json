@@ -2,25 +2,150 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "f7ef0fc92396aa2d412f46a173c632fe30bfae24",
+  "baseCommit": "b01da39c45d9e40be1bce9c6c5fae32f3f1d7af6",
   "documentation": [
     "docs/revision.md",
-    "docs/shared-main-chart-recurrence-8d.md"
+    "docs/legacy-branch-disposition-2026-11-03.md"
   ],
   "cases": [
+    {
+      "id": "AI金鑰工作區與解讀錯誤提示後端",
+      "kind": "unittest",
+      "timeoutSeconds": 600,
+      "reason": "AI 金鑰可配對 Anthropic 工作區 ID；金鑰變更時清除模型快取；解讀的供應商錯誤轉為可行動提示；診斷寫入改限頻記錄",
+      "targets": [
+        "tests.test_secret_migration",
+        "tests.test_signal_narrative",
+        "tests.test_postmarket_http",
+        "tests.test_postmarket_report",
+        "tests.test_ai_stream_contract",
+        "tests.test_ai_research_route",
+        "tests.test_ai_local",
+        "tests.test_no_new_silent_exceptions"
+      ],
+      "changes": [
+        "server/ai_api.py",
+        "server/ai_routes.py",
+        "server/signal_narrative.py",
+        "server/stock_signals_routes.py",
+        "tests/test_secret_migration.py",
+        "tests/test_signal_narrative.py",
+        "tests/test_postmarket_http.py",
+        "tests/test_postmarket_report.py"
+      ],
+      "inputs": [
+        "server/ai_api.py",
+        "server/ai_routes.py",
+        "server/signal_narrative.py",
+        "server/stock_signals_routes.py",
+        "server/log_once.py",
+        "tests/test_secret_migration.py",
+        "tests/test_signal_narrative.py",
+        "tests/test_postmarket_http.py",
+        "tests/test_postmarket_report.py",
+        "tests/test_ai_stream_contract.py",
+        "tests/test_ai_research_route.py",
+        "tests/test_ai_local.py",
+        "tests/test_no_new_silent_exceptions.py",
+        "tests/silent_except_baseline.json"
+      ]
+    },
+    {
+      "id": "AI金鑰設定介面保留工作區",
+      "kind": "node",
+      "timeoutSeconds": 120,
+      "reason": "設定面板載入中、讀取失敗時不覆寫工作區；只更新工作區時不要求重填金鑰",
+      "targets": [
+        "tests/AI金鑰設定_selftest.js"
+      ],
+      "changes": [
+        "stock_terminal.html",
+        "tests/AI金鑰設定_selftest.js"
+      ],
+      "inputs": [
+        "stock_terminal.html",
+        "tests/AI金鑰設定_selftest.js"
+      ]
+    },
+    {
+      "id": "個股體檢解讀錯誤提示呈現",
+      "kind": "node",
+      "timeoutSeconds": 120,
+      "reason": "體檢頁顯示解讀失敗時的可行動說明",
+      "targets": [
+        "tests/stock_health_v5_selftest.js"
+      ],
+      "changes": [
+        "src/ui/stock_health_v5.js",
+        "tests/stock_health_v5_selftest.js"
+      ],
+      "inputs": [
+        "src/ui/stock_health_v5.js",
+        "tests/stock_health_v5_selftest.js"
+      ]
+    },
+    {
+      "id": "美股產業成員來自官方持股",
+      "kind": "unittest",
+      "timeoutSeconds": 600,
+      "reason": "熱力圖 11 檔 SPDR 產業 ETF 的成員取 State Street 官方每日持股，行情沿用 Pulse 批次報價；對不到的名稱與來源失敗仍回 UNAVAILABLE",
+      "targets": [
+        "tests.test_美股類股成員",
+        "tests.test_行情類股契約",
+        "tests.test_review_regressions"
+      ],
+      "changes": [
+        "server/server.py",
+        "server/美股類股成員.py",
+        "tests/test_美股類股成員.py",
+        "tests/test_行情類股契約.py"
+      ],
+      "inputs": [
+        "server/server.py",
+        "server/美股類股成員.py",
+        "server/類股成員.py",
+        "server/pulse_global.py",
+        "tests/test_美股類股成員.py",
+        "tests/test_行情類股契約.py",
+        "tests/test_review_regressions.py"
+      ]
+    },
+    {
+      "id": "首頁打包產物與來源一致",
+      "kind": "unittest",
+      "timeoutSeconds": 600,
+      "reason": "stock_terminal_v2.html 由 build_v2.py 依 stock_terminal.html 與 src 重建",
+      "targets": [
+        "tests.test_bundle_fresh"
+      ],
+      "changes": [
+        "stock_terminal_v2.html"
+      ],
+      "inputs": [
+        "stock_terminal_v2.html",
+        "stock_terminal.html",
+        "build_v2.py",
+        "tests/test_bundle_fresh.py",
+        "src/ui/stock_health_v5.js"
+      ]
+    },
     {
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "發布狀態只改文件；分享封存掃描",
+      "reason": "修訂紀錄、契約文件與分支處置紀錄為文件；分享封存掃描",
       "targets": [
         "tests.test_dist_scrub"
       ],
       "changes": [
-        "docs/revision.md"
+        "docs/revision.md",
+        "docs/報價與投組缺值契約.md",
+        "docs/legacy-branch-disposition-2026-11-03.md"
       ],
       "inputs": [
         "docs/revision.md",
+        "docs/報價與投組缺值契約.md",
+        "docs/legacy-branch-disposition-2026-11-03.md",
         "tests/test_dist_scrub.py"
       ]
     }

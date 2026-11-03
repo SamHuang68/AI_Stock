@@ -1,3 +1,18 @@
+## 2026-11-03 整合舊分支的未合併功能（AI 金鑰工作區、美股產業成員）與舊分支處置紀錄
+
+- 基底：`b01da39c45d9e40be1bce9c6c5fae32f3f1d7af6`（origin/main）；分支 `claude/integrate-ai-key-and-us-members`。
+- 授權：Sam 2026-11-03「有價值的全部整合 其餘刪掉」。這是整合；未合併、未發布。
+- 做法：先盤點 75 個尚存的非 main 分支（完整對照見 `docs/legacy-branch-disposition-2026-11-03.md`），只整合 main 確實沒有、且能在 main 現行契約上驗證的功能，其餘依該文件處置。
+- **AI 金鑰工作區**（來源 `codex/preserve-local-main-b3209f3-20261001` 的 `b3209f3`，2026-10-01）：金鑰與 Anthropic 工作區 ID 以同一份加密資料原子寫入；呼叫供應商時帶 `anthropic-workspace-id`；金鑰變更後不沿用舊金鑰留下的模型快取（快取以不輸出的雜湊辨識憑證）；設定面板在載入中或讀取失敗時不覆寫工作區，只更新工作區時不要求重填金鑰；個股解讀遇到「金鑰未綁工作區」的供應商錯誤時，顯示可行動的說明而不是原始錯誤。main 原本完全沒有工作區欄位（`git grep` 於 `server/`、`src/` 無命中）。套用到最新 main 時只有 `ai_routes.py` 的一行 import 衝突。移植後 `tests/test_no_new_silent_exceptions.py` 擋下 `signal_narrative.py` 新增的兩個靜默寬鬆例外：診斷寫入改用 `log_once`，工作區錯誤判斷縮小為 `(OSError, ValueError, AttributeError)`。
+- **美股產業成員**（來源舊整合線 `e5c148c` 的 `server/美股類股成員.py` 與測試）：main 的 `/sector-members?market=US` 只回 `UNAVAILABLE`（「尚無可核對的完整美股產業成員來源」）。現在對熱力圖的 11 檔 SPDR 產業 ETF 回成員：State Street 官方每日持股（只收有股票代號、CUSIP 與 SEDOL 的股票列，排除現金、貨幣基金、期貨），行情沿用 `pulse_global.yf_batch_quotes`，不另建抓取；缺行情時保留完整名單、數值為空。熱力圖與成員對照共用新的 `_US_SECTOR_ETFS`（原本 `_handle_sectors_us` 內的區域清單）。對不到這 11 檔的名稱與來源失敗仍回原本的 `UNAVAILABLE`／`ok=false`。前端不需修改：`heat_v5.js` 的成員面板已用同一個端點與欄位。實際讀取 XLK 持股檔確認格式未變（資料日 2026-11-02、75 檔、排除 3 列非股票）；`docs/報價與投組缺值契約.md` 同步更新。
+- **未整合、保留的分支**（需要決定，理由見處置紀錄）：`claude/runtime-unification-fixes`、`fix/etf-catalog-validation`（Sam 先前指定保留的單一資料根架構）、`codex/wavedeck-paper-p0`（與 WD-07 等紙上模式修改在七個檔案衝突）、`codex/跨專案驗證入口`（整合會讓 `tests.test_private_web_release` 的 4 個既有案例失敗，本機實測；牽涉發布政策）。
+- **檢視後未移植**：Email 聯絡人通知與 AI 全文朗讀（附屬於已退役的 AI 報告入口）、TDCC 持股分散的 HHI／熵（需改 `holders_week` 結構、來源註明不進總分）、私有網站同步包裝（被 exact-SHA 發布流程取代）。
+- 驗證：局部驗證，逐項見 `.github/驗證計畫.json` 的 6 個案例；`tests.test_secret_migration`／`test_signal_narrative`／`test_postmarket_http`／`test_postmarket_report`／`test_ai_stream_contract`／`test_ai_research_route`／`test_ai_local`／`test_no_new_silent_exceptions`、`tests.test_美股類股成員`／`test_行情類股契約`／`test_review_regressions`、兩個 Node 自測、`tests.test_bundle_fresh`、`tests.test_dist_scrub`；未跑完整套件。`stock_terminal_v2.html` 依來源重建。
+- 未驗證：工作區 ID 對真實 Anthropic 工作區金鑰的呼叫沒有實測（沒有使用真實金鑰；只驗到請求標頭與錯誤轉譯）；美股成員面板沒有在瀏覽器實測，也沒有實測有行情時的整批報價（單次 XLK 持股檔讀取是實測的，行情以替身驗證）；`/sector-members?market=US` 每次點擊最多觸發約 70 檔報價，上限 25 秒，前端快取 60 秒，未量測實際負載。
+- 發布狀態：**未合併、未發布**。
+
+---
+
 ## 2026-11-03 補記 f7ef0fc 發布狀態（含 #279、#280、#281）
 
 - 基底：`f7ef0fc92396aa2d412f46a173c632fe30bfae24`（origin/main）；分支 `claude/revision-f7ef0fc-release`。
