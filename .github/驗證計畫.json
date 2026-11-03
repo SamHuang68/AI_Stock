@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "1735200b1125cdc07bbdf2ca2d8a69f7b23453bb",
+  "baseCommit": "b5174f04e221cbdc877dd7d8c1649281af83fde1",
   "documentation": [
     "docs/revision.md",
     "docs/shared-main-chart-recurrence-8d.md"
@@ -25,35 +25,20 @@
       ]
     },
     {
-      "id": "決策每日情境永久保留",
+      "id": "本機啟動器查不到listener時仍能核對",
       "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "新增 decision_regime_daily 保存逐日情境，regime_at_date 改讀此表（舊資料庫退回 decision_history）；decision_history 的寫入、500 筆上限與讀者不變",
+      "timeoutSeconds": 300,
+      "reason": "start_local.ps1 在 listener 查不到時，以登記程序身分與 /health 核對；listener 查得到時的規則、外部 listener 與公開綁定的拒絕條件不變",
       "targets": [
-        "tests.test_決策每日情境",
-        "tests.test_決策持久提交",
-        "tests.test_conditional_expectation",
-        "tests.test_decision_context",
-        "tests.test_決策資料品質",
-        "tests.test_no_new_silent_exceptions"
+        "tests.test_local_release"
       ],
       "changes": [
-        "server/decision_store.py",
-        "server/conditional_expectation.py",
-        "tests/test_決策每日情境.py"
+        "scripts/start_local.ps1"
       ],
       "inputs": [
-        "server/decision_store.py",
-        "server/conditional_expectation.py",
-        "server/decision_context.py",
-        "server/log_once.py",
-        "tests/test_決策每日情境.py",
-        "tests/test_決策持久提交.py",
-        "tests/test_conditional_expectation.py",
-        "tests/test_decision_context.py",
-        "tests/test_決策資料品質.py",
-        "tests/test_no_new_silent_exceptions.py",
-        "tests/silent_except_baseline.json"
+        "scripts/start_local.ps1",
+        "scripts/local_release.py",
+        "tests/test_local_release.py"
       ]
     }
   ]

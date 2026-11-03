@@ -1,3 +1,19 @@
+## 2026-11-03 補記 b5174f0 發布狀態；啟動器在查不到 listener 時仍能核對
+
+- 基底：`b5174f04e221cbdc877dd7d8c1649281af83fde1`（origin/main）；分支 `claude/launcher-hidden-listeners`。實作與合併 SHA 待 PR 合併後補記。
+- **#276～#278 合併與發布狀態**（Sam 2026-11-03「合併並發布」）：
+  - 合併：#276 本機開機自啟與 listener 擁有者容錯，實作 `d213fae`，合併 `2e84ebe725d6b7ba2896d02b20eeb07db6f2499f`；#277 還原快照休市日與工作期限，實作 `5c636ad`（已含 main 同步），合併 `1735200b1125cdc07bbdf2ca2d8a69f7b23453bb`；#278 逐日市場情境，實作 `1419d28`（已含 main 同步），合併 `b5174f04e221cbdc877dd7d8c1649281af83fde1`。三者合併前 CI（ubuntu、windows）皆通過；main push CI（run 41501693198）對 `b5174f0` 成功。
+  - 發布：release id `b5174f04e221`，前一版 `793f04a094d7a0f976dd22d84714d1d7e6724032`。stage `tests: passed`（組合驗證計畫涵蓋 `793f04a→b5174f0` 全部程式變更：#276、#277、#278 三個案例）。正式站 2026-11-03 02:49（台北）上線，`/health` 的 `runtimeCommit` 與 `/health/live` 皆為 `b5174f0…`，閘道 `isolated-host`、upstream 正常；發布前後 329 個資料檔雜湊完全一致，14 個 SQLite 在停止後完整備份（完整性 ok）。本機 18432 於 02:53 同步並啟動，`runtimeCommit` 為 `b5174f0…`。
+  - 發布流程與既有的 `deploy.ps1` 的差異（證據在 `AI-Workspace/docs/stock-terminal/release-b5174f04/`，不在 Git 內）：(1) 預檢的 CI 只要求目標 SHA 的 `ci` 工作流程（ubuntu、windows 的 test）成功，舊腳本還要求「離線研究」完整驗證工作（2026-10-11 起日常改為局部驗證），在停機前就中止；(2) Windows 10.0.26300 對一般使用者查不到 listener 或擁有者為 0，改以 Win32_Process 的父子關係、完整命令列、建立時間與 `/health` 的 `runtimeCommit` 核對，埠是否關閉改用 TCP 連線測試；(3) 發布前正式站的 supervisor 早已不在（10-30 起），只剩後端與閘道兩個孤兒程序，先核對原父程序、指定 Python、完整腳本參數與前版程式內容（Git blob）都相符，才以 PID＋建立時間＋命令列重新核對後停止。第一次嘗試在孤兒停止後因 `Get-NetTCPConnection` 的幽靈 listener 列而誤判中止，正式站因此停機到修正後重跑完成，約 6 分鐘。
+  - 本機重啟：舊版已安裝的 `start_local.ps1` 在擁有者為 0 時會拒絕，所以先以收據核對程序身分（PID、建立時間、命令列、執行檔、`/health` 的資料目錄）後停止，再 `local_release.py sync`（本機資料已備份）、最後用同步後的新版 `start_local.ps1` 啟動；該腳本在伺服器已就緒後的最後核對因查不到 listener 而結束碼為 1（伺服器正常），即下述修正的原因。
+  - 未驗證：開機自啟（工作排程 `StockTerminal_Local_Host`）在真正重開機後的行為；#277 的還原快照在正式站實機收斂（需觀察幾個時段的被拒收數與 `savedSnapshot`）；#278 的 `decision_regime_daily` 逐日累積；閘道／Tailscale 端版本（需 Owner token）、手機尺寸畫面。
+- **啟動器修正**（`scripts/start_local.ps1`）：同一個作業系統行為的另一面——除了擁有者為 0，`Get-NetTCPConnection -State Listen` 有時完全查不到 18432 的 listener。原本 `-CheckOnly` 與啟動後的最後核對都要求 listener 存在，於是伺服器已就緒仍判定失敗（結束碼 1；`START_LOCAL_AND_WEB.cmd` 會誤報本機掛了）。改為：listener 查不到時，以登記程序身分（PID、建立時間、完整命令列、基底目錄、執行檔）加 `/health`（版本、資料目錄、Python、綁定、埠）核對；listener 查得到時仍照 #276 的規則核對。啟動前的「18432 已被其他程序使用」檢查不變（查得到才擋）；若有別的程序占住埠而 listener 又看不到，新程序會因綁定失敗退出，就緒迴圈會以程序身分不符而失敗，不會誤報成功。
+- 實機驗證：對正在運行的本機（PID 62500）執行修正版 `-CheckOnly` 結束碼 0；完整執行（非 `-CheckOnly`）結束碼 0、輸出「本機 ST 已就緒」、PID 與建立時間不變（沒有重啟）。
+- 驗證：`tests.test_local_release` 通過；`tests.test_launcher_safety` 在這台機器仍有 1 案失敗（真實 listener 擁有者查詢，未修改的 main 同樣失敗，與本次無關）。
+- 發布狀態：**未合併、未發布**。
+
+---
+
 ## 2026-11-03 條件期望的逐日市場情境改存永久的每日表
 
 - 基底：`cda001c9ffbfff900179a3cbdd3d21b60c87b37c`（origin/main）；分支 `claude/regime-history`。實作與合併 SHA 待 PR 合併後補記。依據：2026-10-29 唯讀調查（共用記憶 gotchas/0030 的 2026-10-29 補記），Sam 2026-11-03「照你建議執行」。

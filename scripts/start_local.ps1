@@ -95,7 +95,8 @@ if ($CheckOnly) {
     $owned = if ($receipt) { Get-CimInstance Win32_Process -Filter ('ProcessId = ' + [int]$receipt.pid) } else { $null }
     $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 18432 -ErrorAction SilentlyContinue)
     Assert-LocalListeners $listeners $owned $receipt $baseDir $python
-    if (-not $listeners.Count -or -not (Test-ManagedLocalIdentity $owned $receipt $baseDir $python)) {
+    # 部分 Windows 版本查不到 listener（或擁有者為 0）；此時以登記程序身分加其後的 /health 核對，不要求一定看得到 listener。
+    if (-not (Test-ManagedLocalIdentity $owned $receipt $baseDir $python)) {
         throw '尚無符合收據的本機 ST 程序。'
     }
     $health = Invoke-RestMethod -Uri 'http://127.0.0.1:18432/health' -TimeoutSec 3
@@ -186,10 +187,10 @@ try {
     }
     if (-not $ready) { throw '本機 ST 尚未通過啟動核對；請查看啟動日誌。' }
     $health = Invoke-RestMethod -Uri 'http://127.0.0.1:18432/health' -TimeoutSec 30
-    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 18432 -ErrorAction Stop)
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 18432 -ErrorAction SilentlyContinue)
     $owned = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + [int]$receipt.pid)
     Assert-LocalListeners $listeners $owned $receipt $baseDir $python
-    if (-not $listeners.Count -or -not (Test-LocalHealth $health $baseDir $state.installedCommit $python)) {
+    if (-not (Test-LocalHealth $health $baseDir $state.installedCommit $python)) {
         throw '本機 ST 的版本、資料目錄或埠核對失敗；未開啟瀏覽器。'
     }
     Write-Output ('本機 ST 已就緒：' + $state.installedCommit + '，127.0.0.1:18432')
