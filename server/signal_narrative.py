@@ -23,6 +23,7 @@ import re
 import threading
 import time
 import urllib.error
+import uuid
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 try:
@@ -60,6 +61,28 @@ SCHEMA = {
 _cache_lock = threading.Lock()
 _cache: Dict[Tuple[str, str, str, str], Tuple[float, Dict[str, Any]]] = {}
 CACHE_SEC = 1800
+
+
+def _trace(event: str, request_id: str, **details: Any) -> None:
+    """沿用既有 AI 診斷檔，只記錄狀態，不寫入金鑰、證據內容或供應商錯誤本文。"""
+    try:
+        import ai_local
+        ai_local.trace_event(event, request_id=request_id, mode='cloud-narrative',
+                             provider='anthropic', **details)
+    except Exception:
+        pass  # 診斷寫入失敗不能中斷規則解讀。
+
+
+def _requires_workspace(exc: urllib.error.HTTPError) -> bool:
+    """只辨識供應商明示的工作區要求；錯誤本文不回傳、不記錄。"""
+    if exc.code != 400:
+        return False
+    try:
+        body = json.loads(exc.read(4096).decode('utf-8', 'replace'))
+        message = str((body.get('error') or {}).get('message') or '').lower()
+        return 'anthropic-workspace-id' in message and 'not scoped to a workspace' in message
+    except Exception:
+        return False
 
 
 def system_prompt() -> str:
@@ -267,13 +290,18 @@ def from_message(result: Dict[str, Any], data: Dict[str, Any], model: str) -> Di
 
 
 def explain(result: Dict[str, Any], api_key: Optional[str], *, model: Optional[str] = None,
-            call: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None) -> Dict[str, Any]:
+            call: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+            request_id: Optional[str] = None) -> Dict[str, Any]:
     """單檔即時解讀；call 可注入（測試用），預設走 ai_api 的 /v1/messages。"""
+    request_id = request_id or uuid.uuid4().hex
+    started = time.monotonic()
     base = {'symbol': result.get('symbol'), 'asOf': result.get('asOf')}
+    _trace('收到白話解讀請求', request_id)
     if not result.get('ok') or not api_key:
         out = template(result)
         if result.get('ok') and not api_key:
             out['note'] = '尚未設定 AI Key，顯示規則模板'
+        _trace('使用規則模板', request_id, phase='未設定金鑰' if not api_key else '資料不足')
         return {**base, **out}
     import ai_api
     model = model or ai_api.resolve_model(api_key)
@@ -281,24 +309,49 @@ def explain(result: Dict[str, Any], api_key: Optional[str], *, model: Optional[s
     with _cache_lock:
         hit = _cache.get(key)
     if hit and hit[0] > time.time():
+        _trace('讀取既有解讀', request_id, model=model)
         return hit[1]
 
-    send = call or (lambda payload: ai_api.post_messages(api_key, payload, timeout=90))
+    transport = call or (lambda payload: ai_api.post_messages(api_key, payload, timeout=90))
+
+    def send(payload):
+        _trace('送出白話解讀', request_id, model=model,
+               dataBoundary={'method': 'POST', 'host': 'api.anthropic.com', 'path': '/v1/messages'})
+        return transport(payload)
+
+    workspace_required = False
     try:
         try:
             data = send(request_payload(result, model, structured=True))
         except urllib.error.HTTPError as exc:
             if exc.code != 400:
                 raise
+            workspace_required = _requires_workspace(exc)
+            if workspace_required:
+                raise
+            exc.close()
             # 不支援結構化輸出的舊模型：退回提示詞 JSON，再用同一套驗證
             data = send(request_payload(result, model, structured=False))
         out = {**base, **from_message(result, data, model)}
     except urllib.error.HTTPError as exc:
         out = {**base, **template(result), 'note': f'AI 呼叫失敗（HTTP {exc.code}），改用規則模板'}
+        if exc.code == 401:
+            out['failure'] = {'code': 'authentication_failed', 'httpStatus': 401, 'requestId': request_id}
+            out['recovery'] = 'Anthropic 未接受目前的 API 金鑰。請在本機右上角 KEY 更新有效的 Anthropic 金鑰，儲存後再按「白話解讀」。'
+        elif workspace_required or _requires_workspace(exc):
+            out['failure'] = {'code': 'workspace_required', 'httpStatus': 400, 'requestId': request_id}
+            out['recovery'] = '這把 Anthropic 金鑰需要指定工作區。請在本機右上角 KEY 填入 Workspace ID，儲存後再按「白話解讀」。'
+        exc.close()
+        _trace('白話解讀失敗', request_id, model=model, errorType=f'HTTP{exc.code}',
+               elapsedMs=round((time.monotonic() - started) * 1000))
         return out
     except Exception as exc:
         out = {**base, **template(result), 'note': f'AI 呼叫失敗（{type(exc).__name__}），改用規則模板'}
+        _trace('白話解讀失敗', request_id, model=model, errorType=type(exc).__name__,
+               elapsedMs=round((time.monotonic() - started) * 1000))
         return out
+    _trace('白話解讀完成', request_id, model=model, phase=out['source'],
+           elapsedMs=round((time.monotonic() - started) * 1000))
     with _cache_lock:
         _cache[key] = (time.time() + CACHE_SEC, out)
     return out

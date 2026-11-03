@@ -162,7 +162,7 @@ html,body{height:var(--st-app-height,100dvh);max-height:var(--st-app-height,100d
   #anabtn,.toc-pills,#keybtn,.rtab{display:none!important}
 }
 </style>
-<link rel="stylesheet" href="src/ui/mobile_v2.css?v=2f96ba69f501">
+<link rel="stylesheet" href="src/ui/mobile_v2.css?v=ac43c09785ca">
 </head>
 <body>
 <div id="app">
@@ -2194,26 +2194,41 @@ function showKeyModal() {
   const div=document.createElement('div');
   div.id='key-modal'; div.className='modal';
   div.innerHTML=`<div class="mbox">
-    <div class="m-title">ANTHROPIC API KEY</div>
+    <div class="m-title">Anthropic 金鑰設定</div>
     <div class="m-desc">取得：<a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--cyan)">console.anthropic.com</a> → API Keys<br>
-    <span style="font-size:9px;color:var(--tf)">Key 儲存於本機 server(不進瀏覽器、不傳第三方);AI 呼叫由本機 server 代理。${S.aiKeySet?'<br><b style="color:var(--green)">目前已設定</b>(輸入新值可更新)':''}</span></div>
+    <span style="font-size:9px;color:var(--tf)">金鑰加密儲存於本機伺服器；AI 呼叫時由伺服器送至 Anthropic 驗證。${S.aiKeySet?'<br><b style="color:var(--green)">目前已儲存金鑰</b>（儲存不代表供應商已接受）':''}</span></div>
     <div class="m-row">
       <input class="m-input" id="key-inp" type="password" placeholder="${S.aiKeySet?'已設定 — 輸入可更新':'sk-ant-api03-...'}" value="">
     </div>
+    <label for="key-workspace" class="m-desc">工作區 ID（未綁定工作區的金鑰才需要）</label>
+    <div class="m-row"><input class="m-input" id="key-workspace" type="text" autocomplete="off" placeholder="Anthropic Workspace ID" value="" disabled></div>
+    <div class="m-desc" id="key-workspace-state" role="status">讀取目前工作區設定…</div>
     <div class="m-row" style="margin-top:10px">
-      <button class="m-btn" onclick="saveKey()">儲存</button>
+      <button class="m-btn" id="key-save" onclick="saveKey()" disabled>儲存</button>
       <button class="m-btn-sec" onclick="document.getElementById('key-modal').remove()">取消</button>
       ${S.aiKeySet?`<button class="m-btn-sec" onclick="clearKey()">清除</button>`:''}
     </div>
   </div>`;
   document.body.appendChild(div);
   document.getElementById('key-inp').focus();
+  fetch(`${SERVER}/ai-key/status`).then(r => { if(!r.ok) throw new Error(); return r.json(); }).then(st => {
+    if(!div.isConnected)return;
+    const field=div.querySelector('#key-workspace');
+    field.value=st.workspaceId||''; field.disabled=false;
+    div.querySelector('#key-save').disabled=false;
+    div.querySelector('#key-workspace-state').textContent='已綁定工作區的金鑰可留空；只更新工作區時，金鑰欄可留空。';
+  }).catch(() => { if(div.isConnected)div.querySelector('#key-workspace-state').textContent='工作區設定讀取失敗；請關閉後重新開啟設定，再儲存。'; });
 }
 async function saveKey() {
   const v=document.getElementById('key-inp')?.value?.trim();
-  if(!v)return;
+  const workspace=document.getElementById('key-workspace');
+  if(workspace?.disabled)return;
+  if(!v&&!S.aiKeySet)return;
+  const body={key:v||''};
+  if(workspace&&!workspace.disabled)body.workspaceId=workspace.value.trim();
+  if(!v&&!Object.prototype.hasOwnProperty.call(body,'workspaceId'))return;
   try{
-    const r=await fetch(`${SERVER}/ai-key`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:v})});
+    const r=await fetch(`${SERVER}/ai-key`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok){ alert('儲存失敗:'+(await r.text())); return; }
     S.aiKeySet=true; S.apiKey='';
   }catch(e){ alert('儲存失敗:'+e.message); return; }
@@ -2232,100 +2247,100 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&document.activeElement.id==='syminput') go();
 });
 </script>
-<script src="src/core/colors_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/app_kernel_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/feature_flags_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/epistemic_badges_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/market_freshness_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/market_data_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/投組資料契約_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/decision_data_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/更新工作_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/market_intel_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/table_sort_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/viz_v5.js?v=2f96ba69f501"></script>
-<script src="src/core/market_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/fields_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/chart_registry_v3.js?v=2f96ba69f501"></script>
-<script src="src/ui/share_v3.js?v=2f96ba69f501"></script>
-<script src="src/ui/datasources_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/etf_flow_tip_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/position_v2.js?v=2f96ba69f501"></script>
-<script src="src/core/watch_v2.js?v=2f96ba69f501"></script>
-<script src="src/core/info_v2.js?v=2f96ba69f501"></script>
-<script src="src/core/pro_v2.js?v=2f96ba69f501"></script>
-<script src="src/chart/volume_profile_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/pattern_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/live_v2.js?v=2f96ba69f501"></script>
-<script src="src/fundamental/chip_v3.js?v=2f96ba69f501"></script>
-<script src="src/fundamental/fundamental_v3.js?v=2f96ba69f501"></script>
-<script src="src/ui/polish_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/wl_live_v3.js?v=2f96ba69f501"></script>
-<script src="src/alert/alert_push_v3.js?v=2f96ba69f501"></script>
-<script src="src/screener/backtest_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/indicator_cache_v3.js?v=2f96ba69f501"></script>
-<script src="src/ui/enhance_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/aftermarket_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/overnight_v3.js?v=2f96ba69f501"></script>
-<script src="src/fundamental/supplychain_v3.js?v=2f96ba69f501"></script>
-<script src="src/fundamental/chainmom_v3.js?v=2f96ba69f501"></script>
-<script src="src/fundamental/valuation_v3.js?v=2f96ba69f501"></script>
-<script src="src/alert/calendar_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/multichart_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/spread_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/hotkeys_v3.js?v=2f96ba69f501"></script>
-<script src="src/screener/策略版本.js?v=2f96ba69f501"></script>
-<script src="src/screener/strategy_builder_v3.js?v=2f96ba69f501"></script>
-<script src="src/screener/strategy_script_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/drawtools_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/etf_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/indices_v3.js?v=2f96ba69f501"></script>
-<script src="src/alert/datahealth_v3.js?v=2f96ba69f501"></script>
-<script src="src/alert/toast_v3.js?v=2f96ba69f501"></script>
-<script src="src/alert/settle_v3.js?v=2f96ba69f501"></script>
-<script src="src/ai/cmdpalette_v3.js?v=2f96ba69f501"></script>
-<script src="src/ui/dragwin_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/liverefresh_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/namesearch_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/intraday_volume_v3.js?v=2f96ba69f501"></script>
-<script src="src/core/realtime_v3.js?v=2f96ba69f501"></script>
-<script src="src/ai/ai_runtime_client.js?v=2f96ba69f501"></script>
-<script src="src/core/研究工作流.js?v=2f96ba69f501"></script>
-<script src="src/core/研究任務.js?v=2f96ba69f501"></script>
-<script src="src/core/估值承接核心.js?v=2f96ba69f501"></script>
-<script src="src/ai/copilot_v3.js?v=2f96ba69f501"></script>
-<script src="src/screener/wizard_v3.js?v=2f96ba69f501"></script>
-<script src="src/ui/shell_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/更新工作中心.js?v=2f96ba69f501"></script>
-<script src="src/ui/估值承接研究.js?v=2f96ba69f501"></script>
-<script src="src/ui/研究任務面板.js?v=2f96ba69f501"></script>
-<script src="src/ui/研究工作台.js?v=2f96ba69f501"></script>
-<script src="src/ui/wavedeck_bridge_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/hub_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/pulse_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/decision_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/consensus_attention_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/heat_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/book_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/scan_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/ai_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/breadth_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/afterhours_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/news_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/postmarket_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/conditional_expectation_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/peak_observation_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/peak_observation_100d_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/touxin_5d_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/stock_health_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/bridge_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/visual_system_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/chart_visual_v5.js?v=2f96ba69f501"></script>
-<script src="src/ui/daily_cache_v3.js?v=2f96ba69f501"></script>
-<script src="src/ui/txf_intraday_v3.js?v=2f96ba69f501"></script>
-<script src="src/ui/K線事件研究.js?v=2f96ba69f501"></script>
-<script src="src/ui/toolbar_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/market_score_bar_v3.js?v=2f96ba69f501"></script>
-<script src="src/chart/market_chart_v3.js?v=2f96ba69f501"></script>
+<script src="src/core/colors_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/app_kernel_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/feature_flags_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/epistemic_badges_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/market_freshness_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/market_data_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/投組資料契約_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/decision_data_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/更新工作_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/market_intel_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/table_sort_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/viz_v5.js?v=ac43c09785ca"></script>
+<script src="src/core/market_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/fields_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/chart_registry_v3.js?v=ac43c09785ca"></script>
+<script src="src/ui/share_v3.js?v=ac43c09785ca"></script>
+<script src="src/ui/datasources_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/etf_flow_tip_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/position_v2.js?v=ac43c09785ca"></script>
+<script src="src/core/watch_v2.js?v=ac43c09785ca"></script>
+<script src="src/core/info_v2.js?v=ac43c09785ca"></script>
+<script src="src/core/pro_v2.js?v=ac43c09785ca"></script>
+<script src="src/chart/volume_profile_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/pattern_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/live_v2.js?v=ac43c09785ca"></script>
+<script src="src/fundamental/chip_v3.js?v=ac43c09785ca"></script>
+<script src="src/fundamental/fundamental_v3.js?v=ac43c09785ca"></script>
+<script src="src/ui/polish_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/wl_live_v3.js?v=ac43c09785ca"></script>
+<script src="src/alert/alert_push_v3.js?v=ac43c09785ca"></script>
+<script src="src/screener/backtest_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/indicator_cache_v3.js?v=ac43c09785ca"></script>
+<script src="src/ui/enhance_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/aftermarket_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/overnight_v3.js?v=ac43c09785ca"></script>
+<script src="src/fundamental/supplychain_v3.js?v=ac43c09785ca"></script>
+<script src="src/fundamental/chainmom_v3.js?v=ac43c09785ca"></script>
+<script src="src/fundamental/valuation_v3.js?v=ac43c09785ca"></script>
+<script src="src/alert/calendar_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/multichart_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/spread_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/hotkeys_v3.js?v=ac43c09785ca"></script>
+<script src="src/screener/策略版本.js?v=ac43c09785ca"></script>
+<script src="src/screener/strategy_builder_v3.js?v=ac43c09785ca"></script>
+<script src="src/screener/strategy_script_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/drawtools_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/etf_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/indices_v3.js?v=ac43c09785ca"></script>
+<script src="src/alert/datahealth_v3.js?v=ac43c09785ca"></script>
+<script src="src/alert/toast_v3.js?v=ac43c09785ca"></script>
+<script src="src/alert/settle_v3.js?v=ac43c09785ca"></script>
+<script src="src/ai/cmdpalette_v3.js?v=ac43c09785ca"></script>
+<script src="src/ui/dragwin_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/liverefresh_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/namesearch_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/intraday_volume_v3.js?v=ac43c09785ca"></script>
+<script src="src/core/realtime_v3.js?v=ac43c09785ca"></script>
+<script src="src/ai/ai_runtime_client.js?v=ac43c09785ca"></script>
+<script src="src/core/研究工作流.js?v=ac43c09785ca"></script>
+<script src="src/core/研究任務.js?v=ac43c09785ca"></script>
+<script src="src/core/估值承接核心.js?v=ac43c09785ca"></script>
+<script src="src/ai/copilot_v3.js?v=ac43c09785ca"></script>
+<script src="src/screener/wizard_v3.js?v=ac43c09785ca"></script>
+<script src="src/ui/shell_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/更新工作中心.js?v=ac43c09785ca"></script>
+<script src="src/ui/估值承接研究.js?v=ac43c09785ca"></script>
+<script src="src/ui/研究任務面板.js?v=ac43c09785ca"></script>
+<script src="src/ui/研究工作台.js?v=ac43c09785ca"></script>
+<script src="src/ui/wavedeck_bridge_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/hub_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/pulse_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/decision_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/consensus_attention_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/heat_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/book_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/scan_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/ai_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/breadth_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/afterhours_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/news_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/postmarket_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/conditional_expectation_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/peak_observation_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/peak_observation_100d_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/touxin_5d_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/stock_health_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/bridge_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/visual_system_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/chart_visual_v5.js?v=ac43c09785ca"></script>
+<script src="src/ui/daily_cache_v3.js?v=ac43c09785ca"></script>
+<script src="src/ui/txf_intraday_v3.js?v=ac43c09785ca"></script>
+<script src="src/ui/K線事件研究.js?v=ac43c09785ca"></script>
+<script src="src/ui/toolbar_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/market_score_bar_v3.js?v=ac43c09785ca"></script>
+<script src="src/chart/market_chart_v3.js?v=ac43c09785ca"></script>
 </body>
 </html>

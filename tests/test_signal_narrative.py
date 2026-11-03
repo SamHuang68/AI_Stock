@@ -95,6 +95,13 @@ class ExplainTests(unittest.TestCase):
     def setUp(self):
         sn._cache.clear()
         self.result = make_result()
+        import ai_local
+        trace_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(trace_dir.cleanup)
+        self.trace_path = Path(trace_dir.name) / 'ai_runtime_trace.jsonl'
+        trace_patch = mock.patch.object(ai_local, 'TRACE_PATH', self.trace_path)
+        trace_patch.start()
+        self.addCleanup(trace_patch.stop)
 
     def test_without_key_uses_template_that_cites_real_evidence(self):
         out = sn.explain(self.result, '')
@@ -166,6 +173,71 @@ class ExplainTests(unittest.TestCase):
         self.assertEqual(calls, [True, False])
         self.assertEqual(out['source'], 'claude')
 
+    def test_401_explains_recovery_without_retry_or_secret_logging(self):
+        sent = []
+        secret = 'sk-ant-api03-private-test-secret'
+        private_body = '供應商錯誤本文不得留存'
+
+        def denied(payload):
+            sent.append(payload)
+            raise urllib.error.HTTPError('https://api.anthropic.com/v1/messages', 401,
+                                         secret, {}, io.BytesIO(private_body.encode('utf-8')))
+
+        out = sn.explain(self.result, secret, model='m', call=denied, request_id='auth-test-1')
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(out['source'], 'template')
+        self.assertEqual(out['failure'], {'code': 'authentication_failed', 'httpStatus': 401,
+                                          'requestId': 'auth-test-1'})
+        self.assertIn('更新有效的 Anthropic 金鑰', out['recovery'])
+        self.assertTrue(out['sentences'])
+        self.assertFalse(sn._cache)
+        trace = self.trace_path.read_text(encoding='utf-8')
+        rows = [json.loads(line) for line in trace.splitlines()]
+        self.assertEqual([row['event'] for row in rows],
+                         ['收到白話解讀請求', '送出白話解讀', '白話解讀失敗'])
+        self.assertEqual({row['requestId'] for row in rows}, {'auth-test-1'})
+        self.assertEqual(rows[-1]['errorType'], 'HTTP401')
+        self.assertNotIn(secret, trace + json.dumps(out))
+        self.assertNotIn(private_body, trace)
+        self.assertNotIn(self.result['health']['summary']['sentence'], trace)
+        summary = self.result['health']['summary']['sentence']
+        recovered = sn.explain(self.result, 'new-key', model='m',
+                               call=lambda p: claude_message([
+                                   {'text': summary, 'evidenceIds': ['health.summary']},
+                                   {'text': summary, 'evidenceIds': ['health.summary']}]))
+        self.assertEqual(recovered['source'], 'claude')
+        self.assertNotIn('failure', recovered)
+
+    def test_missing_workspace_is_not_retried_as_output_format_failure(self):
+        calls = []
+
+        def denied(payload):
+            calls.append(payload)
+            body = {'error': {'message': 'This API key is not scoped to a workspace; include anthropic-workspace-id.'}}
+            raise urllib.error.HTTPError('u', 400, 'bad', {}, io.BytesIO(json.dumps(body).encode()))
+
+        out = sn.explain(self.result, 'key', model='m', call=denied)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(out['failure']['code'], 'workspace_required')
+        self.assertIn('Workspace ID', out['recovery'])
+        self.assertEqual(out['source'], 'template')
+
+    def test_interrupted_error_body_still_returns_the_rule_template(self):
+        class BrokenBody(io.BytesIO):
+            def read(self, *args):
+                raise OSError('模擬錯誤本文讀取中斷')
+
+        calls = []
+        def failed(payload):
+            calls.append(payload)
+            body = io.BytesIO(b'{}') if len(calls) == 1 else BrokenBody()
+            raise urllib.error.HTTPError('u', 400, 'bad', {}, body)
+
+        out = sn.explain(self.result, 'key', model='m', call=failed)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(out['source'], 'template')
+        self.assertIn('HTTP 400', out['note'])
+
 
 class BatchDigestTests(unittest.TestCase):
     def test_submit_then_collect(self):
@@ -211,6 +283,63 @@ class BatchDigestTests(unittest.TestCase):
 
 
 class ApiHelperTests(unittest.TestCase):
+    def setUp(self):
+        credentials = mock.patch.object(ai_api, '_load_ai_credentials', return_value={'key': '', 'workspaceId': ''})
+        credentials.start()
+        self.addCleanup(credentials.stop)
+
+    def test_workspace_headers_apply_only_to_the_matching_saved_key(self):
+        with mock.patch.object(ai_api, '_load_ai_credentials', return_value={'key': 'saved-key', 'workspaceId': 'wrkspc_test'}):
+            self.assertEqual(ai_api._headers('saved-key')['anthropic-workspace-id'], 'wrkspc_test')
+            self.assertNotIn('anthropic-workspace-id', ai_api._headers('override-key'))
+            first = ai_api._model_cache_key('saved-key')
+        with mock.patch.object(ai_api, '_load_ai_credentials', return_value={'key': 'saved-key', 'workspaceId': 'wrkspc_second'}):
+            self.assertNotEqual(first, ai_api._model_cache_key('saved-key'))
+
+    def test_replacing_key_discards_old_account_model_caches(self):
+        with mock.patch.object(ai_api, 'save_secret') as save, \
+                mock.patch.dict(ai_api._MODEL_CACHE, {'date': 'today', 'id': 'old-model'}, clear=True), \
+                mock.patch.dict(ai_api._OPUS_CACHE, {'date': 'today', 'id': 'old-opus'}, clear=True):
+            ai_api.save_ai_key(' replacement ')
+            save.assert_called_once_with(ai_api._AI_KEY_FILE, 'replacement')
+            self.assertEqual(ai_api._MODEL_CACHE['date'], '')
+            self.assertEqual(ai_api._OPUS_CACHE, {'date': '', 'id': '', 'credential': ''})
+
+    def test_late_old_key_lookup_cannot_supply_new_key_model(self):
+        for hint in ('sonnet', 'opus'):
+            with self.subTest(hint=hint):
+                entered, release = threading.Event(), threading.Event()
+                calls = []
+                outputs = []
+
+                def lookup(req, timeout=None):
+                    key = req.get_header('X-api-key')
+                    calls.append(key)
+                    if key == 'old-key':
+                        entered.set()
+                        if not release.wait(3):
+                            raise AssertionError('舊查詢未收到釋放訊號')
+                    payload = {'data': [{'id': f'{key}-{hint}'}]}
+                    return io.BytesIO(json.dumps(payload).encode('utf-8'))
+
+                with mock.patch.object(ai_api, 'save_secret'), \
+                        mock.patch.object(ai_api.urllib.request, 'urlopen', lookup), \
+                        mock.patch.dict(ai_api._MODEL_CACHE, {'date': '', 'id': '', 'credential': ''}, clear=True), \
+                        mock.patch.dict(ai_api._OPUS_CACHE, {'date': '', 'id': '', 'credential': ''}, clear=True):
+                    worker = threading.Thread(target=lambda: outputs.append(ai_api.resolve_model_hint('old-key', hint)))
+                    worker.start()
+                    try:
+                        self.assertTrue(entered.wait(2))
+                        ai_api.save_ai_key('new-key')
+                    finally:
+                        release.set()
+                        worker.join(3)
+                    self.assertFalse(worker.is_alive())
+                    self.assertEqual(outputs, [f'old-key-{hint}'])
+                    self.assertEqual(ai_api.resolve_model_hint('new-key', hint), f'new-key-{hint}')
+                    self.assertEqual(ai_api.resolve_model_hint('new-key', hint), f'new-key-{hint}')
+                    self.assertEqual(calls, ['old-key', 'new-key'])
+
     def test_default_model_is_current_generation(self):
         self.assertEqual(ai_api.DEFAULT_MODEL, 'claude-sonnet-5')
 
@@ -262,6 +391,32 @@ class ExplainHttpTests(unittest.TestCase):
                 out = json.load(r)
         self.assertEqual(out['source'], 'template')
         self.assertTrue(out['sentences'])
+
+    def test_workspace_only_update_keeps_key_and_status_never_returns_it(self):
+        body = json.dumps({'workspaceId': 'wrkspc_test'}).encode('utf-8')
+        req = urllib.request.Request(self.base + '/ai-key', data=body,
+                                     headers={'Content-Type': 'application/json'})
+        with mock.patch.object(ai_api, 'load_ai_key', return_value='sk-test-secret'), \
+                mock.patch.object(ai_api, 'load_ai_workspace', return_value='wrkspc_test'), \
+                mock.patch.object(ai_api, 'save_ai_key') as save:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertTrue(json.load(resp)['ok'])
+            save.assert_called_once_with('sk-test-secret', workspace_id='wrkspc_test')
+            with urllib.request.urlopen(self.base + '/ai-key/status', timeout=5) as resp:
+                status = json.load(resp)
+            self.assertEqual(status, {'set': True, 'workspaceId': 'wrkspc_test'})
+            self.assertNotIn('sk-test-secret', json.dumps(status))
+
+    def test_workspace_header_injection_is_rejected_before_saving(self):
+        body = json.dumps({'key': 'sk-test', 'workspaceId': 'wrkspc_test\r\nx-injected: yes'}).encode()
+        req = urllib.request.Request(self.base + '/ai-key', data=body,
+                                     headers={'Content-Type': 'application/json'})
+        with mock.patch.object(ai_api, 'save_ai_key') as save:
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(req, timeout=5)
+            self.assertEqual(caught.exception.code, 400)
+            caught.exception.close()
+            save.assert_not_called()
 
 
 if __name__ == '__main__':

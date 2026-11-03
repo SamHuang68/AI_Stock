@@ -272,6 +272,12 @@
       : '白話解讀（規則模板）';
     var dropped = n.dropped && n.dropped.length ? '<div class="sh5-warn">已刪除 ' + n.dropped.length + ' 句無法對應證據的內容。</div>' : '';
     if (n.note) dropped += '<div class="sh5-warn">' + esc(n.note) + '</div>';
+    var recovery = n.recovery;
+    // 已開啟的本機後端可能尚未重新啟動，也要能解釋原有的 401 回應。
+    if (!recovery && /HTTP\s+401\b/.test(n.note || '')) {
+      recovery = 'Anthropic 未接受目前的 API 金鑰。請在本機右上角 KEY 更新有效的 Anthropic 金鑰，儲存後再按「白話解讀」。';
+    }
+    if (recovery) dropped += '<div class="sh5-warn" role="alert">' + esc(recovery) + '</div>';
     return '<div class="sh5-ai"><div style="font-weight:800;color:#c7d2fe;margin-bottom:4px">' + esc(head) + '</div>' +
       parts.join('<br>') + dropped + '</div>';
   }

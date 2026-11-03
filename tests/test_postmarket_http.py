@@ -86,7 +86,8 @@ class PostmarketHttpTest(unittest.TestCase):
         self._old_load_key = ai_api.load_ai_key
         self._old_model_cache = dict(ai_api._MODEL_CACHE)
         ai_api._MODEL_CACHE.update({'date': datetime.now().strftime('%Y%m%d'),
-                                    'id': 'claude-sonnet-4-6'})
+                                    'id': 'claude-sonnet-4-6',
+                                    'credential': ai_api._model_cache_key('sk-test')})
         pr.configure(
             bars_fn=lambda code: _bars(),
             chip_fn=lambda code: None,

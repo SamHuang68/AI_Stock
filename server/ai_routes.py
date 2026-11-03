@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import threading
 import time
 import urllib.error
@@ -14,7 +15,8 @@ from http_boundary import BodyReadError, read_json_body
 
 class AiRoutesMixin:
     def _handle_ai_key_status(self):
-        self._ok(json.dumps({'set': bool(ai_api.load_ai_key())}).encode())
+        self._ok(json.dumps({'set': bool(ai_api.load_ai_key()),
+                             'workspaceId': ai_api.load_ai_workspace()}).encode())
 
     def _handle_ai_key_set(self):
         try:
@@ -24,10 +26,19 @@ class AiRoutesMixin:
         if body.get('clear'):
             ai_api.save_ai_key('')
             self._ok(b'{"ok":true,"cleared":true}'); return
-        k = (body.get('key') or '').strip()
+        workspace_id = body.get('workspaceId')
+        if workspace_id is not None:
+            if not isinstance(workspace_id, str) or (workspace_id.strip() and not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', workspace_id.strip())):
+                self._err('工作區 ID 格式不正確，請貼上 Anthropic 提供的 Workspace ID。', 400); return
+        value = body.get('key') or ''
+        if not isinstance(value, str):
+            self._err('API 金鑰必須是文字。', 400); return
+        k = value.strip()
+        if not k and workspace_id is not None:
+            k = ai_api.load_ai_key()
         if not k.startswith('sk-'):
             self._err('invalid key (need sk-...)', 400); return
-        ai_api.save_ai_key(k)
+        ai_api.save_ai_key(k, workspace_id=workspace_id)
         self._ok(b'{"ok":true}')
 
     def _handle_ai_model(self):
