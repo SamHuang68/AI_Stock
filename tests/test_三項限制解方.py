@@ -167,11 +167,14 @@ class SolutionTests(unittest.TestCase):
             clock.now.return_value = now
             clock.fromisoformat.side_effect = datetime.fromisoformat
             first = sources.run()
-            self.assertEqual(first['status'], 'partial')
+            # 官方檔列出 2317 但開高低收是「--」（無成交）：保留在結果與 noPriceSymbols，不降級也不重抓。
+            self.assertEqual(first['status'], 'completed')
             self.assertEqual(first['sources'][0]['result']['unavailableSymbols'], ['2317'])
+            self.assertEqual(first['noPriceSymbols'], ['2317'])
+            self.assertEqual(first['unconfirmedSymbols'], [])
             second = sources.run()
             self.assertEqual(second['status'], 'completed')
-            self.assertEqual(len(seen), 3)
+            self.assertEqual(len(seen), 2)
             self.assertIn('reusedFromRun', second['sources'][1])
             # 還原快照依賴現在的日線，不沿用「先前已完成」：兩次執行都重新核對。
             self.assertEqual(snapshots.call_count, 2)

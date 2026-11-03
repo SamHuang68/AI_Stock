@@ -110,8 +110,10 @@ def run(day=None, *, adjustment_budget_seconds=120):
         started = time.monotonic()
         try:
             row['result'] = action()
-            row['status'] = 'partial' if (row['result'].get('status') == 'partial' or row['result'].get('conflicts') or
-                                         row['result'].get('unavailableSymbols')) else 'completed'
+            # 兩層：官方當日檔列出、但開高低收為「--」的代號（無成交，unavailableSymbols）是官方的完整回答，
+            # 只留在結果與 state['noPriceSymbols'] 供查閱，不降級；來源回報 partial、有衝突，或代號不在官方檔內
+            # （unconfirmedSymbols，見下）才是真正的缺口，維持 partial。
+            row['status'] = 'partial' if (row['result'].get('status') == 'partial' or row['result'].get('conflicts')) else 'completed'
         except Exception as exc:
             row.update(status='failed', error=type(exc).__name__, reason=str(exc)[:300])
         row['elapsedSec'] = round(time.monotonic() - started, 3)
@@ -144,6 +146,7 @@ def run(day=None, *, adjustment_budget_seconds=120):
     unavailable = {code for row in quote_sources for code in (row.get('result') or {}).get('unavailableSymbols', [])}
     missing = sorted(code for code in symbols - received - unavailable if eligible_bar(code, day))
     state['unconfirmedSymbols'] = missing
+    state['noPriceSymbols'] = sorted(unavailable)
     if missing:
         for row in quote_sources:
             if row['status'] == 'completed':
