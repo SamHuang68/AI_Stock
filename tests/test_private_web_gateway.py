@@ -617,7 +617,10 @@ class PrivateWebGatewayTests(unittest.TestCase):
         self.assertEqual(status, 403)
 
     def test_reader_cannot_start_holders_refresh_or_backfill(self):
-        for path in ('/holders/refresh', '/holders/update', '/holders/backfill?weeks=104', '/holders/archive'):
+        for path in ('/holders/refresh', '/holders/update', '/holders/backfill?weeks=104', '/holders/archive',
+                     # 上游先解碼一次再比對，編碼變體不可繞過 owner 檢查
+                     '/holders/%72efresh', '/holders/%62ackfill?weeks=104', '/holders/backfill%2F',
+                     '/holders/%20refresh', '/holders/refresh%20', '/holders/UPDATE', '/holders//archive/'):
             with self.subTest(path=path):
                 status, _ = _request(self.base + path, token='reader-secret')
                 self.assertEqual(status, 403)

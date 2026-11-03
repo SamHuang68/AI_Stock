@@ -13,6 +13,7 @@
   - M-5：`/market-snapshot` 10 秒快取；景氣燈號先試主來源再查中繼資料；`/inst-rank` 逐日往前試探總預算 45 秒、單次逾時 8 秒。
   - M-6：三處確認的未逸出 `innerHTML`（多圖空狀態、條件組下拉、精靈錯誤訊息）改用 DOM 文字節點。
   - L-1、L-2、L-4、L-5、L-6、L-9、L-10、L-11：變化量為 0 時照算、去重改 set、WaveDeck 匯流排改用加鎖原子寫入、ETF 報告直接呼叫計算函式（不再自我發 HTTP）、裸 `except` 收窄並降低棘輪基準、登出來源檢查、`_hc` 匯入移到 `try` 之前、移除未用變數。
+- 審查意見修正（PR #283 的自動審查）：閘道 owner 檢查原本拿百分比編碼的路徑直接比對，`/holders/%72efresh`、`/holders/%62ackfill`、`/holders/backfill%2F`、`/holders/%20refresh` 會落入唯讀前綴而放行（reader 實測回 200）。閘道與後端 `_mutating_get` 改為與上游 `_handle_holders` 相同的「解碼一次、去掉斜線與空白、轉小寫」再比對（略寬，寧可多擋）；兩邊的測試各加入編碼變體，對修正前的程式失敗、修正後通過。
 - 不在本次範圍（報告原已列未改）：Yahoo crumb 鎖、`X-Forwarded-For` 信任、`/health` 對 reader 的資訊揭露、L-3、L-7、L-8、L-12；M-6 其餘 16 處經核對多為數字或常數串接。
 - 新增：`tests/test_datastore_universe_codes.py`（`fetch_tw_universe` 原本沒有測試；此測試對舊版 `datastore.py` 失敗、對新版通過）；`stock_terminal_v2.html` 由 `build_v2.py` 依 src 重建（96 行差異，皆來自上列三處前端修改）。
 - 驗證：局部驗證，逐項見 `.github/驗證計畫.json` 的 11 個案例；相關 Python 測試 159 項＋`tests.test_台股基本面`／`tests.test_發布完整性` 35 項＋`tests.test_datastore_universe_codes`＋三個 Node 自測＋`tests.test_bundle_fresh` 全數通過；未跑完整套件。

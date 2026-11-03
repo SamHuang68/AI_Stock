@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from private_web_access import (
     AccessRequestStore,
@@ -787,6 +787,15 @@ def _is_static_navigation(path: str) -> bool:
     return path.lower().endswith(".html") and path.startswith(STATIC_NAV_PREFIXES)
 
 
+_HOLDERS_ACTIONS = {"refresh", "update", "backfill", "archive"}
+
+
+def _holders_action(path: str) -> str:
+    """/holders/ 之後的動作名稱。上游 _handle_holders 先解碼一次、再去掉斜線與空白，
+    所以 %72efresh、backfill%2F、%20refresh 都會執行；這裡用同樣（略寬）的正規化，寧可多擋。"""
+    return unquote(path[9:]).strip(" \t\r\n/").lower()
+
+
 def route_permission(method: str, path: str, role: str, settings: Settings) -> bool:
     if path.startswith('/macro/refresh/'):
         # Sam 核准單一 id 更新；拒絕多段及編碼分隔符，不擴成其他控制路徑。
@@ -802,7 +811,7 @@ def route_permission(method: str, path: str, role: str, settings: Settings) -> b
         if path in STATIC_EXACT or path.startswith(STATIC_PREFIXES):
             return True
         # TDCC 更新／回補是會啟動背景抓取的 GET；唯讀角色不可觸發。
-        if path.startswith("/holders/") and path[9:].strip("/") in {"refresh", "update", "backfill", "archive"}:
+        if path.startswith("/holders/") and _holders_action(path) in _HOLDERS_ACTIONS:
             return role == "owner"
         if _path_matches(path, OWNER_GET_EXACT, OWNER_GET_PREFIXES):
             return role == "owner"

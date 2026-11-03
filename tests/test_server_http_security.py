@@ -173,7 +173,9 @@ class ServerHttpSecurityTests(unittest.TestCase):
 
     def test_mutating_get_rejects_cross_site_browser_requests(self):
         for path in ('/holders/backfill?weeks=104', '/holders/refresh', '/focus?refresh=1',
-                     '/movers?refresh=1', '/sectors?nocache=1'):
+                     '/movers?refresh=1', '/sectors?nocache=1',
+                     '/holders/%72efresh', '/holders/%62ackfill?weeks=104', '/holders/backfill%2F',
+                     '/holders/%20refresh', '/holders/refresh%20'):
             with self.subTest(path=path, header='Sec-Fetch-Site'):
                 self.assertEqual(self._status(path, {'Sec-Fetch-Site': 'cross-site'}), 403)
             with self.subTest(path=path, header='Origin'):

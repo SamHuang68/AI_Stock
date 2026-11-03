@@ -2683,7 +2683,8 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
     def _mutating_get(self):
         """GET 但會觸發抓取、回補或快取失效的請求（舊前端契約保留 GET，故以來源檢查補強）。"""
         parts = urlparse(self.path)
-        if parts.path.startswith('/holders/') and unquote(parts.path[9:]).strip('/') in self._MUTATING_HOLDERS:
+        # 與 _handle_holders 同樣先解碼一次；空白與斜線一併去掉（%20refresh、backfill%2F 也算）。
+        if parts.path.startswith('/holders/') and unquote(parts.path[9:]).strip(' \t\r\n/').lower() in self._MUTATING_HOLDERS:
             return True
         qs = parse_qs(parts.query)
         return any((qs.get(k) or [''])[0].strip().lower() in ('1', 'true', 'yes', 'backfill', 'refresh')
