@@ -161,6 +161,15 @@ stateDiagram-v2
 - 不留倉：收盤前禁新單 + 強制平倉時點
 - 追價風險評估、部位上限、ST 降載（口數 ×0.5、停利緊縮）
 - 權益／昨餘／變動面板（種子數值來自參考 Wave AI，`account.source=wave_ai_ref`，僅供攻能驗證，非使用者實盤持倉）
+- **數值契約**（`server/data_contract.finite_number`）：閘門讀到的數字先過這一層。布林、NaN、Infinity、非數字都是「未知」，不是 0，也不會通過比較（`nan < 門檻` 是 False、`max(0.0, nan)` 是 0.0）。有效值與 `None` 的行為不變；改變的只有「有給卻不是有限數值」：
+
+  | 欄位 | 以前 | 現在 |
+  | --- | --- | --- |
+  | 信心度 `confidence` | NaN 跳過信心度門檻，仍可進場 | 擋新單（「信心度無效」）；沒給（`None`）仍略過門檻；門檻設為 0 時不擋 |
+  | 權益／昨日餘額 | NaN 被算成 0% 回撤並標示「已量測」，回撤鎖永不觸發 | 視為壞資料：擋新單、狀態標 `unknown_invalid`；`None` 仍只警示 |
+  | `spillover_prob`、`lots`、`style` | NaN 例外（`int()`）或繞過規則 | 當未知，用預設（`lots`=1、`style`=50，外溢規則不觸發） |
+
+  只擋新單（`ENTER_*`）；平倉與減碼（`EXIT`／`REDUCE`）不受影響。行情新鮮度閘門不在這一層（另案）。
 
 ### 4.4 Execution Gate & Broker Adapter
 - 閘門檢查清單：狀態允許？風控放行？部位校準一致？紙上／實盤？

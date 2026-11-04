@@ -1,3 +1,32 @@
+## 2026-11-04 WaveDeck 數值契約：下單閘門遇到非有限值失敗關閉（WD P0 分片移植，第 2a 片）
+
+- 基底：`b799137a4436df9932165610148296fb4813c3ec`（origin/main）；分支 `claude/wd-numeric-contract`。
+- 授權：Sam 2026-11-04 對「WaveDeck 第 2 片 `data_contract`」答「繼續」。**未合併、未發布**。
+- 為什麼拆成 2a／2b：分支的 `data_contract` 含兩樣不同性質的東西。(a) 數值契約 `finite_number`：把 NaN、Infinity、布林、非數字當「未知」。(b) 行情新鮮度閘門 `normalize_quote`／`assess_quote`，並接進 `risk.evaluate_gate`、`broker`、`st_link`、`state`：**進場必須有 ≤90 秒、帶時區時間戳的行情**。(b) 會改變下單閘門的政策；main 目前沒有獨立行情來源，訊號只帶 `price`，所以 (b) 上線後現有訊號會全部被擋，除非送件端改成帶 `quote.as_of`。這是政策決定，**不在本片**，等 Sam 定（2b）。本片只做 (a)。
+- 根因（用未改動的 main `risk.py` 實測）：`confidence=NaN` 的進場 `allow=True`、`reasons=[]`（`nan < 門檻` 是 False，信心度門檻被跳過）；`equity=NaN` 時 `daily_dd=0.0` 且 `daily_dd_known=True`（`max(0.0, nan)` 是 0.0，回撤被算成「已量測、0%」，單日回撤鎖永不觸發）；`lots=NaN` 直接丟 `ValueError`。非有限值可以從 LLM 提供者回傳的 JSON（`json.loads` 預設放行 `NaN`）或帳戶資料進來；#288 只擋了訊號與橋接入口。
+- 做了什麼：新增 `server/data_contract.finite_number`。`risk.py`：`daily_dd_known` 不再把非有限值當「已量測」；新增 `daily_dd_invalid`（有給卻不是有限數值，與 `None`＝未知區分）；`evaluate_gate` 對「權益無效」與「信心度無效」擋新單（`ENTER_*`），平倉與減碼不受影響；`spillover_prob`、`lots`、`style` 的非有限值當未知用預設。`engine.enforce_daily_drawdown` 對壞資料標 `unknown_invalid`，不再和示範帳戶的 `unknown_reference` 混在一起。規則表見 `wavedeck/docs/ARCHITECTURE.md` §4.3。
+- **有效值與 `None` 的行為不變**：沒給信心度仍略過門檻；權益為 `None` 仍只警示；數字字串仍可用；營運者把 `WD_MIN_ENTRY_CONFIDENCE` 設為 0 時不擅自攔截。
+- **行為變更（請審閱）**：(1) 信心度有給卻不是有限數值（含布林與無法轉數字的字串；以前後者被當成沒給而略過門檻）且門檻 > 0 → 擋新單。(2) 真實（非參考）帳戶的權益或昨日餘額有給卻不是有限數值 → 擋新單；以前被放行。(3) `lots`／`style` 為 NaN 以前例外，現在用預設 1／50。
+- **與分支版刻意不同**：分支版 `daily_dd_ratio` 改回 `None`，並在實帳模式「回撤未知就禁止新單」、「紙上規則演練不得增加實帳風險」。main 已有 `daily_dd_known` 與 WD-07 的未知語意（未知只警示），這些屬於政策變更，不移植；本片只把「壞資料」和「未知」分開。
+- **順手修正 #288 合併的測試缺陷**：`test_signal_input.test_valid_signal_still_goes_through_the_same_path` 依賴真實時鐘。不留倉規則在台北時間 13:25 之後會擋新單，所以這個測試上午綠、下午紅；#288 的 CI 在上午跑所以當時是綠的。現在明確關閉不留倉。另外該測試類別改為每次換上全新的 `RUNTIME` 單例狀態，不受前面測試（例如回撤鎖）影響。`test_不留倉` 的複製清單補上新的依賴 `data_contract.py`。
+- 驗證：新增 `wavedeck/tests/test_numeric_contract.py` 19 項；7 個突變檢查各自被測試抓到（`daily_dd_known` 接受 NaN、移除權益無效區塊、移除信心度無效區塊、`finite_number` 接受布林、`lots` 退回 `int(x or 1)`、引擎狀態標籤退回、外溢退回 `float()`）。WaveDeck 12 個測試模組共 170 項，在正向與反向模組順序、台北時間 19:3x（#288 的測試會失敗的時段）都通過；`tests.test_dist_scrub`；`scripts/變更驗證.py --check`。未跑 WaveDeck 以外的測試。
+- 未驗證：實機 WaveDeck 沒有重啟，仍是舊版（見下方 #289 的實機記錄）；真實 LLM 提供者回傳 `NaN` 的情況只以單元測試構造，沒有實測；`TxtMasterBroker` 實帳路徑未實測；`decision.py` 缺價時預設 45020、`broker.py` 與 `st_link.py` 的 `float(price or 0)` 把未知價當 0 寫進下單檔，這些屬行情契約（2b），本片沒動。
+- 發布狀態：**未合併、未發布**。WaveDeck 由主工作樹直接執行；要生效須更新主工作樹並重建 `wavedeck/data/程式版本.json` 收據（新增 `server/data_contract.py` 會讓收據缺檔）後重啟。
+
+---
+
+## 2026-11-04 補入 40 筆融資比歷史取樣（正式站與本機資料庫的資料操作）
+
+- 授權：Sam 2026-11-04 對「補那 40 筆進正式站與本機資料庫嗎？」答「都做」。這是資料操作，不涉及程式發布。
+- 背景：`data/tw_margin_mix_daily.csv` 其實是 `macro_track.db` 的 `margin_mix` 表的匯出檔。2026-07 的補充取樣在舊 stash 快照裡留有 40 個日期，現行的正式站、本機與開發樹資料庫都沒有，也從沒進過版本控制；它們落在週一到週四，而正式站的序列是每週五取樣，其中 7 筆落在超過 14 天的空檔裡。
+- 寫入前先核對：40 筆的上市融資餘額（證交所 `MI_MARGN` 今日餘額）與上櫃融資餘額（櫃買中心 `margin/balance` 的「資餘額」逐檔加總，與 `macro_track` 同算法）**全部**與官方一致（40／40，上市與上櫃兩個數字都對）。
+- 方式：SQLite 線上備份 → `INSERT OR IGNORE`（不覆寫既有列）→ `integrity_check` 與逐列回讀。`ratio = otc / listed * 100`（同 `upsert_margin_mix`），`yoy` 留空，由程式在下次讀取時重算。
+- 結果：正式站 345→385 列、本機 358→395 列（本機原本已有其中 3 筆）；兩邊 `integrity_check=ok`、回讀無差異，服務仍健康；本機 `/macro/track/__TW_MARGIN_MIX__` 回 `ratio` 395 點、`yoy` 373 點。
+- 回退：備份與寫入鍵清單在 `AI-Workspace/docs/stock-terminal/single-data-root-20261104/`（不在 Git 內）；回退即刪除清單內的鍵，或還原該備份。
+- 沒做：沒有重啟任何服務；`tw_margin_mix_daily.csv` 由程式在下次匯出時更新；開發工作樹的資料庫沒補（不在要求內）；正式站未經閘道做應用層讀取（需要 Owner token），只做了資料庫層與健康檢查。
+
+---
+
 ## 2026-11-04 WaveDeck 外部輸入檢查（WD P0 分片移植，第 1 片）
 
 - 基底：`cea3714358d7775db91cfd9b72991150dbcbd72f`（origin/main）；分支 `claude/wd-signal-input`。

@@ -149,7 +149,12 @@ class EngineIntegrationTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         from server import engine
-        from server.state import RUNTIME
+        from server.state import RUNTIME, _default_state
+        # RUNTIME 是行程內單例：前面的測試（例如回撤鎖）可能已把急停開起來。換上全新狀態，清理時還原，
+        # 測試才不依賴執行順序。
+        patcher = mock.patch.object(RUNTIME, "_state", _default_state())
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.engine, self.runtime, self.home = engine, RUNTIME, home
 
     def audit_rows(self):
@@ -181,6 +186,8 @@ class EngineIntegrationTests(unittest.TestCase):
 
     def test_valid_signal_still_goes_through_the_same_path(self):
         # 啟發式提供者是離線的純函式；大小寫不同的 provider 名稱（main 會轉小寫）也要照常通過。
+        # 不留倉規則在台北時間 13:25 之後會擋新單，用的是真實時鐘；關掉它，測試才不隨時間變紅。
+        self.runtime.patch(no_overnight={"enabled": False})
         result = self.engine.handle_signal({"symbol": "TXF", "event": "TIMED_MARKET_REVIEW", "provider": "Heuristic"})
         self.assertNotIn("訊號內容無效", str(result.get("reason") or ""))
         self.assertFalse(result.get("blocked"), result)

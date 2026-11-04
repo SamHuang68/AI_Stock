@@ -2,33 +2,38 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "cea3714358d7775db91cfd9b72991150dbcbd72f",
+  "baseCommit": "b799137a4436df9932165610148296fb4813c3ec",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "WaveDeck外部輸入檢查",
+      "id": "WaveDeck數值契約",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "外部訊號與 ST 橋接資料進入 WaveDeck 前先檢查（非有限數值、過大內容、型別與識別欄位格式）；無效輸入不改狀態、不進稽核；/bridge/st 無效輸入回 400",
+      "reason": "下單閘門遇到 NaN／Infinity／布林等非有限值時失敗關閉（信心度、權益、外溢、口數、風格）；有效值與 None 行為不變；測試不再依賴真實時鐘",
       "targets": [
+        "wavedeck.tests.test_numeric_contract",
         "wavedeck.tests.test_signal_input",
+        "wavedeck.tests.test_dd_reference_account",
+        "wavedeck.tests.test_exec_md",
+        "wavedeck.tests.test_paper_sim_equity",
+        "wavedeck.tests.test_reduce_and_paper_isolation",
         "wavedeck.tests.test_request_guard",
         "wavedeck.tests.test_smoke",
-        "wavedeck.tests.test_dd_reference_account",
-        "wavedeck.tests.test_paper_sim_equity",
         "wavedeck.tests.test_不留倉",
         "wavedeck.tests.test_完整審查執行",
+        "wavedeck.tests.test_成交確認",
         "wavedeck.tests.test_策略HTTP",
         "wavedeck.tests.test_策略訊號整合"
       ],
       "changes": [
-        "wavedeck/server/signal_input.py",
+        "wavedeck/server/data_contract.py",
+        "wavedeck/server/risk.py",
         "wavedeck/server/engine.py",
-        "wavedeck/server/server.py",
+        "wavedeck/tests/test_numeric_contract.py",
         "wavedeck/tests/test_signal_input.py",
-        "wavedeck/tests/test_request_guard.py",
+        "wavedeck/tests/test_不留倉.py",
         "wavedeck/docs/ARCHITECTURE.md"
       ],
       "inputs": [
@@ -39,6 +44,7 @@
         "wavedeck/server/audit.py",
         "wavedeck/server/broker.py",
         "wavedeck/server/config.py",
+        "wavedeck/server/data_contract.py",
         "wavedeck/server/decision.py",
         "wavedeck/server/engine.py",
         "wavedeck/server/exec_md.py",
@@ -59,12 +65,16 @@
         "wavedeck/server/程序單例.py",
         "wavedeck/server/策略契約.py",
         "wavedeck/tests/test_dd_reference_account.py",
+        "wavedeck/tests/test_exec_md.py",
+        "wavedeck/tests/test_numeric_contract.py",
         "wavedeck/tests/test_paper_sim_equity.py",
+        "wavedeck/tests/test_reduce_and_paper_isolation.py",
         "wavedeck/tests/test_request_guard.py",
         "wavedeck/tests/test_signal_input.py",
         "wavedeck/tests/test_smoke.py",
         "wavedeck/tests/test_不留倉.py",
         "wavedeck/tests/test_完整審查執行.py",
+        "wavedeck/tests/test_成交確認.py",
         "wavedeck/tests/test_策略HTTP.py",
         "wavedeck/tests/test_策略訊號整合.py"
       ]
