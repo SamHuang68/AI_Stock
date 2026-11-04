@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from typing import Any
 
+from .data_contract import finite_number
 from .不留倉 import deadline_status
 
 # Entry confidence floor (heuristic/LLM). 0 = disabled.
@@ -19,16 +20,34 @@ WARN_DAILY_DD = float(os.environ.get("WD_WARN_DAILY_DD", "0.03"))
 REFERENCE_ACCOUNT_SOURCES = {"wave_ai_ref", "reference", "demo"}
 
 
+def _is_reference_account(acct: dict[str, Any]) -> bool:
+    if "reference" in acct:  # 明確旗標優先；沒有旗標時才看來源
+        return acct.get("reference") is True
+    return acct.get("source") in REFERENCE_ACCOUNT_SOURCES
+
+
 def daily_dd_known(state: dict[str, Any]) -> bool:
     """示範／參考帳戶的權益不是使用者實盤，不能拿來觸發回撤鎖（審查 WD-04）。"""
     acct = state.get("account") or {}
-    if "reference" in acct:  # 明確旗標優先；沒有旗標時才看來源
-        if acct.get("reference") is True:
-            return False
-    elif acct.get("source") in REFERENCE_ACCOUNT_SOURCES:
+    if _is_reference_account(acct):
         return False
     # 紙上模擬權益在缺價格或帳本不一致時回報 None；未知權益不能當成 0 回撤（審查 WD-07）。
-    return acct.get("equity") is not None and acct.get("yesterday_balance") is not None
+    # NaN／Infinity 不是已量測的權益：`max(0.0, nan)` 是 0.0，會讓回撤鎖看起來「量過、0%」卻永不觸發。
+    equity, yesterday = acct.get("equity"), acct.get("yesterday_balance")
+    if equity is None or yesterday is None:
+        return False
+    return finite_number(equity) is not None and finite_number(yesterday) is not None
+
+
+def daily_dd_invalid(state: dict[str, Any]) -> bool:
+    """真實帳戶的權益或昨日餘額有給，卻不是有限數值（NaN／Infinity／布林／非數字）。
+
+    這是壞資料，不是「未知」：未知只警示（既有行為），壞資料擋新單。參考／示範帳戶的數字本來就不用於回撤鎖。"""
+    acct = state.get("account") or {}
+    if _is_reference_account(acct):
+        return False
+    return any(acct.get(key) is not None and finite_number(acct.get(key)) is None
+               for key in ("equity", "yesterday_balance"))
 
 
 def daily_dd_ratio(state: dict[str, Any]) -> float:
@@ -36,10 +55,9 @@ def daily_dd_ratio(state: dict[str, Any]) -> float:
     if not daily_dd_known(state):
         return 0.0
     acct = state.get("account") or {}
-    try:
-        yb = float(acct.get("yesterday_balance") or 0)
-        eq = float(acct.get("equity") or 0)
-    except Exception:
+    yb = finite_number(acct.get("yesterday_balance") or 0)
+    eq = finite_number(acct.get("equity") or 0)
+    if yb is None or eq is None:
         return 0.0
     if yb <= 0:
         return 0.0
@@ -65,7 +83,11 @@ def evaluate_gate(
 
     # Hard daily max drawdown — block new risk-on (and note when already locked)
     dd = daily_dd_ratio(state)
-    if dd >= MAX_DAILY_DD and decision.get("action") in {
+    if daily_dd_invalid(state) and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
+        # 壞資料不是「未知」：未知只警示，壞資料不能讓回撤鎖悄悄失效，所以擋新單。
+        allow = False
+        reasons.append("權益資料無效（非有限數值）：禁止新單")
+    elif dd >= MAX_DAILY_DD and decision.get("action") in {
         "ENTER_LONG", "ENTER_SHORT"
     }:
         allow = False
@@ -84,11 +106,12 @@ def evaluate_gate(
 
     st = state.get("st_overlay") or {}
     link = state.get("st_link") or {}
-    lots = int((state.get("exec") or {}).get("lots") or 1)
-    try:
-        spill = float(st.get("spillover_prob")) if st.get("spillover_prob") is not None else None
-    except Exception:
-        spill = None
+    # 非有限值（NaN／Infinity）在 int()／比較裡不是例外就是被放行；一律當未知，用預設。
+    lots_value = finite_number((state.get("exec") or {}).get("lots"))
+    lots = int(lots_value or 1) if lots_value is not None else 1
+    style_value = finite_number(state.get("style"))
+    style = int(style_value or 50) if style_value is not None else 50
+    spill = finite_number(st.get("spillover_prob"))
 
     # Fail-safe / ST link down: block new risk-on + hard delever
     fail_safe = bool(st.get("fail_safe") or link.get("fail_safe") or link.get("status") == "down")
@@ -104,10 +127,17 @@ def evaluate_gate(
         reasons.append("外溢極低：禁止新單")
 
     # Confidence floor for new risk-on (skip if provider left confidence null)
-    try:
-        conf = float(decision["confidence"]) if decision.get("confidence") is not None else None
-    except Exception:
-        conf = None
+    conf = finite_number(decision.get("confidence"))
+    # 有給卻不是有限數值（NaN、Infinity、布林、非數字）是壞資料：`nan < 門檻` 為 False，不擋就等於門檻被跳過。
+    # 沒給（None）維持既有行為：略過門檻。
+    if (
+        MIN_ENTRY_CONFIDENCE > 0
+        and decision.get("confidence") is not None
+        and conf is None
+        and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}
+    ):
+        allow = False
+        reasons.append("信心度無效（非有限數值）：禁止新單")
     if (
         MIN_ENTRY_CONFIDENCE > 0
         and conf is not None
@@ -129,7 +159,7 @@ def evaluate_gate(
     chase = (decision.get("process") or {}).get("chase_risk") or "medium"
     if (
         chase == "high"
-        and int(state.get("style") or 50) < 55
+        and style < 55
         and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}
     ):
         allow = False

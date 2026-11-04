@@ -15,7 +15,7 @@ from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
 from .providers import infer_with_fallback
 from .signal_input import check_bridge, check_signal
-from .risk import evaluate_gate, daily_dd_known, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
+from .risk import evaluate_gate, daily_dd_invalid, daily_dd_known, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, TZ8, _default_state, now_iso
 from . import 策略契約 as contracts
 from .不留倉 import deadline_status
@@ -70,8 +70,8 @@ def enforce_daily_drawdown(flatten: bool, already_locked: bool) -> bool:
     if not daily_dd_known(st):
         # 示範參考帳戶或紙上權益未知：回撤未知，不鎖定也不平倉；不解除既有急停。
         account = st.get("account") or {}
-        status = ("unknown_" + str(account.get("equity_status"))
-                  if account.get("source") == "paper_sim" else "unknown_reference")
+        status = ("unknown_" + str(account.get("equity_status")) if account.get("source") == "paper_sim"
+                  else "unknown_invalid" if daily_dd_invalid(st) else "unknown_reference")
         RUNTIME.patch(account={"daily_dd_pct": None, "daily_dd_status": status,
                                "daily_dd_limit_pct": round(MAX_DAILY_DD * 100, 2)},
                       lights={"risk_watchdog": "warn"})

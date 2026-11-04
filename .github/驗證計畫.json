@@ -2,21 +2,94 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "b799137a4436df9932165610148296fb4813c3ec",
+  "baseCommit": "24d25681e51175ce6a4812f30b25c763696bb1ff",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
+      "id": "WaveDeck數值契約",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "下單閘門遇到 NaN／Infinity／布林等非有限值時失敗關閉（信心度、權益、外溢、口數、風格）；有效值與 None 行為不變；測試不再依賴真實時鐘",
+      "targets": [
+        "wavedeck.tests.test_numeric_contract",
+        "wavedeck.tests.test_signal_input",
+        "wavedeck.tests.test_dd_reference_account",
+        "wavedeck.tests.test_exec_md",
+        "wavedeck.tests.test_paper_sim_equity",
+        "wavedeck.tests.test_reduce_and_paper_isolation",
+        "wavedeck.tests.test_request_guard",
+        "wavedeck.tests.test_smoke",
+        "wavedeck.tests.test_不留倉",
+        "wavedeck.tests.test_完整審查執行",
+        "wavedeck.tests.test_成交確認",
+        "wavedeck.tests.test_策略HTTP",
+        "wavedeck.tests.test_策略訊號整合"
+      ],
+      "changes": [
+        "wavedeck/server/data_contract.py",
+        "wavedeck/server/risk.py",
+        "wavedeck/server/engine.py",
+        "wavedeck/tests/test_numeric_contract.py",
+        "wavedeck/tests/test_signal_input.py",
+        "wavedeck/tests/test_不留倉.py",
+        "wavedeck/docs/ARCHITECTURE.md"
+      ],
+      "inputs": [
+        ".gitignore",
+        "wavedeck/VERSION",
+        "wavedeck/docs/ARCHITECTURE.md",
+        "wavedeck/server/__init__.py",
+        "wavedeck/server/audit.py",
+        "wavedeck/server/broker.py",
+        "wavedeck/server/config.py",
+        "wavedeck/server/data_contract.py",
+        "wavedeck/server/decision.py",
+        "wavedeck/server/engine.py",
+        "wavedeck/server/exec_md.py",
+        "wavedeck/server/override_notify.py",
+        "wavedeck/server/paper_account.py",
+        "wavedeck/server/providers.py",
+        "wavedeck/server/request_guard.py",
+        "wavedeck/server/review_loop.py",
+        "wavedeck/server/risk.py",
+        "wavedeck/server/server.py",
+        "wavedeck/server/signal_input.py",
+        "wavedeck/server/spillover.py",
+        "wavedeck/server/st_link.py",
+        "wavedeck/server/st_push.py",
+        "wavedeck/server/state.py",
+        "wavedeck/server/不留倉.py",
+        "wavedeck/server/版本身分.py",
+        "wavedeck/server/程序單例.py",
+        "wavedeck/server/策略契約.py",
+        "wavedeck/tests/test_dd_reference_account.py",
+        "wavedeck/tests/test_exec_md.py",
+        "wavedeck/tests/test_numeric_contract.py",
+        "wavedeck/tests/test_paper_sim_equity.py",
+        "wavedeck/tests/test_reduce_and_paper_isolation.py",
+        "wavedeck/tests/test_request_guard.py",
+        "wavedeck/tests/test_signal_input.py",
+        "wavedeck/tests/test_smoke.py",
+        "wavedeck/tests/test_不留倉.py",
+        "wavedeck/tests/test_完整審查執行.py",
+        "wavedeck/tests/test_成交確認.py",
+        "wavedeck/tests/test_策略HTTP.py",
+        "wavedeck/tests/test_策略訊號整合.py"
+      ]
+    },
+    {
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "修訂紀錄是文字資料，補記 WaveDeck 防護的實機狀態；分享封存掃描確認不含絕對使用者路徑與信箱",
+      "reason": "修訂紀錄與架構文件是文字資料；分享封存掃描",
       "targets": [
         "tests.test_dist_scrub"
       ],
       "changes": [
-        "docs/revision.md"
+        "docs/revision.md",
+        "wavedeck/docs/ARCHITECTURE.md"
       ],
       "inputs": [
         "docs/revision.md",
