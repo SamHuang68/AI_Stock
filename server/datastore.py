@@ -598,6 +598,12 @@ def last_ts(sym, market='TW'):
         r = conn.execute('SELECT MAX(ts) FROM bars WHERE market=? AND symbol=?', (market, sym)).fetchone()
     return r[0] if r and r[0] else None
 
+def last_traded_ts(sym, market='TW', *, connection=None):
+    """最後一根有成交量的日 K；零量的填充列不算真實成交。唯讀，傳入 connection 可一次查多檔。"""
+    with (nullcontext(connection) if connection is not None else read_snapshot()) as conn:
+        r = conn.execute('SELECT MAX(ts) FROM bars WHERE market=? AND symbol=? AND volume>0', (market, sym)).fetchone()
+    return r[0] if r and r[0] else None
+
 def update(sym, market='TW'):
     """依停更天數選取補抓期間，避免固定一個月留下歷史缺口。"""
     latest = last_ts(sym, market)
