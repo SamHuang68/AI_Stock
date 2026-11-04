@@ -27,7 +27,7 @@ NOON = datetime(2026, 11, 4, 11, 0, tzinfo=TZ8)          # 不留倉時窗之前
 
 def base_state(**overrides):
     state = {"kill_switch": False, "fsm": "Idle", "account": {"yesterday_balance": 100.0, "equity": 100.0},
-             "no_overnight": {"enabled": False}, "st_overlay": {}, "style": 50, "exec": {"lots": 1}}
+             "no_overnight": {"enabled": False}, "st_overlay": {}, "style": 50, "exec": {"lots": 1, "price": 45000.0}}
     state.update(overrides)
     return state
 

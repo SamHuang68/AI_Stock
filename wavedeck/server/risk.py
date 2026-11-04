@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from .data_contract import finite_number
+from .data_contract import assess_quote, finite_number
 from .不留倉 import deadline_status
 
 # Entry confidence floor (heuristic/LLM). 0 = disabled.
@@ -15,6 +15,9 @@ MIN_ENTRY_CONFIDENCE = float(os.environ.get("WD_MIN_ENTRY_CONFIDENCE", "0.70"))
 MAX_DAILY_DD = float(os.environ.get("WD_MAX_DAILY_DD", "0.05"))
 # Soft warn lamp threshold (default 3%)
 WARN_DAILY_DD = float(os.environ.get("WD_WARN_DAILY_DD", "0.03"))
+# 行情政策（裁量模式的新單）：實帳一律要新鮮、帶時區時間戳的行情。紙上模式容許舊式只帶 price 的訊號
+# （只警示），但「帶了 quote 卻過期／未來／無效」一律擋。設 1 可讓紙上模式也強制，用來逐步導入送件端。
+PAPER_REQUIRES_QUOTE = os.environ.get("WD_PAPER_REQUIRES_QUOTE", "") == "1"
 
 
 REFERENCE_ACCOUNT_SOURCES = {"wave_ai_ref", "reference", "demo"}
@@ -103,6 +106,26 @@ def evaluate_gate(
     if no["blocked_new"] and decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
         allow = False
         reasons.append(no["error"] or "不留倉：已進入截止前禁新單時窗")
+
+    # 行情政策：規則模式的訊號已由 策略契約 在收訊號時強制時間戳、新鮮度與價格，不重複擋。
+    # 裁量模式（TradingView／手動／AI 決策）原本只帶 price，沒有來源時間，exec.price 預設還是示範數字 45020。
+    if decision.get("action") in {"ENTER_LONG", "ENTER_SHORT"} and (state.get("strategy_execution") or {}).get("mode") != "rules":
+        mode = str(state.get("mode") or "paper")          # 與 _default_state 的預設一致
+        symbol = str(state.get("symbol") or "TXF")
+        raw_quote = state.get("quote")
+        # 「舊式只帶 price」只指兩種情況：尚未記錄任何行情（只有 exec.price），或引擎蓋了 legacy_price_only 旗標的行情。
+        # 送件端明確帶了 quote、卻因時間戳壞掉或沒有時區而品質未知，不算舊式訊號——那是壞行情，要擋。
+        legacy = raw_quote is None or (isinstance(raw_quote, dict) and raw_quote.get("legacy_price_only") is True)
+        if raw_quote is None:                              # 尚未記錄行情：只有 exec.price，沒有來源時間
+            raw_quote = {"symbol": symbol, "price": (state.get("exec") or {}).get("price"), "source": "signal.price"}
+        quote = assess_quote(raw_quote, symbol, mode=mode)
+        if not quote["entry_allowed"]:
+            price_only = legacy and quote["quality"] == "unknown" and quote["price"] is not None
+            if price_only and mode == "paper" and not PAPER_REQUIRES_QUOTE:
+                reasons.append("行情來源時間未知（舊式只帶 price 的訊號）：紙上模式僅警示，實帳會擋")
+            else:
+                allow = False
+                reasons.extend(quote["reasons"] or ["行情不可用：禁止新單"])
 
     st = state.get("st_overlay") or {}
     link = state.get("st_link") or {}

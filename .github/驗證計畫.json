@@ -2,17 +2,18 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "24d25681e51175ce6a4812f30b25c763696bb1ff",
+  "baseCommit": "145cd902d4ae256d277de087a9a0bff231b1f1f6",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "WaveDeck數值契約",
+      "id": "WaveDeck行情契約與新單行情政策",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "下單閘門遇到 NaN／Infinity／布林等非有限值時失敗關閉（信心度、權益、外溢、口數、風格）；有效值與 None 行為不變；測試不再依賴真實時鐘",
+      "reason": "裁量模式的新單依行情品質放行：實帳要新鮮、帶時區時間戳的行情；紙上容許舊式只帶 price 並警示；規則模式略過；平倉與減碼不受影響",
       "targets": [
+        "wavedeck.tests.test_quote_contract",
         "wavedeck.tests.test_numeric_contract",
         "wavedeck.tests.test_signal_input",
         "wavedeck.tests.test_dd_reference_account",
@@ -29,12 +30,15 @@
       ],
       "changes": [
         "wavedeck/server/data_contract.py",
-        "wavedeck/server/risk.py",
         "wavedeck/server/engine.py",
+        "wavedeck/server/risk.py",
+        "wavedeck/server/state.py",
+        "wavedeck/tests/test_quote_contract.py",
         "wavedeck/tests/test_numeric_contract.py",
-        "wavedeck/tests/test_signal_input.py",
+        "wavedeck/tests/test_smoke.py",
         "wavedeck/tests/test_不留倉.py",
-        "wavedeck/docs/ARCHITECTURE.md"
+        "wavedeck/docs/ARCHITECTURE.md",
+        "wavedeck/tests/test_策略訊號整合.py"
       ],
       "inputs": [
         ".gitignore",
@@ -68,6 +72,7 @@
         "wavedeck/tests/test_exec_md.py",
         "wavedeck/tests/test_numeric_contract.py",
         "wavedeck/tests/test_paper_sim_equity.py",
+        "wavedeck/tests/test_quote_contract.py",
         "wavedeck/tests/test_reduce_and_paper_isolation.py",
         "wavedeck/tests/test_request_guard.py",
         "wavedeck/tests/test_signal_input.py",

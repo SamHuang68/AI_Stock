@@ -1,3 +1,37 @@
+## 2026-11-04 WaveDeck 行情契約與新單行情政策（WD P0 分片移植，第 2b 片）
+
+- 基底：`145cd902d4ae256d277de087a9a0bff231b1f1f6`（origin/main）；分支 `claude/wd-quote-gate`。
+- 授權：Sam 2026-11-04 對「2b 行情新鮮度閘門要不要做？」答「做」。**未合併、未發布**。
+- 既有資源查核（與分支版不同的原因）：(1) 規則模式的策略訊號早已由 `策略契約.decision_from_signal` 強制 `bar_close_time` 帶時區、新鮮度（`max_signal_age_sec`，預設 300 秒，未來容忍 5 秒）與有效價格；真正沒有保護的是**裁量模式**（TradingView／手動／AI 決策只帶 `price`，`exec.price` 預設還是示範數字 45020）。(2) `order_signal.txt` 的 `px=` 是給下單大師的紀錄欄位，真正的指令是 `target_position.txt`，改它的格式沒有證據安全，不動。(3) 分支版把行情接進 `paper_orders` 的成交流程，那是第 4 片，不在這裡。
+- 做了什麼：`server/data_contract.py` 新增 `parse_as_of`、`normalize_quote`、`assess_quote`（行情品質 `fresh`／`demo`／`stale`／`future`／`unknown`／`invalid`，新鮮度每次依來源時間重新計算，不信任輸入自帶的 `quality`）。`engine.handle_signal` 把訊號的 `quote` 驗證後存進狀態；有效時價格只有一個來源（quote 的價格）；舊式只帶 `price` 的訊號記為 `unknown`（來源 `signal.price`，沒有來源時間）。`risk.evaluate_gate` 對裁量模式的新單套用行情政策。狀態預設新增 `quote: null`（尚未記錄行情）與 `data_contract_version`。規則表與 TradingView 範本見 `wavedeck/docs/ARCHITECTURE.md` §4.1。
+- **政策**（只擋新單 `ENTER_*`，平倉、減碼、觀望不受影響）：實帳要求新鮮、帶時區時間戳的行情；紙上模式容許舊式只帶 `price` 的訊號（只在 `reasons` 多一句警示），但「帶了 `quote` 卻過期／未來／無效」一律擋；`WD_PAPER_REQUIRES_QUOTE=1` 可讓紙上模式也強制；規則模式略過（由策略契約負責）。
+- **與分支版刻意不同**：未來時間容忍 5 秒（分支版 0 秒，與策略契約不一致）；`quote.symbol` 可省略、沿用訊號的商品；紙上模式容許舊式訊號（分支版連紙上也擋，會讓現有只帶 `price` 的送件端全部失效）；`quote` 為 `null` 時以 `exec.price` 當「來源時間未知的價格」；不含「紙上規則演練不得增加實帳風險」與「實帳回撤未知禁止新單」（政策變更）。
+- **行為變更（請審閱）**：(1) **實帳模式**的裁量新單，以前有 `price` 就放行，現在必須帶新鮮、帶時區時間戳的 `quote`；定時檢討與 AI 決策在實帳模式下，最後一次行情超過 90 秒也會被擋。**上實帳前，送件端必須改成帶 `quote`**（TradingView 範本見文件）。(2) 紙上模式：舊式訊號照常放行；帶了壞行情的訊號以前放行、現在被擋。實機目前是紙上模式，所以上線後對現有流程沒有新的阻擋，只多一句警示。
+- 驗證：新增 `wavedeck/tests/test_quote_contract.py` 41 項（解析、品質分類與邊界、輸入不能替自己背書、模式矩陣、閘門政策矩陣、引擎收進行情、三條審查意見的回歸），並在 `test_策略訊號整合` 加 1 項規則模式價格回歸；WaveDeck 14 個模組共 212 項，正反兩種順序都通過；8 個突變檢查各自被測試抓到（容忍度、規則模式略過、紙上警示、閘門永不擋、缺 `mode` 的預設、演練行情在實帳、引擎忽略 quote 價格、引擎不存 quote）。其中「容忍度」一項一開始沒被抓到：測試用匯入的常數造資料，常數與測試一起變；已改成寫死 5 與 6 秒。三個既有測試的合成狀態（`test_smoke`、`test_不留倉`、`test_numeric_contract`）原本沒有價格，補上 `price`；斷言一個字沒動——沒有價格的進場本來就不該放行。
+- **審查意見與處理**（PR 開啟後，Codex 自動審查提出三點，逐條對照程式碼後都成立並已修正）：
+  1. 定時檢討會洗掉已存的行情：`review_loop` 的訊號沒有自己的價格、也沒有 `quote`，只靠快取的 `exec.price`；原本被記成「沒有時間的 `signal.price`」，於是紙上模式下已過期的行情在下一次檢討變成只警示放行，實帳則連新鮮的行情都被擋。修正：這類訊號不產生新行情，沿用已存的行情與時間戳，每次重新算新鮮度。
+  2. 帶了壞時間戳的 `quote` 被當成舊式訊號：原本用 `quality=="unknown" and as_of is None` 辨識舊式訊號，明確帶了 `quote` 卻時間戳壞掉、沒有時區或缺漏的結果相同，紙上模式會放行，與文件矛盾。修正：舊式訊號由引擎蓋 `legacy_price_only` 旗標（`normalize_quote` 只回傳自己定義的欄位，送件端偽造不了），閘門只對有旗標、或尚未記錄行情的狀態給紙上放行。
+  3. 規則模式的價格被 `quote` 取代（最嚴重）：規則模式略過行情閘門，卻讓 `quote["price"]` 取代策略契約驗證過的 `price`；用既有的策略整合 fixture 重現——一個 `price=45020` 的有效規則訊號帶上 2000 年的演練 `quote`（價格 1），閘門放行並以 1 記入紙上成交。修正：規則模式一律以策略契約驗證過的價格為準；裁量模式也只採用品質為 `fresh`／`demo` 的 `quote` 價格。
+  修正過程中我自己也犯了一個錯：判斷「訊號有沒有自己的價格」時，用了已把快取價塞進預設值的 `body.get("price", 快取價)`，所以永遠是「有」，第 1 條的修正一開始等於沒修，被自己新寫的回歸測試抓到。三條各自的回歸測試都做過突變檢查（把修正退回去，測試要變紅）。
+- 未驗證：真實 TradingView 警示的 `{{timenow}}` 格式與時鐘偏差（5 秒容忍是否夠）；實帳模式（沒有實機）；UI 沒有顯示行情品質；`TxtMasterBroker` 路徑未實測。
+- 發布狀態：**未合併、未發布**；生效須更新主工作樹並重建 `wavedeck/data/程式版本.json` 後重啟 WaveDeck。
+
+---
+
+## 2026-11-04 WaveDeck 重建收據並重啟（載入 #288 與 #290）；合併 #289、#290
+
+- 授權：Sam 2026-11-04「合併 #290」、「#289 合併交給你判斷」、「要不要現在重建 WaveDeck 收據並重啟？好」。
+- 合併：#289（另一個工作階段開的純文件 PR，記錄實機狀態）是 **draft**，GitHub 拒絕合併；因為你把它交給我判斷、且內容與我當時探測的實機狀態一致，我把它標為 ready 後合併（`24d25681e51175ce6a4812f30b25c763696bb1ff`）。#290 合併前把 main 併進分支：`docs/revision.md` 與驗證計畫檔衝突，保留雙方各一節、計畫基底更新為 `24d2568`；四項檢查（含 Cursor 安全審查）全過後合併（`145cd902d4ae256d277de087a9a0bff231b1f1f6`）。
+- 重啟前檢查：紙上模式、`Flat`、持倉 0、最後一筆委託是已成交的 `EXIT`、急停關閉；主工作樹 `wavedeck/` 沒有被修改的已追蹤檔。
+- 備份（`AI-Workspace/docs/stock-terminal/wavedeck-restart-20261104/`，不在 Git 內）：舊收據、`runtime_state.json`、`wavedeck_config.json`、審計庫（用 SQLite 備份 API，77,886 筆，`integrity_check=ok`）。
+- 收據重建：涵蓋所有被 Git 追蹤的 `wavedeck/` 檔（排除 `data/`、`logs/`），51 個檔（原 47，加 #288 的 2 個、#290 的 2 個），`commit` 為 `145cd90`，用 WaveDeck 啟動時同一個 `read_release_identity` 驗證為 `releaseVerified=True`。
+- 停止與啟動：依 PID 33764 + 命令列 + 建立時間（2026-10-30 13:30:38）三項核對後停止，不依埠；用專案的 `start_wavedeck.ps1 -NoBrowser` 啟動，新 PID 20384（20:41:18），舊程序已不在。停機約 7 秒。
+- 實機驗證：`/health` 為 `version 0.1.21`、`runtimeCommit 145cd902d4ae…`、`releaseVerified True`；狀態原樣保留（紙上、`Flat`、持倉 0、`paper_sim` 權益 1,000,000）；外來 `Origin` 探針回 403；`POST /bridge/st` 帶 `style=120` 回 400；`POST /api/signal` 帶 `symbol="TX F"` 與 `price=NaN` 都被擋，審計只記原因、不存內容；啟動日誌無錯誤，且日誌裡可見 ST 自己的 `POST /bridge/st → 200`——**真實的 ST 橋接內容通過了新的輸入檢查**。
+- 尚未做：真實 TradingView 警示的驗證；UI 畫面沒有驗證；本次載入的是 #288 與 #290，不含 2b（上一節）。
+- 發布狀態：WaveDeck 實機已更新到 `145cd90`（不屬 Private Web 發布範圍）。
+
+---
+
 ## 2026-11-04 補記 #286 在正式站的第一次實跑結果
 
 - 觀察時間：2026-11-04 約 19:40（台北）。來源：正式站 `data/stock_daily_sources.json` 與 `stock_daily_sources.jsonl`（唯讀）。排程在盤後窗口內每小時重跑一次（18:31 起第一次、19:31 第二次），沒有等到 20:30。

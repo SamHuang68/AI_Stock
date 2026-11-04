@@ -114,6 +114,18 @@ class 策略訊號整合測試(unittest.TestCase):
         self.assertEqual(state["execution"]["version"], self.manifest["version"])
         self.assertEqual(state["positions"]["account"], 2)
 
+    def test_規則訊號帶過期或演練行情時價格仍以策略契約驗證過的為準(self):
+        # 規則模式略過行情閘門；若 quote 的價格能取代訊號價格，過期的演練價 1 就會繞過驗證進紙上成交、污染帳本。
+        bogus = {"price": 1, "as_of": "2000-01-01T00:00:00Z", "source": "demo", "demo": True}
+        result = self.engine.handle_signal(self.signal(quote=bogus))
+        self.assertTrue(result["ok"], result)
+        state = self.runtime.snapshot()
+        self.assertEqual(state["exec"]["price"], 45020)
+        self.assertEqual(state["execution"]["status"], "filled")
+        ledger = state.get("paper_ledger") or {}
+        self.assertIn(ledger.get("avgPrice"), (45020, 45020.0, None), ledger)
+        self.assertNotEqual(ledger.get("lastFillPrice"), 1)
+
     def test_版本商品週期不符與過期訊號拒絕送單(self):
         self.txt()
         for key, value in (("version", "0" * 64), ("symbol", "WRONG"), ("timeframe", "999m"),
