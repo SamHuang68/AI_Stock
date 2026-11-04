@@ -137,6 +137,36 @@ stateDiagram-v2
 
 欄位缺漏、`null` 或空字串一律視為「用預設」，與檢查導入前相同。策略契約（`策略契約.claim`）用 body 做冪等判斷，所以檢查不會替它補欄位。
 
+**行情契約**（`server/data_contract.normalize_quote`／`assess_quote`；新單的行情政策在 `risk.evaluate_gate`）：
+
+`exec.price` 的預設值 45020 只是示範數字，不是行情；裁量模式的訊號原本只帶 `price`，沒有來源時間，無從判斷是不是舊的。現在訊號可以帶 `quote`：
+
+```json
+{"symbol": "TXF", "event": "BREAKOUT",
+ "quote": {"price": 45010, "as_of": "2026-11-04T12:00:00Z", "source": "tradingview"}}
+```
+
+TradingView 的警示訊息可以寫成 `"quote": {"price": {{close}}, "as_of": "{{timenow}}", "source": "tradingview"}`（`{{timenow}}` 是帶 `Z` 的 ISO 時間）。`quote.symbol` 可省略（沿用訊號的商品），有給就必須相符。
+
+| 行情品質 | 條件 |
+| --- | --- |
+| `fresh` | 價格為有限正數、來源時間帶時區、不早於 90 秒、不晚於本機時間 5 秒（同 `策略契約` 的收 K 時間容忍） |
+| `stale`／`future` | 來源時間過了 90 秒／超前本機超過 5 秒 |
+| `unknown` | 價格有效但來源時間未知或沒有時區（舊式只帶 `price` 的訊號就屬於這類，來源記為 `signal.price`） |
+| `invalid` | 商品不符、價格非有限正數、格式不明 |
+| `demo` | 來源標為 `demo`／`heuristic` 等或 `demo: true`；只適用紙上模式 |
+
+新單（`ENTER_*`）的政策，**只擋新單，平倉、減碼與觀望不受影響**：
+
+| 情況 | 實帳 | 紙上 |
+| --- | --- | --- |
+| 新鮮、帶時區時間戳的行情 | 放行 | 放行 |
+| 舊式只帶 `price`（`unknown`） | **擋** | 放行並警示（設 `WD_PAPER_REQUIRES_QUOTE=1` 改為擋） |
+| 帶了 `quote` 但過期／未來／無效／演練 | 擋 | 擋（演練行情在紙上放行） |
+| 規則模式（策略訊號） | 不經此閘門 | 不經此閘門 |
+
+規則模式的訊號由 `策略契約` 在收訊號時就強制時間戳（`bar_close_time`）、新鮮度（`max_signal_age_sec`）與有效價格，不重複檢查。新鮮度每次進場前都依來源時間重新計算，不沿用存起來的品質。`mode` 缺漏視為 `paper`（與預設狀態相同），不認得的模式一律從嚴。
+
 ### 4.2 Decision Engine
 - 輸入：正規化行情摘要 + 持倉 + ST 宏觀標籤 + 進場風格（35/50/65/自訂）
 - 輸出：

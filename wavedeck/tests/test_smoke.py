@@ -223,7 +223,7 @@ class WaveDeckSmoke(unittest.TestCase):
             "no_overnight": {"enabled": False},
             "st_overlay": {"delever": False, "spillover_prob": 0.25},
             "style": 50,
-            "exec": {"lots": 4},
+            "exec": {"lots": 4, "price": 45000},     # 新單閘門需要一個已知價格
         }
         g = evaluate_gate(st, {"action": "ENTER_LONG", "process": {"chase_risk": "low"}})
         self.assertTrue(g["allow"])

@@ -27,6 +27,10 @@ def _default_state() -> dict[str, Any]:
         "fsm": "Idle",
         "mode": "paper",  # paper | live
         "symbol": "TXF",
+        # 最近一次訊號帶來的行情（已驗證）。None＝尚未記錄行情；exec.price 的 45020 只是示範數字，不是行情，
+        # 閘門遇到 None 時把 exec.price 當「來源時間未知的價格」處理（risk.evaluate_gate）。
+        "quote": None,
+        "data_contract_version": 1,
         "strategy_execution": {"mode": "discretionary", "strategy_id": None, "version": None, "max_signal_age_sec": 300},
         "execution": {},
         "overnight_enforcement": {},

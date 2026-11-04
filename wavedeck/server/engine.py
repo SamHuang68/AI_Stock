@@ -14,6 +14,7 @@ from .broker import execution_pending, get_broker
 from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
 from .providers import infer_with_fallback
+from .data_contract import normalize_quote
 from .signal_input import check_bridge, check_signal
 from .risk import evaluate_gate, daily_dd_invalid, daily_dd_known, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, TZ8, _default_state, now_iso
@@ -364,6 +365,13 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
         price = body.get("price", (st.get("exec") or {}).get("price"))
         if not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price) or price <= 0:
             price = (st.get("exec") or {}).get("price")
+        if "quote" in body:
+            quote = normalize_quote(body.get("quote"), symbol)
+            if quote["price"] is not None:
+                price = quote["price"]          # 行情有效時，價格只有一個來源
+        else:
+            # 舊式只帶 price 的訊號沒有來源時間：quality 是 unknown，不是 fresh（閘門依模式決定放不放行）。
+            quote = normalize_quote({"symbol": symbol, "price": price, "source": "signal.price"}, symbol)
         ctx = {"style": st.get("style"), "event": event, "positions": st.get("positions"), "price": price,
                "source": source, "symbol": symbol, "mode": st.get("mode"), "source_signal": body,
                "timeframe": body.get("timeframe"), "st_rotation": ov.get("rotation"),
@@ -379,7 +387,7 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
         if (live.get("strategy_execution") or {"mode": "discretionary"}) != active or live.get("symbol") != symbol or live.get("mode") != st.get("mode") or (load_config().get("broker") or {}).get("kind") != (cfg.get("broker") or {}).get("kind"):
             result = _blocked("策略執行模式已改變，此次判斷作廢", body)
         else:
-            RUNTIME.patch(exec={"price": price}, lights={"openai_or_local": "warn" if err else "ok"})
+            RUNTIME.patch(exec={"price": price}, quote=quote, lights={"openai_or_local": "warn" if err else "ok"})
             decision["decision_id"] = uuid.uuid4().hex
             result = _finish_decision(live, decision, err, preferred, event, source, body)
         if claimed:

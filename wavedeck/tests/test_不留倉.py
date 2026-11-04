@@ -41,7 +41,7 @@ class 不留倉測試(unittest.TestCase):
         self.state = {
             "no_overnight": {"enabled": True, "force_flat_time": "13:40", "block_new_before_close_min": 15},
             "positions": {"account": 2},
-            "exec": {"lots": 2},
+            "exec": {"lots": 2, "price": 45000},     # 新單閘門需要一個已知價格；沒有價格的進場本來就不該放行
             "style": 30,
         }
 
