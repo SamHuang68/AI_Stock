@@ -1,3 +1,16 @@
+## 2026-11-04 補記 #291 合併、WaveDeck 實機載入 2b，以及 TradingView 警示範本
+
+- 基底：`b44b0ae68cc3a01357dd90ba0742ed9bc8e93292`（origin/main）；分支 `claude/wd-tv-template`。
+- 授權：Sam 2026-11-04「合併」（#291）、對「要不要現在把 2b 載入實機？」答「要」、對「TradingView 的警示訊息要改成帶 `quote`」答「改」。
+- 合併：#291 合併前，Codex 自動審查提出的三點（下一節）都已修正；最新 head `bc3cc82` 的四項檢查（含 Cursor 安全審查）全過、無未解決的討論串；合併提交 `b44b0ae68cc3a01357dd90ba0742ed9bc8e93292`。
+- WaveDeck 實機載入 2b：重啟前確認紙上模式、`Flat`、持倉 0、最後委託已成交、急停關閉；備份（`AI-Workspace/docs/stock-terminal/wavedeck-restart-20261104b/`，不在 Git 內）後重建收據（52 個檔，`commit` 為 `b44b0ae`，`releaseVerified=True`）；依 PID 20384 + 命令列 + 建立時間（20:41:18）核對後停止，不依埠；用專案啟動器重啟，新 PID 32636（22:44:47）。實機驗證：`/health` 為 `runtimeCommit b44b0ae68cc3…`、`releaseVerified True`；狀態原樣保留；`/api/state` 有 `data_contract_version=1` 與 `quote` 欄位（2b 的程式確實載入）；外來 `Origin` 回 403；`/bridge/st` 無效輸入回 400；啟動日誌無錯誤。**這次沒有對實機送任何有效訊號**，因為 2b 會改變狀態；2b 的行為只靠離線測試與上述欄位證明。
+- TradingView 警示範本：我沒有 TradingView 帳號權限，**改不到警示本身**，所以在 `wavedeck/README.md` 放一份可直接貼進「訊息」欄的範本（含 `quote`），並新增 4 項測試（`TradingViewTemplateTests`）讓測試實際解析 README 裡的範本、代入佔位符後走一遍輸入檢查與行情判斷，文件與程式不一致時會失敗；3 個突變檢查（改用 `{{ticker}}`、改用 `{{time}}`、拿掉 `quote` 的價格）都被抓到。範本的兩個重點：`symbol` 寫死 `TXF`（`{{ticker}}` 會是 `TXF1!`，被輸入檢查拒絕）；時間用 `{{timenow}}` 而不是 `{{time}}`（後者是 K 棒**開盤**時間，K 棒收盤時早已超過 90 秒，會被判定過期）。
+- 未驗證：`{{timenow}}` 在真實警示裡的實際格式（依 TradingView 說明是帶 `Z` 的 UTC ISO 時間，第一次使用請用真實警示確認）；TradingView 的 webhook 一般無法自訂標頭，若啟用 `WAVEDECK_SECRET`（檢查 `X-WaveDeck-Secret` 標頭），要確認你的隧道或代理如何補上這個標頭；實帳模式沒有實機。
+- 驗證：`wavedeck.tests.test_quote_contract` 45 項；`tests.test_dist_scrub`；`scripts/變更驗證.py --check`。
+- 發布狀態：文件與測試變更。WaveDeck 實機已在 `b44b0ae`（不屬 Private Web 發布範圍）。
+
+---
+
 ## 2026-11-04 WaveDeck 行情契約與新單行情政策（WD P0 分片移植，第 2b 片）
 
 - 基底：`145cd902d4ae256d277de087a9a0bff231b1f1f6`（origin/main）；分支 `claude/wd-quote-gate`。

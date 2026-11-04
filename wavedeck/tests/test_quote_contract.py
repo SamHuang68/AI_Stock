@@ -6,6 +6,8 @@
 規則模式的訊號由 策略契約 強制時間戳與新鮮度，不經過這道閘門。"""
 from __future__ import annotations
 
+import json
+import re
 import sys
 import tempfile
 import unittest
@@ -19,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 from server import risk  # noqa: E402
 from server.data_contract import (  # noqa: E402
     DEFAULT_QUOTE_MAX_AGE_SEC, FUTURE_TOLERANCE_SEC, assess_quote, normalize_quote, parse_as_of)
+from server.signal_input import check_signal  # noqa: E402
 
 NOW = datetime(2026, 11, 4, 12, 0, 0, tzinfo=timezone.utc)
 NAN, INF = float("nan"), float("inf")
@@ -362,6 +365,46 @@ class EngineIntakeTests(unittest.TestCase):
         self.decision.update(action="EXIT", action_label="全部出場")
         result = self.send({"price": 45050}, mode="live")
         self.assertTrue(result["gate"]["allow"], result["gate"])
+
+
+class TradingViewTemplateTests(unittest.TestCase):
+    """README 裡給使用者貼進 TradingView 的警示範本，實際解析並走一遍程式的檢查；文件與程式不一致時會失敗。"""
+
+    @staticmethod
+    def template():
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        match = re.search(r"<!-- tv-alert-template:start -->\s*```json\s*(.*?)\s*```\s*<!-- tv-alert-template:end -->", text, re.S)
+        assert match, "README 找不到 TradingView 警示範本"
+        return match.group(1)
+
+    def render(self, close="45010.5", timenow=None):
+        timenow = timenow or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return json.loads(self.template().replace("{{close}}", close).replace("{{timenow}}", timenow))
+
+    def test_the_documented_template_is_valid_json_after_substitution(self):
+        body = self.render()
+        self.assertEqual(body["symbol"], "TXF")
+        self.assertIsInstance(body["quote"]["price"], float)
+
+    def test_it_passes_the_input_check_and_yields_a_fresh_quote(self):
+        body = self.render()
+        check_signal(body)
+        quote = normalize_quote(body["quote"], body["symbol"])
+        self.assertEqual((quote["quality"], quote["price"]), ("fresh", 45010.5))
+        self.assertTrue(assess_quote(body["quote"], body["symbol"], mode="live")["entry_allowed"])
+
+    def test_the_symbol_is_a_literal_not_the_ticker_placeholder(self):
+        self.assertNotIn("{{ticker}}", self.template())
+        with self.assertRaises(ValueError):
+            check_signal({"symbol": "TXF1!", "event": "BREAKOUT"})          # 這就是不用 {{ticker}} 的原因
+
+    def test_a_bar_open_time_would_be_judged_stale(self):
+        # README 要求用 {{timenow}} 而不是 {{time}}：{{time}} 是 K 棒開盤時間，收盤時早已超過 90 秒。
+        bar_open = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        quote = normalize_quote(self.render(timenow=bar_open)["quote"], "TXF")
+        self.assertEqual(quote["quality"], "stale")
+        self.assertIn("{{timenow}}", self.template())
+        self.assertNotIn("{{time}}", self.template())
 
 
 if __name__ == "__main__":
