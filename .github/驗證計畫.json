@@ -2,61 +2,16 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "25c4903daececeda266c0c0e7f1cda7188316d67",
+  "baseCommit": "d4aa47127d6925e19bf0bf41025f1f5a455d7466",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "每日日線缺口分類",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "官方明示停止交易與久未成交的代號不再讓 TWSE／TPEx 日線兩列停在 partial；清單讀不到或證據不足時維持缺口；健康日不多發請求",
-      "targets": [
-        "tests.test_daily_sources_gap_classes",
-        "tests.test_三項限制解方",
-        "tests.test_全檢資料邊界",
-        "tests.test_官方研究續補",
-        "tests.test_研究品質與留存",
-        "tests.test_證據限制回報",
-        "tests.test_review_regressions",
-        "tests.test_no_new_silent_exceptions"
-      ],
-      "changes": [
-        "server/個股每日資料.py",
-        "server/datastore.py",
-        "tests/test_daily_sources_gap_classes.py",
-        "tests/test_全檢資料邊界.py"
-      ],
-      "inputs": [
-        "server/個股每日資料.py",
-        "server/datastore.py",
-        "server/台股交易參考.py",
-        "server/台股交易參考.json",
-        "server/http_client.py",
-        "server/log_once.py",
-        "server/sector_flow.py",
-        "server/signal_stats_pool.py",
-        "server/atomic_store.py",
-        "server/chip_history_tracker.py",
-        "server/個股還原研究.py",
-        "server/stock_signals.py",
-        "tests/silent_except_baseline.json",
-        "tests/test_daily_sources_gap_classes.py",
-        "tests/test_三項限制解方.py",
-        "tests/test_全檢資料邊界.py",
-        "tests/test_官方研究續補.py",
-        "tests/test_研究品質與留存.py",
-        "tests/test_證據限制回報.py",
-        "tests/test_review_regressions.py",
-        "tests/test_no_new_silent_exceptions.py"
-      ]
-    },
-    {
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "修訂紀錄是文字資料；分享封存掃描",
+      "reason": "發布狀態只改文件；分享封存掃描",
       "targets": [
         "tests.test_dist_scrub"
       ],
