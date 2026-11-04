@@ -37,6 +37,18 @@
 
 ---
 
+## 2026-11-04 補記 WaveDeck 控制面防護（#200）的實機狀態
+
+- 基底：`b799137a4436df9932165610148296fb4813c3ec`（origin/main）。只補記狀態，不改程式；歷史段落不覆寫。
+- 背景：#200 的合併 SHA 是 `d5871f5fdfafb03f13a129f767c92c46933437cb`。2026-10-14 發布 `d5871f5f…` 的 stage 因 #200 測試在 Windows 的偶發連線重設而失敗（見下方「WaveDeck 被拒請求先讀完本體」段落），修正提交 `dc01694`（2026-10-14 19:16 +0800）已合併。ST 部分隨之後的發布進入正式站與本機（`aeaecef3` 起，是 `d5871f5` 的後代）；WaveDeck 不在 Private Web 發布範圍，由登記的開發工作樹直接執行。
+- Sam 2026-11-04 貼回的唯讀檢查（本機與雲端無法互通，以貼回為準）：WaveDeck 在埠 18433，`version` 0.1.21，`mode=paper`、`fsm=Flat`、`fail_safe=False`；`baseDir` 是登記的開發工作樹下的 `wavedeck` 子目錄；工作樹 `HEAD` 為 `b799137a4436df9932165610148296fb4813c3ec`（2026-11-04 10:48:58 +0800 `pull --ff-only origin main`）；執行中程序 pid 33764 啟動於 2026-10-30 13:30:38，`/health` 回報 `runtimeCommit` 為 `61091d6dff0c0925431eaeeff647f76320192653`、`releaseVerified=True`。以帶外站 `Origin: http://evil.example` 對 `GET /health` 的探針回 **HTTP 403**。
+- 判讀：`61091d6` 是 `main` 的祖先，並包含 `d5871f5`（#200 防護）與 `dc01694`（先讀完本體的修正）；從 `61091d6` 到 `b799137`，`wavedeck/` 下只有 `b62a7d7`（#288）一個提交。因此執行中的程序已有 #200 的防護與修正（探針 403 與此一致），**尚未載入 #288 的輸入檢查**。探針只證明防護存在於這個程序；各端點的完整行為由 CI 的測試負責，沒有在實機逐一驗證。
+- 刻意未做的事：沒有重啟 WaveDeck。要載入 #288 須重啟，且須先由本機發布者逐檔核對 Git blob 後重建 `wavedeck/data/程式版本.json`，否則重啟後 `releaseVerified` 會變 `False`（不影響防護，只影響 `/health` 的版本身分顯示）。#288 的「未驗證」仍在：真實 TradingView 警報的 `{{ticker}}` 格式若帶 `!` 或 `:`（如 `TXF1!`），會被新的檢查拒絕，須用實際警報確認後再決定是否上線。
+- 備註：工作樹的 `wavedeck/data/wavedeck.instance.lock` 是執行中 WaveDeck 的單例鎖，不是殘留檔案，不要刪除。
+- 發布狀態：文件變更，不涉及發布。
+
+---
+
 ## 2026-11-04 WaveDeck 外部輸入檢查（WD P0 分片移植，第 1 片）
 
 - 基底：`cea3714358d7775db91cfd9b72991150dbcbd72f`（origin/main）；分支 `claude/wd-signal-input`。
