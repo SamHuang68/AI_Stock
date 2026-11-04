@@ -113,11 +113,14 @@ def evaluate_gate(
         mode = str(state.get("mode") or "paper")          # 與 _default_state 的預設一致
         symbol = str(state.get("symbol") or "TXF")
         raw_quote = state.get("quote")
+        # 「舊式只帶 price」只指兩種情況：尚未記錄任何行情（只有 exec.price），或引擎蓋了 legacy_price_only 旗標的行情。
+        # 送件端明確帶了 quote、卻因時間戳壞掉或沒有時區而品質未知，不算舊式訊號——那是壞行情，要擋。
+        legacy = raw_quote is None or (isinstance(raw_quote, dict) and raw_quote.get("legacy_price_only") is True)
         if raw_quote is None:                              # 尚未記錄行情：只有 exec.price，沒有來源時間
             raw_quote = {"symbol": symbol, "price": (state.get("exec") or {}).get("price"), "source": "signal.price"}
         quote = assess_quote(raw_quote, symbol, mode=mode)
         if not quote["entry_allowed"]:
-            price_only = quote["quality"] == "unknown" and quote["price"] is not None and quote["as_of"] is None
+            price_only = legacy and quote["quality"] == "unknown" and quote["price"] is not None
             if price_only and mode == "paper" and not PAPER_REQUIRES_QUOTE:
                 reasons.append("行情來源時間未知（舊式只帶 price 的訊號）：紙上模式僅警示，實帳會擋")
             else:

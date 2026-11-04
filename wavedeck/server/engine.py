@@ -362,16 +362,22 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
         cfg = load_config()
         preferred = str(body.get("provider") or (st.get("costs") or {}).get("provider") or cfg.get("provider") or "heuristic")
         ov = st.get("st_overlay") or {}
-        price = body.get("price", (st.get("exec") or {}).get("price"))
-        if not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price) or price <= 0:
-            price = (st.get("exec") or {}).get("price")
+        raw_price = body.get("price")           # 注意：不能用「預設為快取價」的 get 來判斷訊號有沒有自己的價格
+        own_price = isinstance(raw_price, (int, float)) and not isinstance(raw_price, bool) and math.isfinite(raw_price) and raw_price > 0
+        price = raw_price if own_price else (st.get("exec") or {}).get("price")
+        # quote=None：這次訊號沒有帶新行情。已存的行情與它的時間戳原樣保留，閘門每次重新計算它的新鮮度；
+        # 定時檢討只有快取的 exec.price，不能因此把過期的行情洗成「來源時間未知」。
+        quote = None
         if "quote" in body:
             quote = normalize_quote(body.get("quote"), symbol)
-            if quote["price"] is not None:
-                price = quote["price"]          # 行情有效時，價格只有一個來源
-        else:
-            # 舊式只帶 price 的訊號沒有來源時間：quality 是 unknown，不是 fresh（閘門依模式決定放不放行）。
+            # 規則模式略過行情閘門，價格一律以策略契約驗證過的為準；裁量模式也只採用時間與價格都可信的行情價。
+            if not rules and quote["quality"] in {"fresh", "demo"}:
+                price = quote["price"]
+        elif own_price:
+            # 舊式只帶 price 的訊號沒有來源時間：quality 是 unknown，不是 fresh。旗標由引擎蓋上（normalize_quote 只回傳
+            # 自己定義的欄位，送件端偽造不了），閘門才分得出它和「帶了壞 quote」。
             quote = normalize_quote({"symbol": symbol, "price": price, "source": "signal.price"}, symbol)
+            quote["legacy_price_only"] = True
         ctx = {"style": st.get("style"), "event": event, "positions": st.get("positions"), "price": price,
                "source": source, "symbol": symbol, "mode": st.get("mode"), "source_signal": body,
                "timeframe": body.get("timeframe"), "st_rotation": ov.get("rotation"),
@@ -387,7 +393,8 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
         if (live.get("strategy_execution") or {"mode": "discretionary"}) != active or live.get("symbol") != symbol or live.get("mode") != st.get("mode") or (load_config().get("broker") or {}).get("kind") != (cfg.get("broker") or {}).get("kind"):
             result = _blocked("策略執行模式已改變，此次判斷作廢", body)
         else:
-            RUNTIME.patch(exec={"price": price}, quote=quote, lights={"openai_or_local": "warn" if err else "ok"})
+            RUNTIME.patch(exec={"price": price}, **({"quote": quote} if quote is not None else {}),
+                          lights={"openai_or_local": "warn" if err else "ok"})
             decision["decision_id"] = uuid.uuid4().hex
             result = _finish_decision(live, decision, err, preferred, event, source, body)
         if claimed:

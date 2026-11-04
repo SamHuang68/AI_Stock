@@ -37,7 +37,8 @@
         "wavedeck/tests/test_numeric_contract.py",
         "wavedeck/tests/test_smoke.py",
         "wavedeck/tests/test_不留倉.py",
-        "wavedeck/docs/ARCHITECTURE.md"
+        "wavedeck/docs/ARCHITECTURE.md",
+        "wavedeck/tests/test_策略訊號整合.py"
       ],
       "inputs": [
         ".gitignore",

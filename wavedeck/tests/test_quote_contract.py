@@ -195,11 +195,26 @@ class GatePolicyTests(unittest.TestCase):
         self.assertIn("行情來源時間未知", self.reasons(result))
 
     def test_paper_tolerates_price_only_signals_with_a_warning(self):
-        for q in (None, {"symbol": "TXF", "price": 45000.0, "source": "signal.price", "as_of": None}):
+        flagged = {"symbol": "TXF", "price": 45000.0, "source": "signal.price", "as_of": None, "legacy_price_only": True}
+        for q in (None, flagged):
             with self.subTest(q=q):
                 result = entry(gate_state("paper", q))
                 self.assertTrue(result["allow"], result)
                 self.assertIn("紙上模式僅警示", self.reasons(result))
+
+    def test_an_explicit_quote_with_a_broken_time_is_not_a_legacy_price_only_signal(self):
+        # 送件端明確帶了 quote，卻因時間戳壞掉／沒有時區／缺漏而品質未知：這是壞行情，紙上模式也要擋。
+        for label, fields in (("壞字串", {"as_of": "bad timestamp"}), ("沒有時區", {"as_of": "2026-11-04T12:00:00"}),
+                              ("缺漏", {"as_of": None}),
+                              ("自稱 signal.price 但沒有引擎旗標", {"as_of": None, "source": "signal.price"})):
+            with self.subTest(label=label):
+                result = entry(gate_state("paper", live_now(10, **fields)))
+                self.assertFalse(result["allow"], result)
+                self.assertNotIn("紙上模式僅警示", self.reasons(result))
+
+    def test_the_legacy_flag_does_not_help_in_live(self):
+        flagged = {"symbol": "TXF", "price": 45000.0, "source": "signal.price", "as_of": None, "legacy_price_only": True}
+        self.assertFalse(entry(gate_state("live", flagged))["allow"])
 
     def test_paper_still_blocks_a_quote_that_was_sent_but_is_bad(self):
         for label, q in (("過期", live_now(500)), ("未來", live_now(-60)), ("商品不符", live_now(10, symbol="MXF")),
@@ -288,7 +303,39 @@ class EngineIntakeTests(unittest.TestCase):
         self.send({"price": 45050})
         state = self.runtime.snapshot()
         self.assertEqual((state["quote"]["quality"], state["quote"]["source"], state["quote"]["as_of"]), ("unknown", "signal.price", None))
+        self.assertIs(state["quote"]["legacy_price_only"], True)
         self.assertEqual(state["exec"]["price"], 45050)
+
+    def test_a_sender_cannot_forge_the_legacy_flag(self):
+        forged = live_now(10, as_of="bad timestamp", legacy_price_only=True)
+        result = self.send({"quote": forged})
+        self.assertNotIn("legacy_price_only", self.runtime.snapshot()["quote"])
+        self.assertFalse(result["gate"]["allow"], result["gate"])
+
+    def test_a_timed_review_does_not_wash_a_stale_quote_into_a_legacy_one(self):
+        blocked = self.send({"quote": live_now(500)})
+        self.assertFalse(blocked["gate"]["allow"])
+        stored = self.runtime.snapshot()["quote"]
+        review = self.send({"event": "TIMED_MARKET_REVIEW"})            # 只有快取的 exec.price，沒有新行情
+        self.assertEqual(self.runtime.snapshot()["quote"], stored)       # 已存的行情與時間戳原樣保留
+        self.assertFalse(review["gate"]["allow"], review["gate"])
+        self.assertIn("行情已過期", " ".join(review["gate"]["reasons"]))
+
+    def test_a_timed_review_reuses_a_fresh_quote_and_its_original_timestamp_in_live(self):
+        self.send({"quote": live_now(10)})
+        stored = self.runtime.snapshot()["quote"]
+        review = self.send({"event": "TIMED_MARKET_REVIEW"}, mode="live")
+        self.assertEqual(self.runtime.snapshot()["quote"], stored)
+        self.assertTrue(review["gate"]["allow"], review["gate"])        # 仍在 90 秒內：沿用，不被洗成「時間未知」
+
+    def test_only_a_trustworthy_quote_price_replaces_the_signal_price(self):
+        for label, q in (("過期", live_now(500, price=1.0)), ("未來", live_now(-60, price=1.0)),
+                         ("時間未知", live_now(10, price=1.0, as_of=None))):
+            with self.subTest(label=label):
+                self.send({"price": 45050, "quote": q})
+                self.assertEqual(self.runtime.snapshot()["exec"]["price"], 45050)
+        self.send({"price": 45050, "quote": live_now(10, price=45123.0)})
+        self.assertEqual(self.runtime.snapshot()["exec"]["price"], 45123.0)
 
     def test_a_bad_quote_does_not_replace_the_price_but_is_recorded(self):
         self.send({"price": 45050, "quote": live_now(10, symbol="MXF")})
