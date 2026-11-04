@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+import threading
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -44,6 +47,27 @@ class ProviderError(RuntimeError):
         self.cloud_calls = cloud_calls
 
 
+_LOGGED: dict[tuple[str, str], float] = {}
+_LOG_LOCK = threading.Lock()
+LOG_INTERVAL_SEC = 600.0
+
+
+def _log_ledger_error(where: str, exc: BaseException, *, now: float | None = None) -> bool:
+    """帳本讀寫失敗時留下一行限頻記錄（同一處＋同一例外型別 10 分鐘內只記一行）。
+
+    畫面與決策只會看到「帳本無法驗證」，不會有原因；沒有這一行，損毀、鎖定、唯讀的帳本就無從診斷。
+    WaveDeck 與 Stock Terminal 的 `server` 是兩個不同的套件，不能共用 server/log_once.py，所以這裡自帶最小版。"""
+    kind = type(exc).__name__
+    stamp = time.monotonic() if now is None else now
+    with _LOG_LOCK:
+        last = _LOGGED.get((where, kind))
+        if last is not None and stamp - last < LOG_INTERVAL_SEC:
+            return False
+        _LOGGED[(where, kind)] = stamp
+    print(f"[wavedeck] 費用帳本錯誤（{where}）：{kind}: {str(exc)[:200]}", file=sys.stderr, flush=True)
+    return True
+
+
 def _ledger(cfg: dict[str, Any]) -> CostBudget:
     budget = cfg.get("cost_budget", {})
     if not isinstance(budget, dict):
@@ -56,7 +80,8 @@ def budget_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         config = load_config() if cfg is None else cfg
         status = _ledger(config).snapshot()
-    except Exception:
+    except Exception as exc:
+        _log_ledger_error("狀態查詢", exc)
         return {"day": budget_day(), "timezone": "UTC+08:00", "day_basis": "request_admission",
                 "limit_usd": None, "spent_usd": None, "reserved_usd": None,
                 "committed_usd": None, "available_usd": None, "blocked": True,
@@ -71,6 +96,11 @@ def budget_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         status.update({"pricing_configured": False, "blocked": True, "status": "unconfigured",
                        "reason": "付費模型的價目或成本限制尚未確認"})
     return status
+
+
+def recorded_budget_status(cfg: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """帳本檔存在（曾經有過付費請求）才回報狀態；從未付費過的部署回 None，也不會憑空建立帳本檔。"""
+    return budget_status(cfg) if COST_BUDGET_PATH.exists() else None
 
 
 def estimate_openai_usd(usage: dict[str, Any] | None, model: str = "gpt-4o-mini") -> float:
@@ -250,7 +280,8 @@ class OpenAIProvider:
         except Exception as exc:
             try:
                 budget = ledger.retain_unknown(request_id)  # 已結算的請求不受影響，仍回報其實際費用
-            except Exception:
+            except Exception as ledger_exc:
+                _log_ledger_error("保留預留", ledger_exc)
                 budget = {**budget, "blocked": True, "status": "unavailable",
                           "reason": "帳本暫時無法讀取；預留仍保留"}
             raise ProviderError(f"付費模型請求失敗，未知費用仍保留預留額度：{type(exc).__name__}: {str(exc)[:160]}",

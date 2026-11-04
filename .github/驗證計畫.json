@@ -24,6 +24,7 @@
         "wavedeck/server/cost_budget.py",
         "wavedeck/server/engine.py",
         "wavedeck/server/providers.py",
+        "wavedeck/server/server.py",
         "wavedeck/tests/test_cost_budget.py"
       ],
       "inputs": [

@@ -6,6 +6,9 @@
 """
 from __future__ import annotations
 
+import ast
+import contextlib
+import io
 import json
 import sqlite3
 import subprocess
@@ -227,6 +230,7 @@ class _ProviderFixture(unittest.TestCase):
         self.enterContext(mock.patch.object(providers, "_ledger", side_effect=self.ledger_for))
         self.enterContext(mock.patch.object(providers, "_llm_gate_acquire"))
         self.enterContext(mock.patch.object(providers, "_llm_gate_release"))
+        providers._LOGGED.clear()  # 限頻記錄是模組層級狀態，測試之間不能互相抑制
 
     def ledger_for(self, cfg):
         # 與供應者相同的建構方式，但用固定時鐘，測試不隨真實日界線變動。
@@ -333,12 +337,45 @@ class ProviderCostTests(_ProviderFixture):
         self.assertTrue(later["budget"]["blocked"])
 
     def test_unwritable_ledger_blocks_before_http(self):
-        with mock.patch.object(providers, "_ledger", side_effect=OSError("唯讀")):
+        with mock.patch.object(providers, "_ledger", side_effect=OSError("唯讀")), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
             decision, error = self.infer()
         self.assertIsNotNone(error)
         self.assertEqual(decision["budget"]["status"], "unavailable")
         self.assertIsNone(decision["budget"]["committed_usd"])
         self.http.assert_not_called()
+        self.assertIn("OSError: 唯讀", err.getvalue())  # 畫面只會看到「帳本無法驗證」，原因要在記錄裡
+
+    def test_ledger_errors_are_logged_with_their_cause_and_rate_limited(self):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with mock.patch.object(providers, "_ledger", side_effect=OSError("唯讀")):
+                providers.budget_status(self.cfg)
+                providers.budget_status(self.cfg)            # 同一處、同一型別：限頻內不重複
+            with mock.patch.object(providers, "_ledger", side_effect=sqlite3.DatabaseError("損毀")):
+                providers.budget_status(self.cfg)            # 新的例外型別：立刻記錄
+        lines = [line for line in err.getvalue().splitlines() if "費用帳本錯誤" in line]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("OSError: 唯讀", lines[0])
+        self.assertIn("DatabaseError: 損毀", lines[1])
+
+    def test_rate_limit_window_is_ten_minutes_per_place_and_type(self):
+        error = OSError("唯讀")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(providers._log_ledger_error("狀態查詢", error, now=0.0))
+            self.assertFalse(providers._log_ledger_error("狀態查詢", error, now=599.0))
+            self.assertTrue(providers._log_ledger_error("保留預留", error, now=599.0))   # 不同處：各自計時
+            self.assertTrue(providers._log_ledger_error("狀態查詢", error, now=601.0))
+
+    def test_a_failure_to_retain_the_reservation_is_logged_and_blocks(self):
+        self.http.side_effect = TimeoutError("連線逾時")
+        with mock.patch.object(CostBudget, "retain_unknown", side_effect=OSError("鎖定")), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            decision, error = self.infer()
+        self.assertIsNotNone(error)
+        self.assertEqual(decision["budget"]["status"], "unavailable")
+        self.assertTrue(decision["budget"]["blocked"])
+        self.assertIn("費用帳本錯誤（保留預留）：OSError: 鎖定", err.getvalue())
+        self.assertEqual(self.ledger_for(self.cfg).snapshot()["reserved_usd"], 0.0012)  # 預留本身仍在帳本
 
     def test_local_provider_is_not_metered(self):
         self.http.side_effect = None
@@ -363,7 +400,8 @@ class ProviderCostTests(_ProviderFixture):
         unconfigured = providers.budget_status(deepcopy(config_module._DEFAULT))
         self.assertTrue(unconfigured["blocked"])
         self.assertFalse(unconfigured["pricing_configured"])
-        with mock.patch.object(providers, "_ledger", side_effect=OSError("唯讀")):
+        with mock.patch.object(providers, "_ledger", side_effect=OSError("唯讀")), \
+                contextlib.redirect_stderr(io.StringIO()):
             unavailable = providers.budget_status(self.cfg)
         self.assertIsNone(unavailable["committed_usd"])  # 未知，不是 0
         self.assertTrue(unavailable["blocked"])
@@ -490,6 +528,7 @@ class EngineCostTests(unittest.TestCase):
             self.path, c["cost_budget"]["daily_limit_usd"], clock=lambda: FIXED_NOW)))
         self.enterContext(mock.patch.object(providers, "_llm_gate_acquire"))
         self.enterContext(mock.patch.object(providers, "_llm_gate_release"))
+        providers._LOGGED.clear()  # 限頻記錄是模組層級狀態，測試之間不能互相抑制
         self.engine, self.runtime = engine, RUNTIME
 
     def send(self):
@@ -526,6 +565,39 @@ class EngineCostTests(unittest.TestCase):
         self.assertTrue(costs["budget"]["blocked"])
         self.assertFalse(costs["budget"]["pricing_configured"])
         self.http.assert_not_called()
+
+    def test_boot_sync_shows_a_reservation_that_was_never_written_to_costs(self):
+        # 模擬「預留已 commit、決策還沒存就停機」：帳本有預留，runtime 的 costs 還是空的。
+        pricing = ModelPricing.from_config(configuration()["openai"], "fixture-model")
+        CostBudget(self.path, 5, clock=lambda: FIXED_NOW).reserve(pricing)
+        self.assertNotIn("budget", self.runtime.snapshot()["costs"])
+        self.engine.sync_budget_costs()
+        costs = self.runtime.snapshot()["costs"]
+        self.assertEqual(costs["budget"]["reserved_usd"], 0.0012)
+        self.assertEqual(costs["budget"]["pending_requests"], 1)
+        self.assertEqual(costs["day_usd"], 0.0012)       # 已用及預留：預留不會因為重啟而消失
+
+    def test_boot_sync_without_a_ledger_changes_nothing_and_creates_no_file(self):
+        before = dict(self.runtime.snapshot()["costs"])
+        self.engine.sync_budget_costs()
+        self.assertEqual(self.runtime.snapshot()["costs"], before)
+        self.assertFalse(self.path.exists())             # 從未付費過的部署不會憑空多一個帳本檔
+
+    def test_boot_sync_with_an_unreadable_ledger_reports_unknown_not_zero(self):
+        self.path.write_bytes(b"this is not a sqlite database")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.engine.sync_budget_costs()
+        budget = self.runtime.snapshot()["costs"]["budget"]
+        self.assertIsNone(budget["committed_usd"])
+        self.assertTrue(budget["blocked"])
+        self.assertIn("費用帳本錯誤", err.getvalue())
+
+    def test_the_server_boot_path_calls_the_sync(self):
+        # server.server 在匯入時就取得真實資料目錄的單例鎖，這裡不能匯入；改以語法樹確認啟動流程有呼叫它。
+        tree = ast.parse((ROOT / "server" / "server.py").read_text(encoding="utf-8"))
+        boot = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_boot_sync_config")
+        calls = [n.func.id for n in ast.walk(boot) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+        self.assertIn("sync_budget_costs", calls)
 
 
 if __name__ == "__main__":

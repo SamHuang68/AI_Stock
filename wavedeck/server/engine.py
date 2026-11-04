@@ -13,7 +13,7 @@ from . import audit
 from .broker import execution_pending, get_broker
 from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
-from .providers import infer_with_fallback
+from .providers import infer_with_fallback, recorded_budget_status
 from .data_contract import finite_number, normalize_quote
 from .signal_input import check_bridge, check_signal
 from .risk import evaluate_gate, daily_dd_invalid, daily_dd_known, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
@@ -402,6 +402,26 @@ def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
     return _enrich_result(result, st, event, source)
 
 
+def _budget_costs(budget: dict) -> dict:
+    """費用帳本狀態 → `costs` 的補丁。付費請求的單一持久化來源是帳本：今日金額採「已用及預留」
+    （保守上限），未知費用（逾時、缺 usage）仍保留預留，不會少報。session／month 只累計已知費用。"""
+    patch = {"budget": budget}
+    committed = finite_number(budget.get("committed_usd"))
+    if committed is not None:
+        patch["day_usd"] = committed
+    return patch
+
+
+def sync_budget_costs() -> None:
+    """啟動時以持久化帳本為準重建 `costs.budget`。
+
+    預留在送出前就已寫進 SQLite，而 `costs` 要等決策完成才存；在兩者之間停機，預留會留在帳本、
+    畫面與 ST 回報卻看不到它。帳本檔不存在（從未付費過）就什麼都不做，也不會建立帳本檔。"""
+    status = recorded_budget_status()
+    if status is not None:
+        RUNTIME.patch(costs=_budget_costs(status))
+
+
 def _finish_decision(st, decision, err, preferred, event, source, body):
     decision.setdefault("process", {})
     # 先以本次訊號價格更新紙上權益，回撤門檻才不會沿用上一輪監控的舊權益（審查 WD-07）。
@@ -460,13 +480,7 @@ def _finish_decision(st, decision, err, preferred, event, source, body):
         "cloud_calls": int(prev_costs.get("cloud_calls") or 0) + cloud_n,
     }
     if isinstance(decision.get("budget"), dict):
-        # 付費請求的單一持久化來源是費用帳本：今日金額採「已用及預留」（保守上限），
-        # 未知費用（逾時、缺 usage）仍保留預留，不會少報。session／month 只累計已知費用。
-        budget = decision["budget"]
-        cost_patch["budget"] = budget
-        committed = finite_number(budget.get("committed_usd"))
-        if committed is not None:
-            cost_patch["day_usd"] = committed
+        cost_patch.update(_budget_costs(decision["budget"]))
     # Preserve fail-safe tightened invalidation if new decision would loosen it
     prev_ai = RUNTIME.snapshot().get("ai") or {}
     prev_inv = prev_ai.get("invalidation") if isinstance(prev_ai.get("invalidation"), dict) else {}
