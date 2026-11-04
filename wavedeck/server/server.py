@@ -371,7 +371,10 @@ class Handler(BaseHTTPRequestHandler):
             return _json(self, 200, handle_signal(body))
 
         if path == "/bridge/st":
-            return _json(self, 200, {"ok": True, "state": apply_st_bridge(body)})
+            try:
+                return _json(self, 200, {"ok": True, "state": apply_st_bridge(body)})
+            except ValueError as exc:
+                return _json(self, 400, {"ok": False, "error": str(exc)})
 
         if path == "/api/signal":
             return _json(self, 200, handle_signal(body))

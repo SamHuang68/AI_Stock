@@ -127,6 +127,16 @@ stateDiagram-v2
 }
 ```
 
+**輸入檢查**（`server/signal_input.py`，`handle_signal` 與 `apply_st_bridge` 一進來就做；只檢查、不改寫、不補預設值）：
+
+| 對象 | 規則 | 不合格時 |
+| --- | --- | --- |
+| 兩者共通 | 必須是 JSON 物件；整份編碼後 ≤ 16 KiB；不得含 NaN／Infinity | 訊號回 `blocked`（稽核只記原因，不存內容）；`/bridge/st` 回 400，覆寫層不動 |
+| 訊號 | `symbol` 為 1–32 字的 `A-Z a-z 0-9 . ^ _ -`；`event`、`source` 為 ≤128 字、無控制字元的文字；`provider` 為 `heuristic`／`ollama`／`openai`（不分大小寫）；`signal_id` 為 ≤80 字的 `A-Za-z0-9._:-` | 同上 |
+| 橋接 | `style` 為 1–99 的整數；`delever` 為布林值（字串 `"false"` 在 Python 是真值，所以不接受）；`meta` 為物件；`leaders` 最多 6 個、每個 ≤40 字的文字 | 同上 |
+
+欄位缺漏、`null` 或空字串一律視為「用預設」，與檢查導入前相同。策略契約（`策略契約.claim`）用 body 做冪等判斷，所以檢查不會替它補欄位。
+
 ### 4.2 Decision Engine
 - 輸入：正規化行情摘要 + 持倉 + ST 宏觀標籤 + 進場風格（35/50/65/自訂）
 - 輸出：
