@@ -9,9 +9,12 @@ import urllib.request
 from typing import Any
 
 from .config import load_config, openai_api_key
+from .cost_budget import BudgetError, CostBudget, ModelPricing, budget_day
 from .decision import HeuristicProvider
-from .state import now_iso
+from .state import DATA, now_iso
 
+# 付費請求的每日費用帳本；所有程序必須共用同一個檔案，准入才有意義。
+COST_BUDGET_PATH = DATA / "wavedeck_cost_budget.sqlite3"
 ACTIONS = {"HOLD", "ENTER_LONG", "ENTER_SHORT", "EXIT", "REDUCE"}
 LABELS = {
     "HOLD": "維持續抱",
@@ -30,23 +33,50 @@ def _clamp01(x: Any, default: float = 0.5) -> float:
     return max(0.0, min(1.0, v))
 
 
-def estimate_openai_usd(usage: dict[str, Any] | None, model: str = "gpt-4o-mini") -> float:
-    """Rough USD estimate from OpenAI-style usage (gpt-4o-mini defaults)."""
-    usage = usage or {}
+class ProviderError(RuntimeError):
+    """付費請求失敗；帶著帳本狀態與已知費用，讓退回規則引擎時不會把這筆費用當成零。"""
+
+    def __init__(self, message: str, *, budget: dict[str, Any] | None = None,
+                 cost_usd: float | None = 0.0, cloud_calls: int = 0):
+        super().__init__(message)
+        self.budget = budget
+        self.cost_usd = cost_usd
+        self.cloud_calls = cloud_calls
+
+
+def _ledger(cfg: dict[str, Any]) -> CostBudget:
+    budget = cfg.get("cost_budget", {})
+    if not isinstance(budget, dict):
+        raise BudgetError("費用上限設定格式錯誤")
+    return CostBudget(COST_BUDGET_PATH, budget.get("daily_limit_usd", 5))
+
+
+def budget_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """單一持久化費用來源；帳本或設定無法驗證時回報「未知且阻擋」，不冒充零費用。"""
     try:
-        prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-        completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+        config = load_config() if cfg is None else cfg
+        status = _ledger(config).snapshot()
     except Exception:
-        return 0.0
-    # Default rates USD / 1M tokens (gpt-4o-mini ballpark)
-    in_rate, out_rate = 0.15, 0.60
-    m = (model or "").lower()
-    if "gpt-4o" in m and "mini" not in m:
-        in_rate, out_rate = 2.50, 10.00
-    elif "gpt-3.5" in m:
-        in_rate, out_rate = 0.50, 1.50
-    usd = (prompt * in_rate + completion * out_rate) / 1_000_000.0
-    return round(max(0.0, usd), 6)
+        return {"day": budget_day(), "timezone": "UTC+08:00", "day_basis": "request_admission",
+                "limit_usd": None, "spent_usd": None, "reserved_usd": None,
+                "committed_usd": None, "available_usd": None, "blocked": True,
+                "pricing_configured": False, "status": "unavailable", "reason": "費用帳本或上限設定無法驗證"}
+    try:
+        openai = config.get("openai") or {}
+        pricing = ModelPricing.from_config(openai, openai.get("model") or "gpt-4o-mini")
+        status.update({"pricing_configured": True, "model": pricing.model,
+                       "input_bound_tokens": pricing.context_window_tokens,
+                       "max_output_tokens": pricing.max_output_tokens})
+    except (BudgetError, AttributeError, TypeError):
+        status.update({"pricing_configured": False, "blocked": True, "status": "unconfigured",
+                       "reason": "付費模型的價目或成本限制尚未確認"})
+    return status
+
+
+def estimate_openai_usd(usage: dict[str, Any] | None, model: str = "gpt-4o-mini") -> float:
+    """依設定檔中該模型的精確價目計費；沒有配置價目、或 usage 不完整時拋出 BudgetError，不猜。"""
+    cfg = load_config().get("openai") or {}
+    return ModelPricing.from_config(cfg, model).usage_nanos(usage) / 1_000_000_000
 
 
 def _normalize(
@@ -54,7 +84,7 @@ def _normalize(
     event: str,
     provider: str,
     *,
-    cost_usd: float = 0.0,
+    cost_usd: float | None = 0.0,
     local_calls: int = 0,
     cloud_calls: int = 0,
 ) -> dict[str, Any]:
@@ -91,7 +121,8 @@ def _normalize(
             "chase_risk": str(raw.get("chase_risk") or "medium"),
             "gate": "PENDING",
         },
-        "cost_usd": round(float(cost_usd or 0), 6),
+        # None = 費用未知（逾時、缺 usage）；不能寫成 0，否則等於宣稱這筆免費。
+        "cost_usd": None if cost_usd is None else round(float(cost_usd), 6),
         "local_calls": int(local_calls or 0),
         "cloud_calls": int(cloud_calls or 0),
         "updated_at": now_iso(),
@@ -167,35 +198,63 @@ class OpenAIProvider:
     name = "openai"
 
     def infer(self, ctx: dict[str, Any]) -> dict[str, Any]:
-        key = openai_api_key()
-        if not key:
-            raise RuntimeError("缺少 OPENAI_API_KEY（環境變數或 data/wavedeck_secrets.json）")
-        cfg = load_config().get("openai") or {}
-        base = str(cfg.get("base") or "https://api.openai.com/v1").rstrip("/")
-        model = str(cfg.get("model") or "gpt-4o-mini")
-        timeout = float(cfg.get("timeout_sec") or 45)
+        config = load_config()
         event = str(ctx.get("event") or "TIMED_MARKET_REVIEW")
-        out = _http_json(
-            base + "/chat/completions",
-            {
+        # 第一段：送出前的全部檢查與費用預留。任何一項失敗都不會產生網路請求，也不會讀取憑證以外的東西；
+        # 價目沒配置時連憑證都不讀。
+        try:
+            cfg = config.get("openai") or {}
+            model = str(cfg.get("model") or "gpt-4o-mini")
+            pricing = ModelPricing.from_config(cfg, model)
+            ledger = _ledger(config)
+            timeout = float(cfg.get("timeout_sec") or 45)
+            payload = {
                 "model": model,
                 "temperature": 0.2,
+                # 預留金額以這個輸出上限計算（含推理 token）；沒有它，預留就不是上限。
+                "max_completion_tokens": pricing.max_output_tokens,
                 "response_format": {"type": "json_object"},
                 "messages": [
                     {"role": "system", "content": "Return only valid JSON for WaveDeck decision."},
                     {"role": "user", "content": _prompt(ctx)},
                 ],
-            },
-            {
-                "Content-Type": "application/json",
-                "Authorization": "Bearer " + key,
-            },
-            timeout,
-        )
-        content = (((out.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
-        raw = _extract_json(str(content))
-        usd = estimate_openai_usd(out.get("usage") if isinstance(out.get("usage"), dict) else {}, model)
-        return _normalize(raw, event, self.name, cost_usd=usd, cloud_calls=1)
+            }
+            key = openai_api_key()
+            if not key:
+                raise RuntimeError("缺少 OPENAI_API_KEY（環境變數或 data/wavedeck_secrets.json）")
+            request_id, budget = ledger.reserve(pricing)
+        except Exception as exc:
+            budget = getattr(exc, "budget", None) or budget_status(config)
+            raise ProviderError(f"付費請求未通過設定或費用預留檢查：{str(exc)[:200]}",
+                                budget={**budget, "blocked": True}) from exc
+        # 第二段：已預留。之後無論怎麼失敗，預留都不退；只有拿到完整 usage 才以實際費用結算。
+        try:
+            out = _http_json(
+                str(cfg.get("base") or "https://api.openai.com/v1").rstrip("/") + "/chat/completions",
+                payload,
+                {"Content-Type": "application/json", "Authorization": "Bearer " + key},
+                timeout,
+            )
+            try:
+                budget = ledger.settle(request_id, pricing, out.get("usage"))
+            except BudgetError as exc:
+                if exc.budget:  # 供應者回報超出已配置的成本限制：帳本已標記，不能當成一般失敗吞掉
+                    budget = exc.budget
+                    raise
+                budget = ledger.retain_unknown(request_id)
+            content = (((out.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+            result = _normalize(_extract_json(str(content)), event, self.name,
+                                cost_usd=budget["request_cost_usd"], cloud_calls=1)
+            result["budget"] = budget
+            return result
+        except Exception as exc:
+            try:
+                budget = ledger.retain_unknown(request_id)  # 已結算的請求不受影響，仍回報其實際費用
+            except Exception:
+                budget = {**budget, "blocked": True, "status": "unavailable",
+                          "reason": "帳本暫時無法讀取；預留仍保留"}
+            raise ProviderError(f"付費模型請求失敗，未知費用仍保留預留額度：{type(exc).__name__}: {str(exc)[:160]}",
+                                budget=budget, cost_usd=budget.get("request_cost_usd"), cloud_calls=1) from exc
 
 
 def resolve_provider(name: str | None = None):
@@ -253,6 +312,13 @@ def infer_with_fallback(ctx: dict[str, Any], name: str | None = None) -> tuple[d
         fb["process"]["route"] = f"{primary.name}-fail→heuristic→gate"
         fb["summary"] = f"〔{primary.name} 失敗：{exc}〕改用啟發式。 " + fb["summary"]
         fb["provider"] = "heuristic"
+        if isinstance(exc, ProviderError):
+            # 退回規則引擎不會讓這筆付費請求變成免費：已知費用、是否真的送出、帳本狀態都原樣帶回去
+            # （費用未知時 cost_usd 是 None，不是 0）。
+            fb["cost_usd"] = exc.cost_usd
+            fb["cloud_calls"] = exc.cloud_calls
+            if isinstance(exc.budget, dict):
+                fb["budget"] = exc.budget
         return fb, str(exc)
     finally:
         if need_gate:

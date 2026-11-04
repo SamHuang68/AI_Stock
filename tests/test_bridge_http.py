@@ -166,9 +166,19 @@ class BridgeHttpSmoke(unittest.TestCase):
                     httpd.server_close()
 
     def test_estimate_openai_usd(self):
-        usd = estimate_openai_usd({"prompt_tokens": 1000, "completion_tokens": 500}, "gpt-4o-mini")
+        # 價目只來自設定檔、不再內建猜測值：這裡自帶測試用價目（費率是 fixture，不代表供應者實際牌價），
+        # 不讀實機的 wavedeck_config.json，結果才不隨環境變動。
+        configured = {"openai": {"pricing": {"gpt-4o-mini": {
+            "input_usd_per_million": "0.15", "output_usd_per_million": "0.60",
+            "context_window_tokens": 128000, "max_output_tokens": 16000,
+            "output_limit_parameter": "max_completion_tokens", "limits_source": "測試用假設"}}}}
+        with mock.patch.object(_wd_providers, "load_config", return_value=configured):
+            usd = estimate_openai_usd({"prompt_tokens": 1000, "completion_tokens": 500}, "gpt-4o-mini")
         # 1000*0.15 + 500*0.60 = 150+300 = 450 / 1e6 = 0.00045
         self.assertAlmostEqual(usd, 0.00045)
+        with mock.patch.object(_wd_providers, "load_config", return_value={"openai": {}}):
+            with self.assertRaises(_wd_providers.BudgetError):  # 沒有配置價目就不估算，也不猜
+                estimate_openai_usd({"prompt_tokens": 1000, "completion_tokens": 500}, "gpt-4o-mini")
 
 
 if __name__ == "__main__":

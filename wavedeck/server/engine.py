@@ -14,7 +14,7 @@ from .broker import execution_pending, get_broker
 from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
 from .providers import infer_with_fallback
-from .data_contract import normalize_quote
+from .data_contract import finite_number, normalize_quote
 from .signal_input import check_bridge, check_signal
 from .risk import evaluate_gate, daily_dd_invalid, daily_dd_known, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, TZ8, _default_state, now_iso
@@ -459,6 +459,14 @@ def _finish_decision(st, decision, err, preferred, event, source, body):
         "local_calls": int(prev_costs.get("local_calls") or 0) + local_n,
         "cloud_calls": int(prev_costs.get("cloud_calls") or 0) + cloud_n,
     }
+    if isinstance(decision.get("budget"), dict):
+        # 付費請求的單一持久化來源是費用帳本：今日金額採「已用及預留」（保守上限），
+        # 未知費用（逾時、缺 usage）仍保留預留，不會少報。session／month 只累計已知費用。
+        budget = decision["budget"]
+        cost_patch["budget"] = budget
+        committed = finite_number(budget.get("committed_usd"))
+        if committed is not None:
+            cost_patch["day_usd"] = committed
     # Preserve fail-safe tightened invalidation if new decision would loosen it
     prev_ai = RUNTIME.snapshot().get("ai") or {}
     prev_inv = prev_ai.get("invalidation") if isinstance(prev_ai.get("invalidation"), dict) else {}

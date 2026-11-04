@@ -2,22 +2,29 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "b44b0ae68cc3a01357dd90ba0742ed9bc8e93292",
+  "baseCommit": "557531f77c3b3d83f61aa0a1bef50dc83a950ed7",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "WaveDeck警示範本與行情契約測試",
+      "id": "WaveDeck付費請求費用准入",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "README 的 TradingView 警示範本由測試實際解析並走過輸入檢查與行情判斷；文件與程式不一致時測試失敗",
+      "reason": "付費模型請求送出前先在持久化帳本原子預留；價目只來自設定、未配置即阻擋；逾時或缺 usage 保留預留且費用為未知而非零；退回規則引擎不讓費用消失；engine 的今日金額採已用及預留。同時重跑 providers／engine 的直接使用者（供應者回退、行情閘門、規則模式整合、完整審查）",
       "targets": [
-        "wavedeck.tests.test_quote_contract"
+        "wavedeck.tests.test_cost_budget",
+        "wavedeck.tests.test_smoke",
+        "wavedeck.tests.test_quote_contract",
+        "wavedeck.tests.test_策略訊號整合",
+        "wavedeck.tests.test_完整審查執行"
       ],
       "changes": [
-        "wavedeck/README.md",
-        "wavedeck/tests/test_quote_contract.py"
+        "wavedeck/server/config.py",
+        "wavedeck/server/cost_budget.py",
+        "wavedeck/server/engine.py",
+        "wavedeck/server/providers.py",
+        "wavedeck/tests/test_cost_budget.py"
       ],
       "inputs": [
         ".gitignore",
@@ -27,6 +34,7 @@
         "wavedeck/server/audit.py",
         "wavedeck/server/broker.py",
         "wavedeck/server/config.py",
+        "wavedeck/server/cost_budget.py",
         "wavedeck/server/data_contract.py",
         "wavedeck/server/decision.py",
         "wavedeck/server/engine.py",
@@ -47,24 +55,93 @@
         "wavedeck/server/版本身分.py",
         "wavedeck/server/程序單例.py",
         "wavedeck/server/策略契約.py",
-        "wavedeck/tests/test_quote_contract.py"
+        "wavedeck/tests/test_cost_budget.py",
+        "wavedeck/tests/test_quote_contract.py",
+        "wavedeck/tests/test_smoke.py",
+        "wavedeck/tests/test_完整審查執行.py",
+        "wavedeck/tests/test_策略訊號整合.py"
+      ]
+    },
+    {
+      "id": "ST橋接與費用估算契約",
+      "kind": "unittest",
+      "timeoutSeconds": 300,
+      "reason": "estimate_openai_usd 不再內建猜測價目，只依設定檔的精確價目計費；橋接測試改為自帶價目 fixture，不讀實機設定檔",
+      "targets": [
+        "tests.test_bridge_http"
+      ],
+      "changes": [
+        "tests/test_bridge_http.py"
+      ],
+      "inputs": [
+        ".gitignore",
+        "server/wavedeck_bus.py",
+        "tests/test_bridge_http.py",
+        "wavedeck/VERSION",
+        "wavedeck/server/__init__.py",
+        "wavedeck/server/audit.py",
+        "wavedeck/server/broker.py",
+        "wavedeck/server/config.py",
+        "wavedeck/server/cost_budget.py",
+        "wavedeck/server/data_contract.py",
+        "wavedeck/server/decision.py",
+        "wavedeck/server/engine.py",
+        "wavedeck/server/exec_md.py",
+        "wavedeck/server/override_notify.py",
+        "wavedeck/server/paper_account.py",
+        "wavedeck/server/providers.py",
+        "wavedeck/server/request_guard.py",
+        "wavedeck/server/review_loop.py",
+        "wavedeck/server/risk.py",
+        "wavedeck/server/server.py",
+        "wavedeck/server/signal_input.py",
+        "wavedeck/server/spillover.py",
+        "wavedeck/server/st_link.py",
+        "wavedeck/server/st_push.py",
+        "wavedeck/server/state.py",
+        "wavedeck/server/不留倉.py",
+        "wavedeck/server/版本身分.py",
+        "wavedeck/server/程序單例.py",
+        "wavedeck/server/策略契約.py"
+      ]
+    },
+    {
+      "id": "WaveDeck費用面板畫面契約",
+      "kind": "node",
+      "timeoutSeconds": 120,
+      "prepare": [
+        "node"
+      ],
+      "reason": "費用面板以帳本為準顯示已用及預留、預留、可用、未知費用與阻擋原因；付費請求失敗退回規則引擎後不得顯示「API 費用 $0」；整支 render 必須跑得完（函式內新增 var 蓋掉外層 money 會讓面板之前的區塊丟例外）",
+      "targets": [
+        "wavedeck/tests/cost_panel_selftest.js"
+      ],
+      "changes": [
+        "wavedeck/web/js/deck.js",
+        "wavedeck/tests/cost_panel_selftest.js"
+      ],
+      "inputs": [
+        "wavedeck/web/js/deck.js",
+        "wavedeck/tests/cost_panel_selftest.js"
       ]
     },
     {
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "修訂紀錄與 README 是文字資料；分享封存掃描",
+      "reason": "新增的費用設定說明與修訂紀錄不得含絕對使用者路徑",
       "targets": [
         "tests.test_dist_scrub"
       ],
       "changes": [
         "docs/revision.md",
-        "wavedeck/README.md"
+        "wavedeck/README.md",
+        "wavedeck/docs/ARCHITECTURE.md"
       ],
       "inputs": [
         "docs/revision.md",
         "wavedeck/README.md",
+        "wavedeck/docs/ARCHITECTURE.md",
         "tests/test_dist_scrub.py"
       ]
     }
