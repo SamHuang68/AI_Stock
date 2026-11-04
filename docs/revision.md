@@ -1,3 +1,20 @@
+## 2026-11-04 補記 d4aa471 發布狀態（含 #285、#286）
+
+- 基底：`d4aa47127d6925e19bf0bf41025f1f5a455d7466`（origin/main）；分支 `claude/revision-d4aa4712-release`。
+- 授權：Sam 2026-11-04「合併 & 發佈」（對象為 #286）。
+- 合併（合併前 CI ubuntu、windows 與自動安全審查皆通過，沒有審查留言）：#286 每日日線缺口分類，實作 `e688dfd1598782595ab451eb7b1a7110ddedf922`，合併 `d4aa47127d6925e19bf0bf41025f1f5a455d7466`。main push CI（run 41747209962）對 `d4aa4712` 成功。#285（僅文件）在 `3b844d4` 之後合併，一併涵蓋在這次發布範圍。
+- 發布時機：2026-11-04 08:33（台北），在每日盤後 14–21 點窗口之前；停機前確認 `update_jobs` 沒有執行中或排隊中的工作（成功 21,611、逾時 58、失敗 1，皆為終態）。
+- 發布：release id `d4aa47127d69`，前一版 `3b844d4d25bd`。stage `tests: passed`（manifest v3）；本次涵蓋 `3b844d4→d4aa471`（#285、#286），驗證計畫用 #286 的兩個案例，基底改為前一版正式 SHA，並把 `.github/驗證計畫.json` 本身列入文件案例（與 3b844d4 同做法）。兩個案例在 stage 內都是實際執行並通過（`每日日線缺口分類` 12.8 秒、`文件不含絕對使用者路徑` 58.3 秒），不是沿用舊證據。流程與 3b844d4 相同：預檢 → 停止 → 停止後備份 14 個 SQLite → promote → 啟動 → 驗證。
+- 實測：正式站 08:33:44（台北）停止、08:41:00 要求啟動（停機約 7 分鐘）；`/health` 的 `runtimeCommit` 為 `d4aa47127d69…`，閘道 `isolated-host`、upstream 正常，未登入回 401；發布前後 332 個資料檔雜湊完全一致（無變動、無缺漏），promote 後資料庫檢查通過（bars 1,525,035 列，發布前後列數與內容雜湊相同）。本機 18432 於 08:42 同步（本機資料已備份）、08:50:22 `/health` 回 200，`runtimeCommit` 為 `d4aa47127d69…`，`/selftest` 21／21。
+- 尚未觀察：本次變更的實際效果要等 2026-11-04 盤後（約 20:30）`stock-daily-sources` 在正式站實跑。預期（以 2026-11-03 資料重播的結果，不是實測）：若缺口代號仍是同 6 檔，`suspendedSymbols`＝`4207`、`5355`、`8176`，`inactiveSymbols`＝`00847B`、`1522A`、`8183`，`unconfirmedSymbols` 為空，TWSE 日線與 TPEx 日線兩列為 `completed`；整體狀態仍會因 `還原快照` 為 `partial` 而是 `partial`。以正式站該次的 `state`（`suspendedSymbols`、`inactiveSymbols`、`suspensionLists`）為準，不是以上預期。
+- 工具注意：本機 `local_release.py sync` 這次花約 8 分鐘（程序全程高 CPU，累計讀取超過 20 GB，疑似為備份後的完整雜湊核對，並非卡住）；用背景方式執行本機重啟並以 `/health` 判斷，不要中途終止。重啟腳本的日誌要等腳本結束才寫入，執行中看到空檔案是正常的。
+- 未驗證：開機自啟（工作排程 `StockTerminal_Local_Host`）在真正重開機後的行為；閘道／Tailscale 端版本（需 Owner token）、手機尺寸畫面。
+- 已知未處理：同 3b844d4 段落所列（`tests.test_launcher_safety` 一案在這台機器失敗、單一 worker 被 `stock-daily-sources` 占用、正式站日線 07-10 填充列未清除、8D 0030 仍 open）；另有 4 個保留分支與 82 個 stash 等待決定。
+- 驗證：只改文件；`tests.test_dist_scrub`。
+- 發布狀態：文件變更，不涉及發布。
+
+---
+
 ## 2026-11-04 每日日線缺口分類：官方明示停止交易與久未成交不再讓 TWSE／TPEx 兩列停在 partial
 
 - 基底：`25c4903daececeda266c0c0e7f1cda7188316d67`（origin/main）；分支 `claude/daily-sources-suspended-inactive`（工作樹 `AI-Workspace/worktrees/stock-terminal/daily-sources-gap-classes`）。
