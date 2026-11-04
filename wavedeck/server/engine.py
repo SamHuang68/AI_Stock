@@ -14,6 +14,7 @@ from .broker import execution_pending, get_broker
 from .config import load_config, set_broker_kind, set_mode, set_provider
 from .override_notify import notify_async as notify_override_alpha
 from .providers import infer_with_fallback
+from .signal_input import check_bridge, check_signal
 from .risk import evaluate_gate, daily_dd_known, daily_dd_ratio, MAX_DAILY_DD, WARN_DAILY_DD
 from .state import RUNTIME, TZ8, _default_state, now_iso
 from . import 策略契約 as contracts
@@ -185,6 +186,7 @@ def set_no_overnight(body: dict) -> dict:
 
 def apply_st_bridge(body: dict[str, Any]) -> dict[str, Any]:
     """Stock Terminal macro overlay (style / delever / rotation / spillover)."""
+    check_bridge(body)          # ValueError：由 /bridge/st 路由回 400，不寫入覆寫層
     style = body.get("style")
     delever = bool(body.get("delever"))
     note = str(body.get("note") or "")
@@ -327,6 +329,11 @@ def _blocked(reason: str, body: dict) -> dict:
 def handle_signal(body: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(body, dict):
         return _blocked("訊號內容須為 JSON 物件", {})
+    try:
+        check_signal(body)
+    except ValueError as exc:
+        # 稽核不寫入無效內容本身（可能含 NaN 或超大內容），只記原因。
+        return _blocked("訊號內容無效：" + str(exc), {})
     claimed = False
     with _ORDER_LOCK:
         st = RUNTIME.snapshot()

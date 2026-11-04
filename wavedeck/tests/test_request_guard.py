@@ -255,6 +255,16 @@ class RequestGuardHttpTests(unittest.TestCase):
                 self.assertEqual(status, 200, body)
         self.assertEqual(self.runtime.snapshot()["style"], 41)
 
+    def test_invalid_bridge_payload_is_rejected_with_400_and_leaves_the_overlay_alone(self):
+        before = self.runtime.snapshot().get("st_overlay")
+        for payload in ({"style": 120}, {"style": True}, {"delever": "false"}, {"meta": [1]},
+                        {"leaders": ["x"] * 7}):
+            with self.subTest(payload=payload):
+                status, body, _ = self.request("POST", "/bridge/st", body=payload, headers={"Origin": ST_ORIGIN})
+                self.assertEqual(status, 400, body)
+                self.assertFalse(body["ok"])
+        self.assertEqual(self.runtime.snapshot().get("st_overlay"), before)
+
     def test_stock_terminal_origin_may_only_read_state_and_push_the_overlay(self):
         headers = {"Origin": ST_ORIGIN}
         with patch.object(self.server_module, "apply_st_bridge", return_value={"ok": True}) as bridge:

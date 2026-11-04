@@ -1,3 +1,24 @@
+## 2026-11-04 WaveDeck 外部輸入檢查（WD P0 分片移植，第 1 片）
+
+- 基底：`cea3714358d7775db91cfd9b72991150dbcbd72f`（origin/main）；分支 `claude/wd-signal-input`。
+- 授權：Sam 2026-11-04 對「WaveDeck 要開始分片移植嗎？」答「做」。**未合併、未發布**。
+- 來源與整體計畫：`codex/wavedeck-paper-p0`（`0bec06d`，2026-10-03，落後 main 366 個提交）。該分支新增 4 個模組，main 的 WaveDeck 都沒有對等功能（只有顯示用的共享成本計數器與 WD-07 的紙上權益帳本 `paper_account`）：`signal_input`、`data_contract`、`cost_budget`、`paper_orders`。整支合併會在 7 個檔案衝突，改分片移植，順序：`signal_input`（本片）→ `data_contract` → `cost_budget` → `paper_orders`（與 `paper_account` 重疊，須先決定設計）。每片獨立 PR 與測試。
+- 本片做了什麼：`handle_signal`（`/webhook`、`/webhook/tradingview`、`/api/signal`）與 `apply_st_bridge`（`/bridge/st`）一進來先檢查輸入。規則見 `wavedeck/docs/ARCHITECTURE.md` §4.1。根因是 Python 的 `json.loads` 預設放行 `NaN`／`Infinity`，main 原本只檢查 `price`；`meta.score` 等欄位的非有限數值會寫進狀態，瀏覽器端 `JSON.parse` 就會失敗。另外 `delever` 用 `bool()` 轉型，字串 `"false"` 會被當成真值。
+- **既有資源查核後與分支版不同的地方**（分支版是針對當時的程式寫的，照搬會傷到 main 現行契約）：
+  1. 只檢查、不改寫。分支版 `validate_signal` 會補 `symbol`／`event`／`source` 預設並回傳新 dict，但 `策略契約.claim(body)` 用 body 做冪等判斷，補欄位會改變指紋。
+  2. 欄位為 `None` 或空字串視為「用預設」，與 main 的 `body.get(k) or 預設` 同義（分支版會拒絕空的 `event`）；`style: null` 也接受。
+  3. `provider` 不分大小寫（`providers.py` 會轉小寫）。
+  4. 不含 `quote` 檢查：main 沒有這個欄位，隨 `data_contract` 那一片。
+  5. 無效訊號的稽核只記原因，不存內容（內容可能含 `NaN` 或超大）；沿用 main 的 `_blocked` 回應形狀，不引入分支版的 `INVALID_SIGNAL` 新格式。
+  6. `/bridge/st` 路由原本沒有接 `ValueError`，驗證若直接丟出會打斷連線；補成 400，形狀與同檔的策略端點一致。
+- **行為變更（請審閱）**：下列輸入以前被接受、現在被拒絕：含 `NaN`／`Infinity` 的內容；編碼後超過 16 KiB；`symbol` 不是 1–32 字的 `A-Za-z0-9.^_-`（含空白，也含 `:`、`!`）；`event`／`source` 含控制字元或超過 128 字；`provider` 不在 `heuristic`／`ollama`／`openai`；`signal_id` 不是 ≤80 字的 `A-Za-z0-9._:-`；橋接 `style` 不是 1–99 的整數、`delever` 不是布林值、`meta` 不是物件、`leaders` 超過 6 個或單項超過 40 字。
+- 合法送件者核對：ST 前端 `wavedeck_bridge_v5.js` 送出 `style` 20–90 的整數、布林 `delever`、最多 6 個字串的 `leaders`，且 `JSON.stringify` 會把 `NaN` 轉成 `null`，所以都通過；既有 8 個呼叫這兩個入口的測試模組（共 100 項，含規則模式策略訊號與 HTTP）檢查導入後全數通過。
+- 驗證：新增 `wavedeck/tests/test_signal_input.py` 21 項（解析與邊界、不改寫輸入、`None`／空字串語意、引擎整合：無效輸入不改狀態且稽核不存內容、有效輸入照舊）與 `test_request_guard` 1 項（真的 `/bridge/st` 路由回 400 且覆寫層不動）；7 個突變檢查各自被測試抓到（移除訊號檢查、移除橋接檢查、路由不接 `ValueError`、`allow_nan=True`、範圍檢查排在 `float()` 之後、`provider` 區分大小寫、稽核存入無效內容）。9 個測試模組共 122 項通過；未跑 WaveDeck 以外的測試。
+- 未驗證：真實 TradingView 警報（倉庫裡沒有範例 payload，文件與測試只出現 `"symbol": "TXF"`）。**若實際警報的 `{{ticker}}` 是 `TXF1!` 這類帶 `!` 或 `:` 的格式，會被拒絕**，需要放寬字元集；上線前請用實際警報確認。瀏覽器端畫面未驗證。
+- 發布狀態：**未合併、未發布**。WaveDeck 不在 Private Web 發布範圍：由主工作樹直接執行，要生效須更新主工作樹並重啟 WaveDeck，且啟動時會核對 `wavedeck/data/程式版本.json` 收據，新增 `server/signal_input.py` 時收據缺檔會讓 `releaseVerified=false`，須逐檔核對 Git blob 後重建收據。
+
+---
+
 ## 2026-11-04 補記 d4aa471 發布狀態（含 #285、#286）
 
 - 基底：`d4aa47127d6925e19bf0bf41025f1f5a455d7466`（origin/main）；分支 `claude/revision-d4aa4712-release`。
