@@ -104,6 +104,27 @@ WaveDeck 只綁本機，但瀏覽器裡的任何網頁都能對本機位址發�
 | TV／訊號 | `POST http://127.0.0.1:18433/webhook` |
 | 狀態 | `GET  http://127.0.0.1:18433/api/state` |
 
+### TradingView 警示訊息範本
+
+警示的「訊息」欄貼上下面這份（`{{close}}`、`{{timenow}}` 是 TradingView 的佔位符，送出時會被換掉）：
+
+<!-- tv-alert-template:start -->
+```json
+{
+  "symbol": "TXF",
+  "event": "BREAKOUT",
+  "source": "tradingview",
+  "quote": {"price": {{close}}, "as_of": "{{timenow}}", "source": "tradingview"}
+}
+```
+<!-- tv-alert-template:end -->
+
+- **`symbol` 寫死 `TXF`**，不要用 `{{ticker}}`：它會是 `TXF1!` 這類帶 `!` 的格式，會被輸入檢查拒絕。
+- **時間用 `{{timenow}}`，不要用 `{{time}}`**：`{{time}}` 是該根 K 棒的**開盤**時間，K 棒收盤時早已超過 90 秒，會被判定過期。`{{timenow}}` 是警示觸發當下、帶 `Z` 的 UTC ISO 時間；第一次使用請用真實警示確認格式。
+- **實帳**的新單必須帶新鮮的 `quote`（90 秒內、與本機時鐘相差不超過 5 秒）；紙上模式不帶 `quote` 也能用，只會多一句警示。規則見 `docs/ARCHITECTURE.md` §4.1。
+- 本機時鐘偏差或網路延遲超過上述容忍時，行情會被當成過期或未來；請讓執行 WaveDeck 的電腦對時。
+- 這份範本由 `tests/test_quote_contract.py` 實際解析並檢查，文件與程式不一致時測試會失敗。
+
 ST 覆寫範例：
 
 ```bash
