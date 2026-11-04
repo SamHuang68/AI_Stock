@@ -154,7 +154,8 @@ class SourceBoundaryTests(unittest.TestCase):
             second = sources.run()
             self.assertEqual(second['status'], 'completed')
             self.assertEqual(second['unconfirmedSymbols'], [])
-            self.assertEqual(len(seen), 4)
+            # 只數行情請求：首輪有缺口時另查的官方停止交易清單不算「重抓行情」。
+            self.assertEqual(len([url for url in seen if url not in sources.SUSPENSION_SOURCES.values()]), 4)
             benchmark.assert_called_once()
             twse_chips.assert_called_once()
             # 還原快照依賴現在的日線，不沿用「先前已完成」：兩次執行都重新核對。
