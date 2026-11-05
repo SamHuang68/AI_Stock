@@ -42,6 +42,7 @@ from server.engine import (  # noqa: E402
     set_kill_switch,
     panic,
     system_control,
+    sync_budget_costs,
 )
 from server import 策略契約 as strategy_contract  # noqa: E402
 from server import request_guard  # noqa: E402
@@ -90,6 +91,7 @@ def _boot_sync_config() -> None:
             costs={"provider": str(cfg.get("provider") or "heuristic")},
             account={"broker_api": kind},
         )
+        sync_budget_costs()  # 重啟前已預留、卻還沒寫進 costs 的付費請求，要在畫面與 ST 回報看得到
     except Exception as exc:
         sys.stderr.write(f"[wavedeck] boot config sync skipped: {exc}\n")
 

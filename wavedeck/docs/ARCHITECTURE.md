@@ -189,6 +189,7 @@ TradingView 的警示訊息可以寫成 `"quote": {"price": {{close}}, "as_of": 
 ```
 
 - **提供者介面**：`LocalOllamaProvider`｜`CloudOpenAIProvider`｜`HeuristicProvider`（無模型時可跑 demo）
+- **費用准入（OpenAI）**：`server/cost_budget.py` 是 SQLite 帳本，付費請求前以 `BEGIN IMMEDIATE` 原子預留、拿到完整 usage 才結算；價目只來自 `openai.pricing`，未配置即阻擋。預留採整數奈美元保守進位。供應者失敗退回啟發式時，`ProviderError` 把已知費用（未知為 `null`，不是 0）與帳本狀態帶進決策，engine 寫入 `costs.budget`；`costs.day_usd` 取「已用及預留」。設定與操作見 `README.md`「付費模型的費用上限」。
 - 每次推論必落盤；UI「AI 最新判斷」直接讀此結構
 
 ### 4.3 Risk & Watchdog（可覆寫 AI）
@@ -236,7 +237,7 @@ TradingView 的警示訊息可以寫成 `"quote": {"price": {{close}}, "as_of": 
 | Watch／Book ← WD | **SSE** `GET /bridge/wavedeck/stream`（FULL_SYNC／POSITION_STATE_CHANGE）→ symbol chip 字典原子重繪；REST 僅作冷啟動／失聯 fallback |
 | WD → ST 反向繁線 | 狀態機變更 `st_push.push_async`（REST POST，含輕量 `chip`）；ST bus 再 SSE 扇出至瀏覽器 |
 | 共享成本計數器 | ST `GET /bridge/wavedeck`／`/api/cost-meter`；頂列 WD 燈 title 顯示合計；`/health.wavedeck` 含 age_sec／fresh |
-| LLM 成本累計 | OpenAI `usage`→USD；Ollama 計本機次；啟發式 $0；回報至 ST 合併 |
+| LLM 成本累計 | OpenAI `usage`→USD（依設定檔價目，經費用帳本准入；今日金額為「已用及預留」，未知費用保留預留）；Ollama 計本機次；啟發式 $0；回報至 ST 合併 |
 | Heartbeat／Fail-safe | WD 每 5s ping ST `/health`；斷線或覆寫過期 → 風格 35、降載、收緊失效、禁新單 |
 | Override Alpha | 風險覆寫寫入 ST `data/override_alpha.db`；`POST /api/override-alpha/review` 盤後本機 LLM 回顧 |
 | LLM 優先權 | 共享 `data/llm_gate.json`：WD=P1（可搶 ST）；ST Pulse／覆寫回顧 defer；實例隔離 ST `:1234`／WD Ollama `:11434` |

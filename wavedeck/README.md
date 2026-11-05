@@ -99,7 +99,7 @@ WaveDeck 只綁本機，但瀏覽器裡的任何網頁都能對本機位址發�
 | ST → WaveDeck | `POST http://127.0.0.1:18433/bridge/st`（風格／降載／輪動／外溢） |
 | WaveDeck → ST | `POST http://127.0.0.1:18432/bridge/wavedeck`（FSM／部位／成本回報） |
 | 共享成本 | `GET http://127.0.0.1:18432/bridge/wavedeck` 或 `/api/cost-meter`；`/health.wavedeck` 含 freshness |
-| LLM 費用 | OpenAI 依 usage 累計 USD；Ollama 計本機次；啟發式 $0 |
+| LLM 費用 | OpenAI 依 usage 與設定檔中的精確價目計費，並經每日費用帳本准入（見「付費模型的費用上限」）；Ollama 計本機次；啟發式 $0 |
 | Console「套用 ST 建議風格」 | 讀 ST 上表 → 寫 `/bridge/st` + `/api/style` |
 | TV／訊號 | `POST http://127.0.0.1:18433/webhook` |
 | 狀態 | `GET  http://127.0.0.1:18433/api/state` |
@@ -141,7 +141,7 @@ curl -s -X POST http://127.0.0.1:18433/bridge/st \
 |------|------|
 | 決策源 | Console 選 Heuristic／Ollama／OpenAI；失敗自動回退啟發式 |
 | Ollama | 本機 `http://127.0.0.1:11434`，模型見 `data/wavedeck_config.json` |
-| OpenAI | `OPENAI_API_KEY` 或 `data/wavedeck_secrets.json`（勿提交） |
+| OpenAI | `OPENAI_API_KEY` 或 `data/wavedeck_secrets.json`（勿提交）；**未配置價目時付費請求一律阻擋**，見下方「付費模型的費用上限」 |
 | 紙上 | `PaperBroker` 只改記憶體部位 |
 | 實盤 TXT | `TxtMasterBroker` 寫 `data/master/target_position.txt` 並讀策略／帳戶 TXT |
 | ST 入口 | Stock Terminal 側欄 **執行** → 開啟 WaveDeck |
@@ -156,6 +156,33 @@ curl -s -X POST http://127.0.0.1:18433/api/mode \
   -H 'Content-Type: application/json' -d '{"mode":"live"}'
 curl -s -X POST http://127.0.0.1:18433/api/sync_txt -d '{}'
 ```
+
+#### 付費模型的費用上限（OpenAI）
+
+付費請求送出前，先在費用帳本（`data/wavedeck_cost_budget.sqlite3`，SQLite，跨程序共用）原子預留費用；沒通過就不送出，也不讀金鑰。只有 OpenAI 路徑計入帳本，Ollama 與啟發式不受影響。
+
+- **預設全部阻擋**：`openai.pricing` 預設是空的，不提供任何猜測價目。選了 OpenAI 但沒配置價目時，請求被擋下並退回啟發式，畫面顯示「未配置雲端價目，付費呼叫已阻擋」。
+- **要啟用**，在 `data/wavedeck_config.json` 為「精確的模型名稱」填入下列欄位。數值須自行向供應者文件查證，並把來源與日期寫進 `limits_source`；這裡刻意不給範例數字，避免被當成預設值。
+
+  ```json
+  "openai": {
+    "model": "<精確模型名稱>",
+    "pricing": { "<精確模型名稱>": {
+      "input_usd_per_million": "<USD／百萬輸入 token>",
+      "output_usd_per_million": "<USD／百萬輸出 token>",
+      "context_window_tokens": 0,
+      "max_output_tokens": 0,
+      "output_limit_parameter": "max_completion_tokens",
+      "limits_source": "<確認來源與日期>" } }
+  },
+  "cost_budget": { "daily_limit_usd": 5 }
+  ```
+
+- **怎麼預留**：以完整 `context_window_tokens` 的輸入費加 `max_output_tokens` 的輸出費預留，請求同時帶 `max_completion_tokens`（須涵蓋全部可計費輸出，含推理 token）。這個上限以「供應者確實遵守 context 與輸出 token 限制」為前提，不是供應者帳單的保證。
+- **怎麼結算**：拿到完整 usage 才以實際費用結算並釋出差額。逾時、HTTP 錯誤、缺 usage 或 usage 不一致時，預留保留（程序重啟也不退款），該筆費用顯示「未知」，不會當成 0；也不因為退回啟發式就宣稱當日免費。
+- **日界線**固定 UTC+08:00，依「請求准入日」記帳（跨日才回來的回應仍算在送出那天，不等於供應者的帳單日）。同一天只能把上限調低、不能調高；調高要到隔天才生效。
+- **越界停止**：供應者回報的 token 超過配置的限制時，帳本標記越界並停止之後所有付費請求（包含隔天），畫面顯示「需人工處理」。目前沒有自動解除，必須人工處理帳本。
+- **看到的數字**：畫面「已用及預留」是保守上限（已結算費用加未結算預留）；`本次`／`本月` 只累計已知費用，未知費用請看「未知費用 N 筆」與「預留 USD」。帳本狀態在每次付費決策完成後、以及 WaveDeck 啟動時更新（重啟前已預留、卻還沒記入畫面的請求，啟動後就會顯示）；帳本檔不存在表示從未發出付費請求，不會被憑空建立。帳本讀不到時顯示「未知」並阻擋，原因會以限頻（10 分鐘）寫入 WaveDeck 的標準錯誤輸出。
 
 ---
 

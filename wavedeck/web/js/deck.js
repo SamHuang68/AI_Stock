@@ -422,14 +422,37 @@
     var combined = stc && stc.costs ? stc.costs.combined_usd_est : null;
     var prov = String(c.provider || ai.provider || 'heuristic');
     var dayUsd = Number(c.day_usd || 0);
-    var dayCap = 5; // soft budget label (USD); env/UI hint only
-    var budgetCls = dayUsd >= dayCap ? 'bad' : (dayUsd >= dayCap * 0.7 ? 'warn' : '');
+    // 付費請求的單一持久化來源是費用帳本（costs.budget）。只要帳本有紀錄就顯示它，不看供應者名稱：
+    // 付費請求失敗後會退回規則引擎（provider 變 heuristic），不能因此顯示「API 費用 $0」。
+    // 這裡只放數字與固定文字；帳本的日期先濾成日期字元。
+    var budget = c.budget && typeof c.budget === 'object' ? c.budget : null;
+    // 名稱刻意不用 money／amount：render 之外已有 money()，函式內再 var 同名會因提升而蓋掉它，面板之前的呼叫就壞了。
+    var costAmount = function (v) { var n = Number(v); return v == null || !isFinite(n) ? '未知' : n; };
+    var costUsd = function (v) { var n = costAmount(v); return n === '未知' ? n : '$' + n; };
+    var budgetPills = '';
+    if (budget) {
+      var cap = budget.limit_usd != null ? Number(budget.limit_usd) : null;
+      var committed = budget.committed_usd != null ? Number(budget.committed_usd) : null;
+      var budgetCls = budget.blocked ? 'bad' : (cap && committed != null && committed >= cap * 0.7 ? 'warn' : '');
+      var budgetDay = String(budget.day || '').replace(/[^0-9-]/g, '').slice(0, 10);
+      var why = budget.limit_breached ? '供應者回報超出已配置成本限制，付費呼叫已停止，需人工處理'
+        : (budget.status === 'unavailable' ? '費用帳本無法驗證，付費呼叫已阻擋'
+        : (budget.pricing_configured === false ? '未配置雲端價目，付費呼叫已阻擋'
+        : (budget.blocked ? '已達每日上限，付費呼叫已阻擋' : '')));
+      var unknownN = Math.max(0, parseInt(budget.unknown_requests, 10) || 0);
+      budgetPills =
+        '<span class="pill ' + budgetCls + '">帳本 ' + budgetDay + '：已用及預留 ' + costUsd(committed) + ' / 上限 ' + costUsd(cap) + '</span>' +
+        (why ? '<span class="pill bad">' + why + '</span>' : '') +
+        (unknownN ? '<span class="pill warn">未知費用 ' + unknownN + ' 筆（已保留預留）</span>' : '');
+    }
     var modeLabel = prov === 'openai' ? 'OpenAI 雲端' : (prov === 'ollama' ? 'Ollama 本機' : 'Heuristic 規則');
     $('costKv').innerHTML =
       '<div class="cost-mode"><span class="pill">' + modeLabel + '</span>' +
-        (prov === 'openai'
-          ? '<span class="pill ' + budgetCls + '">今日 $' + dayUsd + ' / 警戒 $' + dayCap + '</span>'
-          : '<span class="pill">API 費用 $0（非雲端）</span>') +
+        (budget
+          ? budgetPills
+          : (prov === 'openai'
+            ? '<span class="pill">今日 $' + dayUsd + '（尚無費用帳本紀錄）</span>'
+            : '<span class="pill">API 費用 $0（非雲端）</span>')) +
       '</div>' +
       '<div class="a"><div class="k">本次 USD</div><div class="v">' + (c.session_usd != null ? c.session_usd : 0) + '</div></div>' +
       '<div class="a"><div class="k">今日 USD</div><div class="v">' + (c.day_usd != null ? c.day_usd : 0) + '</div></div>' +
@@ -437,6 +460,10 @@
       '<div class="a"><div class="k">提供者</div><div class="v">' + (c.provider || '—') + '</div></div>' +
       '<div class="a"><div class="k">本機／雲端次</div><div class="v">' +
         (c.local_calls || 0) + '/' + (c.cloud_calls || 0) + '</div></div>' +
+      (budget
+        ? '<div class="a"><div class="k">預留 USD</div><div class="v">' + costAmount(budget.reserved_usd) + '</div></div>' +
+          '<div class="a"><div class="k">可用 USD</div><div class="v">' + costAmount(budget.available_usd) + '</div></div>'
+        : '') +
       (combined != null
         ? '<div class="a"><div class="k">ST+WD 合計</div><div class="v">' + combined + '</div></div>'
         : '') +
