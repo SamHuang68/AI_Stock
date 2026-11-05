@@ -41,8 +41,9 @@ REPORT_URL = 'https://openapi.taifex.com.tw/v1/DailyMarketReportOpt'
 DELTA_URL = 'https://openapi.taifex.com.tw/v1/DailyOptionsDelta'
 TW_TZ = ZoneInfo('Asia/Taipei')
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CACHE_PATH = os.path.join(BASE_DIR, 'data', 'options_structure_cache.json')
-HISTORY_PATH = os.path.join(BASE_DIR, 'data', 'options_structure_history.json')
+import data_paths
+CACHE_PATH = str(data_paths.data_path('options_structure_cache.json', code_root=BASE_DIR))
+HISTORY_PATH = str(data_paths.data_path('options_structure_history.json', code_root=BASE_DIR))
 CACHE_TTL_SEC = 15 * 60
 HISTORY_LIMIT = 180
 

@@ -17,7 +17,8 @@ import sector_flow
 
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_BASE, 'data', 'sector_history.db')
+import data_paths
+DB_PATH = str(data_paths.data_path('sector_history.db', code_root=_BASE))
 _URLS = (
     'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={date}&type=IND&response=json',
     'https://www.twse.com.tw/exchangeReport/MI_INDEX?date={date}&type=IND&response=json',

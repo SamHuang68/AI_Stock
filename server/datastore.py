@@ -22,8 +22,10 @@ import uuid
 from contextlib import closing, nullcontext, contextmanager
 from pathlib import Path
 if __package__:
+    from . import data_paths
     from . import 日線來源收據 as source_provenance
 else:
+    import data_paths
     import 日線來源收據 as source_provenance
 
 # 進程內全域寫入鎖
@@ -35,7 +37,7 @@ if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_BASE, 'data', 'market.db')
+DB_PATH = str(data_paths.data_path('market.db', code_root=_BASE))
 
 SCHEMA_VERSION = 3
 SCHEMA = """

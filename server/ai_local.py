@@ -25,10 +25,15 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
+
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST_LABEL = (os.environ.get("ST_AI_HOST_LABEL") or "EVO-T1").strip()[:48]
-TRACE_PATH = Path(os.environ.get("ST_AI_TRACE_PATH") or str(ROOT / "logs" / "ai_runtime_trace.jsonl"))
+TRACE_PATH = data_paths.log_path('ai_runtime_trace.jsonl', code_root=ROOT, override_env='ST_AI_TRACE_PATH')
 
 
 def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:

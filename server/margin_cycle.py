@@ -35,7 +35,11 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, 'data')
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
+DATA = str(data_paths.data_root(code_root=ROOT))
 DB_PATH = os.path.join(DATA, 'margin_cycle.db')
 SYMBOL = '__TW_MARGIN_CYCLE__'
 TZ_TPE = timezone(timedelta(hours=8))

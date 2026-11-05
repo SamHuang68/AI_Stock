@@ -31,7 +31,8 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DB_PATH = os.path.join(_BASE, 'data', 'pulse_history.db')
+import data_paths
+DB_PATH = str(data_paths.data_path('pulse_history.db', code_root=_BASE))
 _lock = threading.Lock()
 _sync_lock = threading.Lock()
 _initialized = {}

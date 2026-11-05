@@ -272,6 +272,7 @@ print(json.dumps(list(cases(unittest.defaultTestLoader.loadTestsFromName('tests.
         with mock.patch.object(build_dist, "TRACKED_FILES", set()):
             with self.assertRaisesRegex(RuntimeError, "not in Git index"):
                 build_dist.validate_required_share_files()
+        self.assertIn("server/data_paths.py", required)   # 約 40 個 server 模組在匯入時就依賴它
         self.assertIn("server/decision_context.py", required)
         self.assertIn("server/options_exposure.py", required)
         self.assertIn("docs/architecture/archify-manifest.json", required)

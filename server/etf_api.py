@@ -27,7 +27,8 @@ if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 
 ETF_DELTA_PATH = str(etf_paths.resolve_history_dir())
-ETF_CATALOG_FILE = os.path.join(_BASE, 'data', 'etf_catalog.json')
+import data_paths
+ETF_CATALOG_FILE = str(data_paths.data_path('etf_catalog.json', code_root=_BASE))
 
 # ── Tracker run state (for /etf-tracker/run + /etf-tracker/status) ──
 _tracker_state = {

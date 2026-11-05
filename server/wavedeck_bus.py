@@ -20,7 +20,12 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 TZ8 = timezone(timedelta(hours=8))
-DATA = Path(__file__).resolve().parents[1] / 'data'
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
+
+DATA = data_paths.data_root(code_root=Path(__file__).resolve().parents[1])
 STORE = DATA / 'wavedeck_bus.json'
 
 # WaveDeck 預設／fallback 埠（與 bridge JS、run.py 對齊）。

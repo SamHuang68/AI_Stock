@@ -15,6 +15,7 @@ from typing import Callable
 
 from daemon_lock import acquire_daemon_lock, release_daemon_lock
 from jsonl_trace import append_jsonl
+import data_paths
 
 
 TABLE = 'pulse_update_jobs_v1'
@@ -34,9 +35,10 @@ class PulseUpdateStopped(RuntimeError):
 class PulseUpdates:
     def __init__(self, db_path=None, trace_path=None, *, interval_seconds=60,
                  max_run_seconds=300, clock=time.time, monotonic=time.monotonic):
-        self.db_path = os.path.abspath(db_path or os.environ.get('ST_UPDATE_JOBS_DB') or
-                                       _ROOT / 'data' / 'update_jobs.sqlite3')
-        self.trace_path = os.path.abspath(trace_path or _ROOT / 'logs' / 'pulse_updates.jsonl')
+        self.db_path = os.path.abspath(data_paths.data_path(
+            'update_jobs.sqlite3', code_root=_ROOT, override=db_path or None, override_env='ST_UPDATE_JOBS_DB'))
+        self.trace_path = os.path.abspath(data_paths.log_path(
+            'pulse_updates.jsonl', code_root=_ROOT, override=trace_path or None))
         self.interval_seconds = max(0.01, float(interval_seconds))
         self.max_run_seconds = max(0.01, float(max_run_seconds))
         self._clock = clock

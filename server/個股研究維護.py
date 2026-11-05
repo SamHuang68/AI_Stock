@@ -20,6 +20,7 @@ import 每日個股留存 as daily
 from 台股交易參考 import session, instrument
 
 ROOT = Path(__file__).resolve().parents[1]
+import data_paths
 JOB = 'stock-research-maintenance'
 REPORT_JOB = 'stock-evidence-report'
 # 佇列預設 300 秒，但每日來源更新（官方日檔、還原快照 120 秒預算、全市場重算與證據報告）實測約 330～1540 秒；
@@ -189,7 +190,7 @@ def run(*, enable_daily=False, download_sources=False, now=None):
     now = now or datetime.now(ss._TZ['TW'])
     run_id = uuid.uuid4().hex
     state = {'runId': run_id, 'status': 'running', 'startedAt': now.isoformat(), 'steps': [], 'externalCalls': 0}
-    trace_path = state_path.parent.parent / 'logs' / 'stock_research_maintenance.jsonl'
+    trace_path = data_paths.log_path('stock_research_maintenance.jsonl', code_root=state_path.parent.parent)
     trace_path.parent.mkdir(parents=True, exist_ok=True)
 
     def save(event, **details):

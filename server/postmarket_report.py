@@ -35,6 +35,11 @@ except Exception:  # pragma: no cover - tzdata missing
 
 ROOT = Path(__file__).resolve().parents[1]
 
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
+
 GATE_OWNER = 'st'
 GATE_PURPOSE = 'postmarket-daily'
 GATE_TTL_SEC = 120.0
@@ -985,10 +990,7 @@ def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> floa
 # ── 本機報告存檔（data/reports/postmarket/YYYY-MM-DD.json，gitignored） ──────
 
 def reports_dir() -> Path:
-    override = os.environ.get('ST_REPORTS_DIR')
-    if override:
-        return Path(override)
-    return ROOT / 'data' / 'reports' / 'postmarket'
+    return data_paths.data_path('reports/postmarket', code_root=ROOT, override_env='ST_REPORTS_DIR')
 
 
 def save_report(payload: Dict[str, Any], now: Optional[datetime] = None) -> Dict[str, Any]:

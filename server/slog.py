@@ -9,6 +9,11 @@ import os
 import sys
 from typing import Optional
 
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
+
 _CONFIGURED = False
 _LOG = logging.getLogger('stock_terminal')
 
@@ -25,7 +30,7 @@ def setup(level: str = 'INFO') -> logging.Logger:
     _LOG.addHandler(sh)
     try:
         base = os.path.dirname(os.path.abspath(__file__))
-        log_dir = os.path.join(os.path.dirname(base), 'data', 'logs')
+        log_dir = str(data_paths.data_path('logs', code_root=os.path.dirname(base)))
         os.makedirs(log_dir, exist_ok=True)
         fh = logging.FileHandler(os.path.join(log_dir, 'server.log'), encoding='utf-8')
         fh.setFormatter(fmt)

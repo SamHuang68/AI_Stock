@@ -11,6 +11,7 @@ import glob
 import zipfile
 import datetime
 
+import data_paths
 import etf_paths
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,7 +21,7 @@ KEEP = 14                                       # 保留最近幾份(約兩週�
 
 def source_dirs():
     return [
-        ('chip_history', os.path.join(BASE, 'data', 'chip_history')),
+        ('chip_history', str(data_paths.data_path('chip_history', code_root=BASE))),
         ('etf_history', str(etf_paths.resolve_history_dir())),
     ]
 
