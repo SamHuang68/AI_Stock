@@ -26,12 +26,13 @@ except ImportError:
     from indicators import dated_candle_snapshot
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_FILE = os.path.join(_BASE, 'data', 'alert_config.json')
-RULES_FILE = os.path.join(_BASE, 'data', 'alert_rules.json')
-SECRETS_FILE = os.path.join(_BASE, 'data', 'alert_secrets.bin')
-LOG_DIR = os.path.join(_BASE, 'logs', 'alerts')
+import data_paths
+CONFIG_FILE = str(data_paths.data_path('alert_config.json', code_root=_BASE))
+RULES_FILE = str(data_paths.data_path('alert_rules.json', code_root=_BASE))
+SECRETS_FILE = str(data_paths.data_path('alert_secrets.bin', code_root=_BASE))
+LOG_DIR = str(data_paths.log_path('alerts', code_root=_BASE))
 # 送達待送匣：全部已設定通道都失敗的推播在此保留並重試（審查 AL-01）。
-OUTBOX_FILE = os.path.join(_BASE, 'data', 'alert_outbox.json')
+OUTBOX_FILE = str(data_paths.data_path('alert_outbox.json', code_root=_BASE))
 OUTBOX_MAX_ATTEMPTS = 5
 OUTBOX_MAX_AGE_SECONDS = 3600
 OUTBOX_RETRY_GAP_SECONDS = 60

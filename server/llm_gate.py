@@ -13,8 +13,10 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+import data_paths
+
 ROOT = Path(__file__).resolve().parents[1]
-GATE_PATH = Path(os.environ.get('LLM_GATE_PATH') or (ROOT / 'data' / 'llm_gate.json'))
+GATE_PATH = data_paths.data_path('llm_gate.json', code_root=ROOT, override_env='LLM_GATE_PATH')
 
 _lock = threading.RLock()
 

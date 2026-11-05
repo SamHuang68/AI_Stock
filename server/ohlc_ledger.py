@@ -24,7 +24,8 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-LEDGER_DIR = os.path.join(_BASE, 'data', 'ohlc_ledger')
+import data_paths
+LEDGER_DIR = str(data_paths.data_path('ohlc_ledger', code_root=_BASE))
 DB_PATH = os.path.join(LEDGER_DIR, 'ohlc_ledger.db')
 
 SCHEMA_VERSION = 1
@@ -130,7 +131,7 @@ def _normalize_price_basis(value: str) -> str:
 def _ledger_db_path(base_dir: str | os.PathLike[str] | None = None) -> str:
     if base_dir is None:
         return DB_PATH
-    return os.path.join(os.fspath(base_dir), 'data', 'ohlc_ledger', 'ohlc_ledger.db')
+    return str(data_paths.data_path('ohlc_ledger/ohlc_ledger.db', code_root=base_dir))
 
 
 def get_conn(base_dir: str | os.PathLike[str] | None = None) -> sqlite3.Connection:

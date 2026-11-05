@@ -30,7 +30,8 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DATA_DIR = os.path.join(_BASE, 'data')
+import data_paths
+DATA_DIR = str(data_paths.data_root(code_root=_BASE))
 TWOII_CSV = os.path.join(DATA_DIR, 'twoii_daily.csv')
 TXF_CSV = os.path.join(DATA_DIR, 'txf_daily.csv')
 TZ_TPE = timezone(timedelta(hours=8))

@@ -131,6 +131,7 @@ if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import data_paths
 
 
 def _breadth_trace(event, **fields):
@@ -140,7 +141,7 @@ def _breadth_trace(event, **fields):
 def _keystats_trace(event, **fields):
     """Persist sanitized market-cap acquisition transitions for one symbol."""
     try:
-        path = os.path.join(_BASE, 'logs', 'keystats_trace.jsonl')
+        path = str(data_paths.log_path('keystats_trace.jsonl', code_root=_BASE))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         allowed = (
             'correlationId', 'symbol', 'cache', 'source', 'hasPrice',
@@ -157,7 +158,7 @@ def _keystats_trace(event, **fields):
 def _fundamental_trace(event, **fields):
     """Persist a bounded trace for market classification and model resolution."""
     try:
-        path = os.path.join(_BASE, 'logs', 'fundamental_trace.jsonl')
+        path = str(data_paths.log_path('fundamental_trace.jsonl', code_root=_BASE))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         allowed = (
             'correlationId', 'symbol', 'market', 'kind', 'model', 'source',
@@ -183,7 +184,7 @@ def _ui_route_trace(row):
         )
         clean = {k: str((row or {}).get(k) or '')[:120] for k in allowed}
         clean['serverTs'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-        path = os.path.join(_BASE, 'logs', 'ui_route_trace.jsonl')
+        path = str(data_paths.log_path('ui_route_trace.jsonl', code_root=_BASE))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         from jsonl_trace import append_jsonl
         append_jsonl(path, clean, max_bytes=128 * 1024, tail_lines=300)
@@ -223,7 +224,7 @@ def _boot_trace(msg):
     """Always-on boot breadcrumb — survives blank Hermes consoles (no stdout)."""
     line = time.strftime('%Y-%m-%d %H:%M:%S') + ' | ' + str(msg)
     try:
-        log_dir = os.path.join(_BASE, 'logs')
+        log_dir = str(data_paths.log_path(code_root=_BASE))
         os.makedirs(log_dir, exist_ok=True)
         with open(os.path.join(log_dir, 'SERVER_BOOT.txt'), 'a', encoding='utf-8') as fh:
             fh.write(line + '\n')
@@ -237,10 +238,10 @@ def _boot_trace(msg):
 
 
 # ── Chip history (v3.8): 每日法人籌碼快照，用於連續買賣超天數 ──
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 
 # v3.9 P3: 畫線雲端記憶 — 存 draw_store.json {sym: [obj,...]}（gitignore）
-DRAW_STORE_FILE = os.path.join(_BASE, 'data', 'draw_store.json')
+DRAW_STORE_FILE = str(data_paths.data_path('draw_store.json', code_root=_BASE))
 _draw_lock = threading.Lock()
 def _load_draw_store():
     try:
@@ -908,7 +909,7 @@ def _get_tw_names():
     m = {}
     # ── 本地備份讀取防線 ────────────────────────────────────
     # 優先載入上次成功儲存的名稱對照表，確保即使 OpenAPI 斷連或限流，依然有完整的股票代號可用
-    data_dir = os.path.join(_BASE, 'data')
+    data_dir = str(data_paths.data_root(code_root=_BASE))
     backup_path = os.path.join(data_dir, 'tw_names_backup.json')
     if os.path.exists(backup_path):
         try:
@@ -1389,7 +1390,7 @@ def _is_tw_market_fund_sym(sym: str) -> bool:
 
 def _universe_median_pe():
     """從 data/universe.json twmeta 算上市櫃本益比中位數（濾掉異常）。"""
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'universe.json')
+    path = str(data_paths.data_path('universe.json', code_root=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
@@ -6772,9 +6773,9 @@ class Handler(ResearchIntegrationRoutesMixin, ResearchWorkflowRoutesMixin, Updat
                             'volRatio': round(ind['volRatio'], 2) if ind['volRatio'] is not None else None})
         results = enrich_results(records, fund, chip, lookup=_openapi_lookup,
                                  monthly_revenue=_mops_monthly_revenue,
-                                 database=os.path.join(_BASE, 'data', 'market.db'),
+                                 database=str(data_paths.data_path('market.db', code_root=_BASE)),
                                  chip_history_path=CHIP_HISTORY_PATH,
-                                 trace_path=os.path.join(_BASE, 'logs', 'screen3.jsonl'),
+                                 trace_path=str(data_paths.log_path('screen3.jsonl', code_root=_BASE)),
                                  trace_id=__import__('uuid').uuid4().hex)
         results.sort(key=lambda x: (x.get('changePct') is None, -(x.get('changePct') or 0), x['sym']))
         self._ok(json.dumps({'results': results[:80], 'scanned': len(syms),

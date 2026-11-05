@@ -22,9 +22,10 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-LEDGER_DIR = os.path.join(_BASE, 'data', 'touxin_ledger')
+import data_paths
+LEDGER_DIR = str(data_paths.data_path('touxin_ledger', code_root=_BASE))
 DB_PATH = os.path.join(LEDGER_DIR, 'touxin_ledger.db')
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 
 SCHEMA_VERSION = 1
 _WRITE_LOCK = threading.Lock()
@@ -107,7 +108,7 @@ def _finite_number(value: Any, field: str, *, allow_negative: bool = True) -> fl
 def _ledger_db_path(base_dir: str | os.PathLike[str] | None = None) -> str:
     if base_dir is None:
         return DB_PATH
-    return os.path.join(os.fspath(base_dir), 'data', 'touxin_ledger', 'touxin_ledger.db')
+    return str(data_paths.data_path('touxin_ledger/touxin_ledger.db', code_root=base_dir))
 
 
 def get_conn(base_dir: str | os.PathLike[str] | None = None) -> sqlite3.Connection:

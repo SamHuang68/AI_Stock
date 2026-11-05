@@ -28,7 +28,8 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _PYEXE = sys.executable
-DATA = os.path.join(_BASE, 'data')
+import data_paths
+DATA = str(data_paths.data_root(code_root=_BASE))
 SRV = os.path.dirname(os.path.abspath(__file__))
 
 

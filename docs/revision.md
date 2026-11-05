@@ -1,3 +1,44 @@
+## 2026-11-05 單一資料根階段 2（2a）：伺服器端資料路徑解析器與消費者改接
+
+- 基底：`7b16bf4b70919177260c34a02494637dd9486dc7`（origin/main）；分支 `claude/data-root-stage2`。實作與合併 SHA 待 PR 合併後補記。
+- 授權與範圍：Sam 2026-11-05「單一資料根階段 2 開始做」。計畫是 2026-11-04 的《單一正式資料根：分階段計畫》（`AI-Workspace/docs/stock-terminal/single-data-root-20261104/plan.md`）第 2 階段：「`data_paths.py` 解析器 + 改接消費者。legacy 預設，路徑與現在逐字相同」。**這是階段 2 的伺服器端（2a）；WaveDeck 端的消費者（2b）另開 PR。未合併、未發布。**
+- 前一輪狀態補記：#293（`cost_budget`，合併 `e41b2c2…`）與 #294（`paper_orders`，合併 `7b16bf4b…`）已於 2026-11-05 12:14 上線（主工作樹 fast-forward 到 `7b16bf4b…`，WaveDeck 重啟為 PID 43928，`releaseVerified=True`）；兩個分支與 worktree 已清理。
+- 既有資源查核：
+  1. main 沒有任何集中的資料路徑解析：45 個 `server/` 檔、共 79 處（AST 掃描）各自用 `os.path.join(_BASE, 'data', …)` 或 `ROOT / 'data'` 組路徑（`_BASE` 在各檔重複定義，凍結版用 `sys.executable`）。另有 5 個單一路徑的環境變數覆寫（`ST_UPDATE_JOBS_DB`、`ST_REPORTS_DIR`、`ST_AI_TRACE_PATH`、`LLM_GATE_PATH`、`ST_ETF_HISTORY_DIR`），語意是「明確傳入 > 環境變數 > 預設」。
+  2. 保留分支 `claude/runtime-unification-fixes`（`71be7fa`，#266 已關閉）有 400 行的 `data_paths.py`，但它的 154 個變更把「路徑解析」和階段 3 的寫入守衛、階段 4 的發布與啟動器、以及不相關的行為變更（JSONL 重寫、唯讀連線、外置模式下拒絕動作）混在同一批 diff，所以**不能 cherry-pick 或 rebase**，只能在 main 上重做路徑解析這一層。
+  3. `etf_paths.py` 已經有自己的共享目錄解析（`%LOCALAPPDATA%` 下的 ETF 歷史目錄，另有 `ST_ETF_HISTORY_DIR`），不在 `data/` 底下，不屬於這一階段。
+- 設計決定（與分支版刻意不同）：
+  1. **解析器是純函式**：只看呼叫端傳入的 `code_root` 與環境變數，不讀任何檔案。分支版在 legacy 解析時還會讀 `.private_web_release.json`（上限 256 KB、含連結與別名檢查）；實測目前兩個受管安裝的收據已有 177 KB，繼續成長或安裝型態改變，**現行正常的安裝會因為資料路徑解析而無法啟動**。這類保護隨階段 4 的安裝側綁定一起加。
+  2. **只有 legacy 一種模式；任何外置設定一律拒絕**：環境裡出現 `ST_DATA_ROOT`、`ST_RUNTIME_ROLE`、`ST_DATA_BINDING`（非空）就拋 `BindingError`，不靜默退回 legacy 去開另一份資料。外置資料根的身分檔與切換收據驗證、寫入租約、能力版本都隨階段 3／4 進來，現在不寫沒有人能用也沒有人能驗證的程式。
+  3. **`code_root` 原樣沿用**（不 `abspath`、不 `resolve`）、**覆寫值原樣回傳**（不展開 `~`、不轉絕對路徑）：原本的程式就是直接 `os.path.join`／`Path(env or 預設)`，這樣才是逐字相同。空字串視同沒設定。覆寫變數必須在解析器登錄，未登錄的名稱拒絕。
+  4. 每個消費者仍自己傳入原本的 `_BASE`／`ROOT`／`SCRIPT_DIR`（含凍結版分支），只把「接 `'data'`／`'logs'`」這一步交給解析器。
+- 做了什麼：
+  1. 新增 `server/data_paths.py`（`data_root`／`data_path`／`log_path`／`binding_for`／`BindingError`）。
+  2. 改接 42 個既有 `server/` 檔（另新增 1 個），共 70 個 `data_paths` 呼叫點；自己組路徑的位置 79 → 9 處（剩下的 9 處見下方「刻意沒有改接」）。其中 40 處模組常數由「只認三種固定樣式」的轉換腳本產生並逐行審 diff，其餘 `base_dir` 掛鉤、環境變數覆寫、類別預設值與 `server.py` 內的日誌函式手動改）。其中 `datastore.DB_PATH`（市場資料庫）、`slog`（`data/logs`）、`job_queue`／`pulse_updates`（更新工作庫與追蹤檔）、`llm_gate`、`ai_local`、`postmarket_report`、`server.py`（日誌、畫線儲存、篩選）都在內。
+  3. 新增 `tests/test_data_paths.py`（19 項）、`tests/test_data_path_legacy_contract.py`（4 項）、`tests/test_no_raw_data_paths.py`（3 項）與 `tests/raw_data_paths_baseline.json`。
+  4. `scripts/build_dist.py` 的 `REQUIRED_SHARE_FILES` 登記 `server/data_paths.py`，`tests/test_dist_scrub.py` 的預檢測試加一條斷言：約 40 個 `server/` 模組在匯入時就依賴新模組，忘記加入 Git 索引時要在建包前就以明確訊息失敗，而不是建出匯入失敗的單機分享包。這是 `scripts/` 唯一的改動，屬於打包防呆，不涉及任何資料路徑。
+- 刻意**沒有**改接（各有歸屬與理由，登記在 `tests/raw_data_paths_baseline.json`）：
+  1. `server/daemon_lock.py` 的 `data/runtime_locks`：階段 3 的寫入租約會接管這個保留目錄，與租約一起改。
+  2. `server/private_web_gateway.py`、`scripts/`（發布、host、build_dist、local_release；上面第 4 點的必備檔案登記除外）：階段 4。閘道的設定與權杖是存取控制狀態，不在階段 2 搬動。
+  3. `server/etf_snapshot_health.py`（ETF 共享目錄的上一層，不在 `data/`）、`server/backup_data.py` 的 `backups/` 目錄（程式目錄下的備份輸出，不是執行期資料）。
+  4. WaveDeck 的資料與日誌（`wavedeck/server/`）：2b，WaveDeck 的 `server` 套件與主站 `server/` 同名，需要自己的解析入口。
+- 行為變更：
+  1. legacy 路徑：**無變更**，見下方基準對照。唯一已證實的差異：測試或工具手動傳給 `ohlc_ledger`／`peak_approvals`／`touxin_ledger`／`touxin_5d` 的 `base_dir` 若用**正斜線**（如 `'rel/x'`），原本 `os.path.join` 會保留 `/`（`rel/x\data\…`），現在統一成 `\`（`rel\x\data\…`）。Windows 上是同一個檔案；POSIX 上完全相同。正式程式碼都不傳 `base_dir`。
+  2. 空字串的 `code_root`／`base_dir`（`''`）原本會安靜得到相對於工作目錄的 `data\…`，現在拋 `BindingError`：寧可大聲失敗，也不要把資料靜默寫進工作目錄。倉庫內沒有任何呼叫這樣傳（已搜尋 `server/`、`tests/`、`scripts/`、`wavedeck/`），`tests/test_data_paths.py` 鎖住這個行為。
+  3. 新的啟動失敗條件：環境變數 `ST_DATA_ROOT`／`ST_RUNTIME_ROLE`／`ST_DATA_BINDING` 設為非空值時，載入任何已改接的模組會拋 `BindingError`。目前倉庫、啟動器與文件都沒有使用這些名稱（已搜尋確認）。
+- 驗證（逐層分開，沒有以低層結果宣稱高層結論）：
+  1. **改前改後路徑快照**（`AI-Workspace/docs/stock-terminal/single-data-root-stage2-20261105/snapshot_paths.py`）：45 個模組各用獨立子行程匯入，乾淨環境與五個覆寫環境變數都設的環境各一輪，比對 100／101 個模組層級路徑屬性與 25 個函式層級探針（含 `slog.setup()` 的檔案日誌、`server.py` 的 4 個日誌函式與 `universe.json`、`breadth_build`、`backup_data`、三個帳本的 `base_dir` 掛鉤）：**零差異**，僅上述正斜線案例一項已知差異。快照工具本身做了負向對照：在暫存複本植入 7 種錯誤（檔名、`log`／`data` 搞混、漏掉環境覆寫、`base_dir` 被忽略等）全數被抓到；曾發現並移除一個會掩蓋分隔符號差異的正規化。
+  2. **新測試**：26 項全過。解析器 19 項（含「不碰檔案系統」「外置設定一律拒絕」「覆寫語意」）；legacy 契約 4 項（暫存複本上 33 個模組、62 個常數、函式層級路徑、覆寫優先序，期望值是獨立寫死的契約表而非由解析器算出）；靜態棘輪 3 項。
+  3. **突變檢查**：解析器與契約共 27 種突變（解析器 12、消費者 15）全部被抓到；兩個後加探針 5 種全部被抓到；棘輪 3 種（新增兩種寫法、減少未降基準）全部被抓到。
+  4. **既有測試（局部）**：每個被改模組的直接測試加幾個會載入 `server.py` 的整合測試，59 個測試模組、641 項通過、1 項既有跳過；`test_no_new_silent_exceptions` 通過（沒有新增任何例外處理）。
+  5. 計畫實跑：`.github/驗證計畫.json`（3 個案例）由官方執行器實跑通過——解析器與 legacy 契約 26 項（1.6 秒）；各模組改接後的既有行為 643 項、1 項既有跳過（48 秒；60 個測試模組，含靜默例外棘輪）；分享包必備檔案與文件 12 項（45 秒，含從**實際建出的單機分享包**跑 `test_review_regressions`）。計畫 `--check` 確認 51 個變更檔全部被案例涵蓋、沒有無關案例。
+  6. 計畫第一次實跑時，`tests.test_dist_scrub` 從**實際建出的單機分享包**跑 `test_review_regressions`，因新檔尚未加入 Git 索引（分享包以 `git ls-files` 取檔）而 `import data_paths` 失敗——這不是解析器的錯，但證明了「新模組必須隨提交進分享包」是真實風險。執行器依規則拒絕原樣重跑（輸入指紋未變），因此以上面第 4 點的預檢加固作為修正，再重跑。
+- 未驗證與限制：
+  1. **沒有跑完整測試套件。** `server.py` 與 `datastore` 被約 187／200 個測試檔引用，已超出局部範圍，依規則需先經 Sam 同意；上面的局部驗證不等於全套。
+  2. 沒有在 Linux 本機執行（CI 的 Ubuntu 會跑）；沒有用真實 `data/` 啟動伺服器端到端；沒有量測啟動時間（解析器只做字串運算，但未量測）。
+  3. 外置模式沒有任何實作與驗證——這是刻意的，不是遺漏。
+- 發布狀態：僅分支，**未合併、未發布**。生效須合併後更新主工作樹與兩套 runtime；本階段不改變任何資料位置。
+
 ## 2026-11-05 WaveDeck 紙上委託與成交收據（WD P0 分片移植，第 4 片）
 
 - 基底：`e41b2c2c2e0f358c503c1a3b6aa7f4200882af1d`（origin/main，#293 的合併提交）；分支 `claude/wd-paper-orders`。

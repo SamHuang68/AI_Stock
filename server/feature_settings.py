@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+import data_paths
+
 
 FEATURE_KEYS = (
     'ohlcLedger',
@@ -53,8 +55,8 @@ def _truthy(value: str | None) -> bool:
 
 
 def _local_override_path(base_dir: str | Path | None = None) -> Path:
-    root = Path(base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return root / 'data' / 'feature_flags.local.json'
+    root = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return data_paths.data_path('feature_flags.local.json', code_root=root)
 
 
 def _read_local_overrides(base_dir: str | Path | None = None) -> dict[str, bool]:

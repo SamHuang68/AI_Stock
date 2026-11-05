@@ -51,8 +51,9 @@ if getattr(__import__('sys'), 'frozen', False):
     _BASE = os.path.dirname(__import__('sys').executable)
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(_BASE, 'data', 'decision_history.db')
-TRACE_PATH = os.path.join(_BASE, 'logs', 'decision_trace.jsonl')
+import data_paths
+DB_PATH = str(data_paths.data_path('decision_history.db', code_root=_BASE))
+TRACE_PATH = str(data_paths.log_path('decision_trace.jsonl', code_root=_BASE))
 TW_TZ = timezone(timedelta(hours=8))
 
 _lock = threading.RLock()

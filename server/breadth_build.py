@@ -10,13 +10,14 @@ import time
 import urllib.request
 from datetime import date, timedelta
 from typing import Any, Callable
+import data_paths
 from exchange_source_dates import breadth_cache_key, marketflow_cache_key, taipei_today
 
 
 def breadth_trace(base_dir: str, event: str, **fields: Any) -> None:
     """Persistent, bounded diagnostic trail for official breadth freshness."""
     try:
-        path = os.path.join(base_dir, 'logs', 'breadth_trace.jsonl')
+        path = str(data_paths.log_path('breadth_trace.jsonl', code_root=base_dir))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'event': event, **fields}
         from jsonl_trace import append_jsonl

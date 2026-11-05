@@ -6,6 +6,7 @@ import re
 import sqlite3
 from urllib.parse import unquote, urlsplit
 
+import data_paths
 from http_boundary import BodyReadError, read_json_body
 from 研究工作流路由 import query as query_values
 
@@ -45,7 +46,7 @@ class ResearchIntegrationRoutesMixin:
         self._ok(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8'))
 
     def _research_database(self):
-        return str(Path(self._BASE) / 'data' / 'market.db')
+        return str(data_paths.data_path('market.db', code_root=self._BASE))
 
     def _handle_valuation_research(self):
         try:

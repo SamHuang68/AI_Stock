@@ -13,8 +13,10 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+import data_paths
+
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / 'data'
+DATA = data_paths.data_root(code_root=ROOT)
 DB = DATA / 'override_alpha.db'
 TZ8 = timezone(timedelta(hours=8))
 

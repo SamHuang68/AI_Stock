@@ -25,7 +25,8 @@ def _validated_day(value):
     return observed.strftime('%Y%m%d')
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHIP_HISTORY_PATH = os.path.join(_BASE, 'data', 'chip_history')
+import data_paths
+CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 YF_HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 

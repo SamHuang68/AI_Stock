@@ -147,6 +147,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+import data_paths
 from daemon_lock import acquire_daemon_lock, release_daemon_lock
 
 _durable_default = None
@@ -188,8 +189,9 @@ class DurableJobQueue:
     """有界、持久、單一工作者；讀取不建表、不恢復、不啟動。"""
     def __init__(self, db_path=None, *, capacity=16, retain=100,
                  clock=time.time, monotonic=time.monotonic):
-        self.db_path = os.path.abspath(db_path or os.environ.get('ST_UPDATE_JOBS_DB') or
-                                       Path(__file__).resolve().parents[1] / 'data/update_jobs.sqlite3')
+        self.db_path = os.path.abspath(data_paths.data_path(
+            'update_jobs.sqlite3', code_root=Path(__file__).resolve().parents[1],
+            override=db_path or None, override_env='ST_UPDATE_JOBS_DB'))
         self.capacity, self.retain = max(1, int(capacity)), max(10, int(retain))
         self.clock, self.monotonic = clock, monotonic
         self._handlers = {}

@@ -32,7 +32,8 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, 'data')
+import data_paths
+DATA = str(data_paths.data_root(code_root=ROOT))
 DB_PATH = os.path.join(DATA, 'tdcc_holders.db')
 
 TDCC_URL = 'https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5'

@@ -58,7 +58,8 @@ def _ssl_context_for(url: str):
 
 # ── 路徑 ──────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CATALOG_FILE = os.path.join(SCRIPT_DIR, 'data', 'etf_catalog.json')
+import data_paths
+CATALOG_FILE = str(data_paths.data_path('etf_catalog.json', code_root=SCRIPT_DIR))
 
 # ── ETFS 觀測池：從 etf_catalog.json 動態載入 enabled=true 的 ETF ─
 def load_catalog():

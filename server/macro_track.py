@@ -38,7 +38,8 @@ from html import unescape
 from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, 'data')
+import data_paths
+DATA = str(data_paths.data_root(code_root=ROOT))
 CBC_DAILY = os.path.join(DATA, 'cbc_policy_rates.csv')
 CBC_CHANGES = os.path.join(DATA, 'cbc_policy_rate_changes.csv')
 MARGIN_MIX_CSV = os.path.join(DATA, 'tw_margin_mix_daily.csv')

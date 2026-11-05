@@ -42,7 +42,8 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DATA_DIR = os.path.join(_BASE, 'data')
+import data_paths
+DATA_DIR = str(data_paths.data_root(code_root=_BASE))
 SEED_CSV = os.path.join(DATA_DIR, 'margin_ratio_history.csv')
 SYMBOL = '__MARGIN_RATIO__'
 MARKET = 'TW'

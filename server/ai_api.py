@@ -26,8 +26,9 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 
-_AI_KEY_FILE = os.path.join(_BASE, 'data', 'ai_key.bin')
-_AI_KEY_LEGACY_FILE = os.path.join(_BASE, 'data', 'ai_key.txt')
+import data_paths
+_AI_KEY_FILE = str(data_paths.data_path('ai_key.bin', code_root=_BASE))
+_AI_KEY_LEGACY_FILE = str(data_paths.data_path('ai_key.txt', code_root=_BASE))
 _ai_key_lock = threading.Lock()
 
 # 預設 Sonnet 家族（opus 為 opt-in）；/v1/models 查不到時的後備改為當代的 Sonnet 5
