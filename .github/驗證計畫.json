@@ -11,18 +11,20 @@
       "id": "資料根解析器與legacy路徑契約",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "新增 server/data_paths.py：純函式的 legacy 資料／日誌路徑解析、覆寫語意沿用既有模組、任何外置資料根設定一律拒絕；legacy 路徑契約在暫存複本上匯入 33 個模組逐項核對（常數、函式層級路徑、被 except 吞掉的日誌函式、環境變數覆寫優先序）；靜態棘輪擋住 server/ 再新增自己組 data／logs 路徑",
+      "reason": "新增 server/data_paths.py：純函式的 legacy 資料／日誌路徑解析、覆寫語意沿用既有模組、任何外置資料根設定一律拒絕；legacy 路徑契約在暫存複本上匯入 33 個模組逐項核對（常數、函式層級路徑、被 except 吞掉的日誌函式、環境變數覆寫優先序）；靜態棘輪擋住 server/ 再新增自己組 data／logs 路徑；套件模式匯入（from server import X）在改接後仍要能匯入的 21 個模組（改接初版曾讓其中 20 個退化，Codex 審查發現）",
       "targets": [
         "tests.test_data_paths",
         "tests.test_data_path_legacy_contract",
-        "tests.test_no_raw_data_paths"
+        "tests.test_no_raw_data_paths",
+        "tests.test_package_mode_imports"
       ],
       "changes": [
         "server/data_paths.py",
         "tests/raw_data_paths_baseline.json",
         "tests/test_data_path_legacy_contract.py",
         "tests/test_data_paths.py",
-        "tests/test_no_raw_data_paths.py"
+        "tests/test_no_raw_data_paths.py",
+        "tests/test_package_mode_imports.py"
       ],
       "inputs": [
         ".gitignore",
@@ -184,6 +186,7 @@
         "tests/test_data_path_legacy_contract.py",
         "tests/test_data_paths.py",
         "tests/test_no_raw_data_paths.py",
+        "tests/test_package_mode_imports.py",
         "wavedeck/VERSION"
       ]
     },
@@ -239,6 +242,7 @@
         "tests.test_quote_api",
         "tests.test_resilience_gate",
         "tests.test_review_regressions",
+        "tests.test_secret_migration",
         "tests.test_sector_history",
         "tests.test_shadow_feature_gates",
         "tests.test_signal_indicator_parity",
@@ -543,6 +547,7 @@
         "tests/test_quote_api.py",
         "tests/test_resilience_gate.py",
         "tests/test_review_regressions.py",
+        "tests/test_secret_migration.py",
         "tests/test_sector_history.py",
         "tests/test_shadow_feature_gates.py",
         "tests/test_signal_indicator_parity.py",

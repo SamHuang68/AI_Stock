@@ -26,7 +26,10 @@ except ImportError:
     from indicators import dated_candle_snapshot
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 CONFIG_FILE = str(data_paths.data_path('alert_config.json', code_root=_BASE))
 RULES_FILE = str(data_paths.data_path('alert_rules.json', code_root=_BASE))
 SECRETS_FILE = str(data_paths.data_path('alert_secrets.bin', code_root=_BASE))

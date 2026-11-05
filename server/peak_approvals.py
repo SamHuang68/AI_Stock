@@ -27,7 +27,10 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 APPROVALS_DIR = str(data_paths.data_path('peak_approvals', code_root=_BASE))
 DB_PATH = os.path.join(APPROVALS_DIR, 'peak_approvals.db')
 

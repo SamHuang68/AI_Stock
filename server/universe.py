@@ -25,7 +25,10 @@ if getattr(sys, 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 CACHE = str(data_paths.data_path('universe.json', code_root=_BASE))
 _TW_CODE = re.compile(r'^[0-9]{4}[0-9A-Z]{0,2}$')   # 2330 / 0050 / 00631L / 020000…
 _US_SYM = re.compile(r'^[A-Z][A-Z0-9.\-]{0,7}$')

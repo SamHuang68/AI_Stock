@@ -36,7 +36,10 @@ except ImportError:
     from atomic_store import StoreCorruptError, atomic_write_json, load_json
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 CACHE_FILE = str(data_paths.data_path('stock_signal_pooled_stats.json', code_root=_BASE))
 CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 MIN_SYMBOLS = 5

@@ -13,7 +13,10 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = data_paths.data_root(code_root=ROOT)

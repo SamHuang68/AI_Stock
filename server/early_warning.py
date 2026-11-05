@@ -29,7 +29,10 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 DB_PATH = str(data_paths.data_path('market_signals.db', code_root=_BASE))
 CONTRACT_VERSION = 3
 ENGINE_VERSION = 'st-market-precursor/v2'

@@ -26,7 +26,10 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if getattr(sys, 'frozen', False):
     _BASE = os.path.dirname(sys.executable)
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 _AI_KEY_FILE = str(data_paths.data_path('ai_key.bin', code_root=_BASE))
 _AI_KEY_LEGACY_FILE = str(data_paths.data_path('ai_key.txt', code_root=_BASE))
 _ai_key_lock = threading.Lock()

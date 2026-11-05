@@ -12,10 +12,11 @@
   2. **只有 legacy 一種模式；任何外置設定一律拒絕**：環境裡出現 `ST_DATA_ROOT`、`ST_RUNTIME_ROLE`、`ST_DATA_BINDING`（非空）就拋 `BindingError`，不靜默退回 legacy 去開另一份資料。外置資料根的身分檔與切換收據驗證、寫入租約、能力版本都隨階段 3／4 進來，現在不寫沒有人能用也沒有人能驗證的程式。
   3. **`code_root` 原樣沿用**（不 `abspath`、不 `resolve`）、**覆寫值原樣回傳**（不展開 `~`、不轉絕對路徑）：原本的程式就是直接 `os.path.join`／`Path(env or 預設)`，這樣才是逐字相同。空字串視同沒設定。覆寫變數必須在解析器登錄，未登錄的名稱拒絕。
   4. 每個消費者仍自己傳入原本的 `_BASE`／`ROOT`／`SCRIPT_DIR`（含凍結版分支），只把「接 `'data'`／`'logs'`」這一步交給解析器。
+  5. **套件模式匯入要保留**（Codex 審查發現，本機重現）：`server/` 的模組有兩種載入方式——把 `server/` 放進 `sys.path` 後以頂層名稱匯入（正式執行與多數測試），以及只把 repo 根目錄放進 `sys.path`、以 `from server import ai_api` 匯入（例如 `tests/test_secret_migration.py`）。初版一律寫 `import data_paths`，後者會 `ModuleNotFoundError`。逐一實測 149 個 `server` 模組：改前 71 個可套件模式匯入，初版改後只剩 51 個，**20 個退化**（19 個直接受害，`signal_digest` 因為它靠「套件匯入失敗就退回頂層匯入」的備援、備援被 `stock_signals_routes` 的失敗打斷而間接受害）。這 20 個模組改用 `datastore` 本來就在用的雙模式寫法 `if __package__: from . import data_paths / else: import data_paths`；原本就不能套件模式匯入的模組（頂層同層相依早就會失敗）維持 `import data_paths`。
 - 做了什麼：
   1. 新增 `server/data_paths.py`（`data_root`／`data_path`／`log_path`／`binding_for`／`BindingError`）。
   2. 改接 42 個既有 `server/` 檔（另新增 1 個），共 70 個 `data_paths` 呼叫點；自己組路徑的位置 79 → 9 處（剩下的 9 處見下方「刻意沒有改接」）。其中 40 處模組常數由「只認三種固定樣式」的轉換腳本產生並逐行審 diff，其餘 `base_dir` 掛鉤、環境變數覆寫、類別預設值與 `server.py` 內的日誌函式手動改）。其中 `datastore.DB_PATH`（市場資料庫）、`slog`（`data/logs`）、`job_queue`／`pulse_updates`（更新工作庫與追蹤檔）、`llm_gate`、`ai_local`、`postmarket_report`、`server.py`（日誌、畫線儲存、篩選）都在內。
-  3. 新增 `tests/test_data_paths.py`（19 項）、`tests/test_data_path_legacy_contract.py`（4 項）、`tests/test_no_raw_data_paths.py`（3 項）與 `tests/raw_data_paths_baseline.json`。
+  3. 新增 `tests/test_data_paths.py`（19 項）、`tests/test_data_path_legacy_contract.py`（4 項）、`tests/test_no_raw_data_paths.py`（3 項）、`tests/test_package_mode_imports.py`（2 項）與 `tests/raw_data_paths_baseline.json`。
   4. `scripts/build_dist.py` 的 `REQUIRED_SHARE_FILES` 登記 `server/data_paths.py`，`tests/test_dist_scrub.py` 的預檢測試加一條斷言：約 40 個 `server/` 模組在匯入時就依賴新模組，忘記加入 Git 索引時要在建包前就以明確訊息失敗，而不是建出匯入失敗的單機分享包。這是 `scripts/` 唯一的改動，屬於打包防呆，不涉及任何資料路徑。
 - 刻意**沒有**改接（各有歸屬與理由，登記在 `tests/raw_data_paths_baseline.json`）：
   1. `server/daemon_lock.py` 的 `data/runtime_locks`：階段 3 的寫入租約會接管這個保留目錄，與租約一起改。
@@ -28,11 +29,12 @@
   3. 新的啟動失敗條件：環境變數 `ST_DATA_ROOT`／`ST_RUNTIME_ROLE`／`ST_DATA_BINDING` 設為非空值時，載入任何已改接的模組會拋 `BindingError`。目前倉庫、啟動器與文件都沒有使用這些名稱（已搜尋確認）。
 - 驗證（逐層分開，沒有以低層結果宣稱高層結論）：
   1. **改前改後路徑快照**（`AI-Workspace/docs/stock-terminal/single-data-root-stage2-20261105/snapshot_paths.py`）：45 個模組各用獨立子行程匯入，乾淨環境與五個覆寫環境變數都設的環境各一輪，比對 100／101 個模組層級路徑屬性與 25 個函式層級探針（含 `slog.setup()` 的檔案日誌、`server.py` 的 4 個日誌函式與 `universe.json`、`breadth_build`、`backup_data`、三個帳本的 `base_dir` 掛鉤）：**零差異**，僅上述正斜線案例一項已知差異。快照工具本身做了負向對照：在暫存複本植入 7 種錯誤（檔名、`log`／`data` 搞混、漏掉環境覆寫、`base_dir` 被忽略等）全數被抓到；曾發現並移除一個會掩蓋分隔符號差異的正規化。
-  2. **新測試**：26 項全過。解析器 19 項（含「不碰檔案系統」「外置設定一律拒絕」「覆寫語意」）；legacy 契約 4 項（暫存複本上 33 個模組、62 個常數、函式層級路徑、覆寫優先序，期望值是獨立寫死的契約表而非由解析器算出）；靜態棘輪 3 項。
-  3. **突變檢查**：解析器與契約共 27 種突變（解析器 12、消費者 15）全部被抓到；兩個後加探針 5 種全部被抓到；棘輪 3 種（新增兩種寫法、減少未降基準）全部被抓到。
-  4. **既有測試（局部）**：每個被改模組的直接測試加幾個會載入 `server.py` 的整合測試，59 個測試模組、641 項通過、1 項既有跳過；`test_no_new_silent_exceptions` 通過（沒有新增任何例外處理）。
-  5. 計畫實跑：`.github/驗證計畫.json`（3 個案例）由官方執行器實跑通過——解析器與 legacy 契約 26 項（1.6 秒）；各模組改接後的既有行為 643 項、1 項既有跳過（48 秒；60 個測試模組，含靜默例外棘輪）；分享包必備檔案與文件 12 項（45 秒，含從**實際建出的單機分享包**跑 `test_review_regressions`）。計畫 `--check` 確認 51 個變更檔全部被案例涵蓋、沒有無關案例。
+  2. **新測試**：28 項全過。解析器 19 項（含「不碰檔案系統」「外置設定一律拒絕」「覆寫語意」）；legacy 契約 4 項（暫存複本上 33 個模組、62 個常數、函式層級路徑、覆寫優先序，期望值是獨立寫死的契約表而非由解析器算出）；靜態棘輪 3 項；套件模式匯入 2 項（21 個模組，並檢查名單內沒有頂層的裸 `import data_paths`）。
+  3. **突變檢查**：解析器與契約共 27 種突變（解析器 12、消費者 15）全部被抓到；兩個後加探針 5 種全部被抓到；棘輪 3 種（新增兩種寫法、減少未降基準）全部被抓到；套件模式匯入測試 4 種（把雙模式寫法還原成裸 import）全部被抓到。
+  4. **既有測試（局部）**：每個被改模組的直接測試加幾個會載入 `server.py` 的整合測試，60 個測試模組、646 項通過、1 項既有跳過（含 `test_secret_migration`）；`test_no_new_silent_exceptions` 通過（沒有新增任何例外處理）。
+  5. 計畫實跑：`.github/驗證計畫.json`（3 個案例）由官方執行器實跑通過——解析器、legacy 契約、棘輪與套件模式匯入 28 項（2.0 秒）；各模組改接後的既有行為 646 項、1 項既有跳過（49 秒；61 個測試模組，含靜默例外棘輪與 `test_secret_migration`）；分享包必備檔案與文件 12 項（46 秒，含從**實際建出的單機分享包**跑 `test_review_regressions`）。計畫 `--check` 確認 52 個變更檔全部被案例涵蓋、沒有無關案例。
   6. 計畫第一次實跑時，`tests.test_dist_scrub` 從**實際建出的單機分享包**跑 `test_review_regressions`，因新檔尚未加入 Git 索引（分享包以 `git ls-files` 取檔）而 `import data_paths` 失敗——這不是解析器的錯，但證明了「新模組必須隨提交進分享包」是真實風險。執行器依規則拒絕原樣重跑（輸入指紋未變），因此以上面第 4 點的預檢加固作為修正，再重跑。
+  7. **PR 送出後的兩個發現（皆已修正）**：(a) Windows CI 在第一個案例失敗——契約測試的子行程用 `-I`，隔離模式會忽略 `PYTHONIOENCODING`／`PYTHONUTF8`，而 CI 的 Windows 預設是 cp1252，`etf_delta_tracker` 在找不到目錄時匯入就會印中文而 `UnicodeEncodeError`；我的開發機是 cp950、Ubuntu 是 UTF-8，所以本機與 Linux 都沒事。子行程改用 `-X utf8`（`test_dist_scrub` 本來就是這樣）。(b) 上述第 5 點的套件模式退化：我依模組名挑選的局部測試沒有涵蓋「以套件模式匯入」這一類，`test_secret_migration` 因此漏跑；已補進案例並新增永久測試，也另外搜尋過其他以套件模式匯入已改接模組的既有測試，只有它一個。
 - 未驗證與限制：
   1. **沒有跑完整測試套件。** `server.py` 與 `datastore` 被約 187／200 個測試檔引用，已超出局部範圍，依規則需先經 Sam 同意；上面的局部驗證不等於全套。
   2. 沒有在 Linux 本機執行（CI 的 Ubuntu 會跑）；沒有用真實 `data/` 啟動伺服器端到端；沒有量測啟動時間（解析器只做字串運算，但未量測）。

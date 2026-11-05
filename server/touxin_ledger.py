@@ -22,7 +22,10 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 LEDGER_DIR = str(data_paths.data_path('touxin_ledger', code_root=_BASE))
 DB_PATH = os.path.join(LEDGER_DIR, 'touxin_ledger.db')
 CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))

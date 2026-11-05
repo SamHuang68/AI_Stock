@@ -172,7 +172,9 @@ class LegacyPathContract(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith('ST_') and k not in {'LLM_GATE_PATH', 'PYTHONPATH', 'PYTHONHOME'}}
         env.update({'PYTHONIOENCODING': 'utf-8', 'PYTHONDONTWRITEBYTECODE': '1'}, **extra_env)
-        proc = subprocess.run([sys.executable, '-I', '-c', CHILD, cls.root, cls.base, spec_path],
+        # -I 會忽略 PYTHONIOENCODING／PYTHONUTF8；CI 的 Windows 預設是 cp1252，有的模組匯入時會印中文
+        # （etf_delta_tracker 找不到目錄時），所以要明確用 -X utf8，不能靠環境變數。
+        proc = subprocess.run([sys.executable, '-I', '-X', 'utf8', '-c', CHILD, cls.root, cls.base, spec_path],
                               capture_output=True, text=True, encoding='utf-8', errors='replace',
                               env=env, cwd=cls.base, timeout=240)
         for line in reversed(proc.stdout.splitlines()):

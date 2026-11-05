@@ -32,7 +32,10 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 DATA = str(data_paths.data_root(code_root=ROOT))
 DB_PATH = os.path.join(DATA, 'tdcc_holders.db')
 

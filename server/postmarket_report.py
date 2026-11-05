@@ -35,7 +35,10 @@ except Exception:  # pragma: no cover - tzdata missing
 
 ROOT = Path(__file__).resolve().parents[1]
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 
 GATE_OWNER = 'st'
 GATE_PURPOSE = 'postmarket-daily'

@@ -34,7 +34,10 @@ except ImportError:
     from deadline import BoundedExecutor, Deadline
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 CHIP_HISTORY_PATH = str(data_paths.data_path('chip_history', code_root=_BASE))
 WATCHLIST_FILE = str(data_paths.data_path('stock_signal_watchlist.json', code_root=_BASE))
 

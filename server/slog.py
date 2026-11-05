@@ -9,7 +9,10 @@ import os
 import sys
 from typing import Optional
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 
 _CONFIGURED = False
 _LOG = logging.getLogger('stock_terminal')

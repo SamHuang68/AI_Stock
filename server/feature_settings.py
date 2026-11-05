@@ -13,7 +13,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-import data_paths
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 
 
 FEATURE_KEYS = (
