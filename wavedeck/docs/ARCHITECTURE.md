@@ -295,6 +295,7 @@ TradingView 的警示訊息可以寫成 `"quote": {"price": {{close}}, "as_of": 
 ### v1.5（已交付）
 - **決策 adapter**：`heuristic`｜`ollama`｜`openai`（失敗自動 fallback 啟發式）
 - **Broker**：`PaperBroker`｜`TxtMasterBroker`（`data/master/*.txt` 四欄對帳）
+- **紙上委託與成交收據**：`server/paper_orders.py` 是純函式模組，狀態在 `paper_book`（`order`／`receipts`／`intents`，隨 Runtime 保存）。`PaperBroker.apply_intent` 以 `broker._target` 決定目標部位，`submit` 把「現有部位→目標」變成委託，再用 `exec.price` 開一張收據交給 `confirm_fill` 驗證並套用；部位與 `paper_account` 權益帳本由同一張收據更新。收據以 `receipt_id` 冪等、意圖以 (`strategy_id`, `signal_id`) 冪等；平倉意圖與急停會先取消進行中的委託餘量。對外 `execution` 欄位維持既有形狀（全部成交＝`filled` 且 `position_confirmed`），另加 `filled_quantity`、`remaining_quantity`、`average_fill_price`、`price_unknown`。`engine._apply_patch` 與 `panic_flatten` 一併帶 `paper_book`。
 - **模式**：預設 `paper`；`live` 明確切換後才寫下單大師 TXT
 - **ST 入口**：側欄「執行」→ `http://127.0.0.1:18433/`（`shell_v5` + `wavedeck_bridge_v5`）
 - API：`/api/provider`、`/api/mode`、`/api/broker`、`/api/sync_txt`、`/api/config`

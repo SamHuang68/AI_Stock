@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import paper_orders as _paper_orders
 from .config import load_config
 from .state import ROOT
 
@@ -133,7 +134,7 @@ def panic_flatten(state: dict[str, Any]) -> dict[str, Any]:
         },
         "lights": dict(applied.get("lights") or {}),
         "account": dict(applied.get("account") or {}),
-        **({"paper_ledger": applied["paper_ledger"]} if "paper_ledger" in applied else {}),
+        **{key: applied[key] for key in ("paper_ledger", "paper_book") if key in applied},
     }
 
 
@@ -148,7 +149,8 @@ def now_line() -> str:
 
 
 def execution_pending(execution: dict[str, Any]) -> bool:
-    return bool(execution.get("order_id") and not execution.get("position_confirmed") and execution.get("status") != "rejected")
+    return bool(execution.get("order_id") and not execution.get("position_confirmed")
+                and execution.get("status") not in ("rejected", "cancelled"))
 
 
 def _target(action: str, lots: int, current: int | None = None, requested: int | None = None) -> int | None:
@@ -176,31 +178,121 @@ def _receipt(state, decision, target):
             "strategy_version": decision.get("version") or decision.get("strategy_version")}
 
 
+def _paper_price(state):
+    """紙上成交價沿用 exec.price（最近一筆訊號價，審查 WD-07）；缺漏或非有限正值為未知（None）。"""
+    from .data_contract import finite_number
+    price = finite_number((state.get("exec") or {}).get("price"))
+    return price if price is not None and price > 0 else None
+
+
+def _paper_basis(state, price):
+    """成交價出處：只標示 exec.price 是否與一筆此刻仍新鮮的已驗證行情一致，不另外換價。
+    規則模式或舊式只帶 price 的訊號沒有可再驗證的行情，標為 signal_price。"""
+    from .data_contract import normalize_quote
+    quote = state.get("quote")
+    if price is not None and isinstance(quote, dict) and not quote.get("legacy_price_only"):
+        checked = normalize_quote(quote, str(state.get("symbol") or "TXF"))
+        if checked["quality"] in {"fresh", "demo"} and checked["price"] == price:
+            return {"price_basis": "quote", "quote_source": checked["source"], "quote_as_of": checked["as_of"]}
+    return {"price_basis": "signal_price"}
+
+
+def _paper_ledger(state, position, price):
+    """依成交後的部位更新紙上權益帳本（審查 WD-07）；價格未知時部位照記、損益標為未知。"""
+    from . import paper_account
+    return paper_account.fill_fields(paper_account.apply_fill(
+        state.get("paper_ledger"), position, price, paper_account.settings(load_config())["point_value"]))
+
+
+def _order_view(order):
+    """把紙上委託翻成引擎與畫面既有的 execution 欄位：全部成交＝filled 且部位已核對，其餘維持未核對。"""
+    confirmed = order["status"] == "confirmed"
+    view = {"order_id": order["order_id"], "symbol": order["symbol"], "target": order["target_position"],
+            "status": "filled" if confirmed else order["status"], "evidence_kind": "simulated",
+            "position_confirmed": confirmed, "quantity": order["quantity"],
+            "filled_quantity": order["filled_quantity"], "remaining_quantity": order["remaining_quantity"],
+            "average_fill_price": order["average_fill_price"], "price_unknown": order["price_unknown"],
+            # 狀態補丁逐層合併，舊鍵不會消失：未核對時要明確清成 None，否則會殘留上一筆成交的核對結果。
+            "confirmed_account": order["target_position"] if confirmed else None,
+            "confirmed_at": now_line() if confirmed else None}
+    return view
+
+
 class PaperBroker:
+    """紙上券商：意圖先成為持久化的委託，部位只在成交收據通過驗證後才改（paper_orders）。
+
+    目前唯一的成交來源是本券商自己：委託建立後立刻以 exec.price 產生一張收據並套用，所以對外仍是
+    即時成交。委託若沒成交（收據被拒），會維持待成交，由下一次 sync_positions 重試；平倉意圖與急停會取消它。"""
     name = "paper"
 
-    def sync_positions(self, state):
+    def _idle(self, state):
         # 紙上部位只由明確意圖改變，不把未成交目標當作帳戶。
         return {"positions": dict(state.get("positions") or {}), "execution": dict(state.get("execution") or {}),
                 "lights": {"broker_api": "ok", "order_signal_file": "ok", "position_sync": "ok"},
                 "account": {"broker_api": "paper", "position_sync": "simulated"}}
+
+    def sync_positions(self, state):
+        result = self._idle(state)
+        out = _paper_orders.snapshot(state)
+        order = out["order"] or {}
+        if order.get("status") not in _paper_orders.ACTIVE_STATUSES:
+            return result
+        if (state.get("kill_switch") or state.get("fsm") == "Halted") and order.get("action") in {"ENTER_LONG", "ENTER_SHORT"}:
+            out = _paper_orders.cancel_order(state, "紙上急停：入場委託未成交餘量已取消")
+            return self._publish(state, result, out, out["order"]["cancelled_reason"])
+        return self._settle(state, result, out)
+
+    def _settle(self, state, result, out, decision=None):
+        """對 out 內仍有餘量的委託，以目前價格產生一張收據並套用；收據被拒時委託維持待成交並說明原因。"""
+        order = out["paper_book"]["order"]
+        price = _paper_price(state)
+        receipt = {"receipt_id": f"paper-fill:{order['order_id']}:{order['filled_quantity']}",
+                   "order_id": order["order_id"], "symbol": order["symbol"], "quantity": order["remaining_quantity"],
+                   "filled_at": _paper_orders._now(), "source": "paper", **_paper_basis(state, price),
+                   **({"price": price} if price is not None else {"price_unknown": True})}
+        try:
+            settled = _paper_orders.confirm_fill({**state, "positions": out["positions"], "paper_book": out["paper_book"]}, receipt)
+        except ValueError as exc:
+            return self._publish(state, result, out, f"紙上委託待成交：{exc}", decision)
+        ledger = _paper_ledger(state, settled["positions"].get("account"), price)
+        return self._publish(state, result, settled, "紙上模擬成交" if settled["order"]["status"] == "confirmed"
+                             else "紙上部分成交，剩餘委託待成交", decision, ledger)
+
+    def _publish(self, state, result, out, order_action, decision=None, ledger=None, touched=True):
+        order = out["paper_book"]["order"]
+        execution = result["execution"]
+        # touched：這次動到了帳簿裡的委託（開單、成交、取消）。沒動到時，只有 execution 仍對應、且該委託剛被取消
+        # （平倉意圖順手取消舊委託）才同步；已成交的舊委託不重寫（會改掉核對時間），策略啟用把 execution 重設為
+        # 閒置之後也不該被它復活。
+        if order and (touched or (order["status"] == "cancelled" and execution.get("order_id") == order["order_id"])):
+            # 新委託沿用既有的 execution 欄位（要求時間、策略與訊號識別等），再疊上委託與成交狀態。
+            execution = _receipt(state, decision, order["target_position"]) if decision is not None else dict(execution)
+            execution.update(_order_view(order))
+        result.update(positions=out["positions"], paper_book=out["paper_book"], execution=execution,
+                      order_action=order_action)
+        if ledger is not None:
+            result["paper_ledger"] = ledger
+        return result
 
     def apply_intent(self, state, decision, lots):
         current = (state.get("positions") or {}).get("account")
         target = _target(decision.get("action"), lots, current, decision.get("requested_lots"))
         if target is None:
             return self.sync_positions(state)
-        from . import paper_account
-        # 以當下訊號價格模擬成交並記入帳本，供紙上權益與每日回撤使用（審查 WD-07）。
-        ledger = paper_account.fill_fields(paper_account.apply_fill(
-            state.get("paper_ledger"), target, (state.get("exec") or {}).get("price"),
-            paper_account.settings(load_config())["point_value"]))
-        pos = dict(state.get("positions") or {})
-        execution = _receipt(state, decision, target)
-        execution.update(status="filled", evidence_kind="simulated", position_confirmed=True,
-                         confirmed_account=target, confirmed_at=now_line())
-        pos.update(ai_suggested=target, txt_target=target, strategy=target, account=target)
-        return {"positions": pos, "execution": execution, "order_action": "紙上模擬成交", "paper_ledger": ledger}
+        sub = _paper_orders.submit(state, decision, target)
+        result = {"positions": dict(state.get("positions") or {}), "execution": dict(state.get("execution") or {})}
+        if not sub["accepted"]:
+            result.update(blocked=True, reason=sub["reason"], order_action=sub["reason"])
+            return result
+        if sub["duplicate"]:
+            result["order_action"] = sub["reason"]
+            return result
+        if sub["order"] is None:
+            # 已是目標部位：對齊部位並讓帳本與之一致，不建立委託（與先前行為相同，只是不再捏造一張委託）。
+            # 這次只可能順手取消了舊的進行中委託；沒有動到委託時 execution 不變。
+            return self._publish(state, result, sub, sub["reason"], touched=False,
+                                 ledger=_paper_ledger(state, target, _paper_price(state)))
+        return self._settle(state, result, sub, decision)
 
 
 class TxtMasterBroker:

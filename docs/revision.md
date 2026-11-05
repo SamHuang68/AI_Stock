@@ -1,3 +1,43 @@
+## 2026-11-05 WaveDeck 紙上委託與成交收據（WD P0 分片移植，第 4 片）
+
+- 基底：`e41b2c2c2e0f358c503c1a3b6aa7f4200882af1d`（origin/main，#293 的合併提交）；分支 `claude/wd-paper-orders`。
+- 授權與範圍：Sam 2026-11-05「先做 paper_orders」；動手前列出「照分支語意（無新鮮報價就掛單）」「相容移植（保留即時成交）」「先不移植」，Sam 選**相容移植**。**未合併、未發布**。
+- 前一片狀態補記：第 3 片（`cost_budget`，#293）已於 2026-11-05 03:20 UTC 合併為 `e41b2c2c2e0f358c503c1a3b6aa7f4200882af1d`；尚未發布，實機 WaveDeck 仍是 `b44b0ae`。
+- 既有資源查核：
+  1. main 的 `PaperBroker.apply_intent` 是立刻以 `exec.price`（最近一筆訊號價）成交：部位直接改、`execution` 直接標 `filled`／`position_confirmed`，同時用 WD-07 的 `paper_account.apply_fill` 記帳本。目標部位由 `broker._target` 決定（減碼預設減半、`requested_lots`、反手），這些全是 main 已有的契約，分支版（基線 `7fff194`，落後 main 數百個提交）不知道。
+  2. 引擎對 `execution` 的取用是：`execution_pending`（有 `order_id`、未 `position_confirmed`、非 `rejected`）、`_confirmed_fsm`（`Arming`／`Reducing`／`InPosition`）、`activate_strategy`（有未核對委託不可切換）、不留倉監控（`target == 0` 與 `position_confirmed`）、畫面的 `executionReceipt`。這些都不能改形狀。
+  3. `RUNTIME.patch` 對字典只做一層 `update`：新委託與帳簿整份取代；`execution` 的舊鍵會留著。
+  4. main 沒有任何非同步的成交來源：報價只隨訊號進來（`engine.handle_signal` 才寫 `quote`），所以分支版的「掛單等新鮮報價才成交」在 main 上等於讓平倉與舊式只帶 `price` 的訊號卡在掛單；掛單與部分成交這兩種狀態到不了。
+- 與分支版刻意不同：
+  1. **保留即時成交**：委託建立後立刻用 `exec.price` 開一張收據並套用；不要求新鮮報價才成交。風險降低的平倉與急停不被價格政策擋住（進場早已由 `risk.evaluate_gate` 的行情政策把關）。
+  2. **沿用 `broker._target`**：已有部位時的進場意圖照舊以絕對目標加碼或反手，不像分支版直接拒絕；減碼維持減半與 `requested_lots`。
+  3. **價格未知仍成交**（WD-07 的既有行為）：缺價或非有限正值時部位照記、帳本標未知、權益回報未知；收據用 `price_unknown=true` 且不帶價格，平均價為未知。
+  4. **紙上以帳戶部位為準**：開委託時把策略部位對齊帳戶，不因兩者不同而拒單（main 的紙上券商一向整組覆寫）。
+  5. **帳簿放獨立的 `paper_book`，不塞進 `execution`**：`execution` 會被 TXT 券商整份寫進追蹤檔，收據表放那裡會跟著污染；`execution` 維持既有形狀，另加 `filled_quantity`／`remaining_quantity`／`average_fill_price`／`price_unknown`。
+  6. **收據與意圖各只留最近 50 筆**：`/api/state` 每次輪詢都回整個帳簿，不能無限成長；更舊的意圖不再有重送保護。
+  7. 不看 `state["mode"]`：是否為紙上由 `get_broker()` 決定。分支版的行情閘門與 `signal_input`、`data_contract` 已在前幾片移植，這片不重複。
+- 做了什麼：
+  1. 新增 `server/paper_orders.py`（純函式）：`submit`（把「現有部位→目標」變成委託；重複意圖、已是目標部位、進行中委託的處理）、`confirm_fill`（逐項驗證單筆增量成交，冪等，錯誤不改輸入）、`cancel_order`、`snapshot`。
+  2. `broker.py`：`PaperBroker` 改為委託加收據；`_order_view` 把委託翻成既有的 `execution` 欄位（全部成交＝`filled`＋`position_confirmed`）；`execution_pending` 把 `cancelled` 視為已結束；`panic_flatten` 一併帶回 `paper_book`；每張收據記 `price_basis`（`quote` 或 `signal_price`）。
+  3. `engine._apply_patch` 套用 `paper_book`；`state._default_state` 加預設空帳簿。
+  4. 文件：`wavedeck/README.md`「紙上委託與成交收據」、`wavedeck/docs/ARCHITECTURE.md`。
+- 行為變更（請審閱）：
+  1. 已是目標部位的意圖不再捏造一張新的「已成交」委託與新的 `order_id`（`execution` 維持不變）；部位與帳本仍照舊對齊。
+  2. 同一個策略內，同一個 `signal_id` 重送同樣內容會被忽略；同一個 `signal_id` 但內容不同被擋下（`blocked`）。意圖的冪等鍵是 (`strategy_id`, `signal_id`)，與 `策略契約.claim` 的去重範圍一致，換策略後同名的 `signal_id` 不會被當成重複（Codex 審查意見，已修）。
+  3. 收據被拒時委託維持待成交，由下一次 `sync_positions` 重試；這是新狀態。平倉意圖與急停會先取消它；進場與減碼遇到進行中的委託會被擋下。
+  4. `/api/state` 與狀態檔多一個 `paper_book`。
+  5. 畫面 `executionReceipt` 未改：紙上成交仍顯示「倉位已核對；未取得成交明細 · 依據：simulated」，儘管現在其實有收據明細；要不要改文字是另一個決定。
+- 驗證：
+  - `wavedeck.tests.test_paper_orders` 38 項：純模組 17、紙上券商 18、引擎整合 3（走真實 `handle_signal`／`sync_broker_positions`／`panic`，並重新載入狀態檔）。WaveDeck 與橋接測試共 293 項（既有 255 項不改）：全套跑 6 次，5 次全過；有 1 次 `test_request_guard` 的 `style` 斷言失敗（35≠41），同一個檔案單獨重跑 6 次都過。原因與本片無關：隔離伺服器的 ST 看門狗在連線斷時每個 tick 把 `style` 壓到 `FAIL_SAFE_STYLE`（35），和測試「POST 41 後立刻讀」競爭；沒有在基線上重現，屬推論。
+  - 突變檢查 46 項（逐一拿掉保護）全部被抓到，且全部由本片自己的 38 項抓到、逐項核對失敗的是對應測試而非語法錯誤。第一輪有 2 項存活（等價的狀態檢查改以錯誤訊息釘住；非正的 `exec.price` 補測試），補測試時還抓到一個真的缺口：`execution` 遺失時，同步完成成交後沒有補回 `execution`——已修。自查差異再補兩處：新的待成交委託明確清掉上一筆成交的 `confirmed_account`／`confirmed_at`（狀態補丁逐層合併，舊鍵不會消失）；沒動到委託的「已是目標部位」意圖不再重寫舊成交的核對時間。另外發現測試模組借用既有整合測試的 `setUp` 時，基底類別留在模組命名空間，載入器會把它的 13 項測試重跑一遍而灌水測試數，已刪除。
+  - 驗證計畫三個案例（紙上委託與成交收據、ST 橋接讀取狀態、文件不含絕對使用者路徑）由官方執行器（`scripts/變更驗證.py`）實際執行並通過。
+  - 隔離實例（埠 18444、`ST_URL` 指向無效埠、工作樹自己的資料目錄；實機 PID 32636 全程未動）走真實 HTTP：`/api/panic` 以 EXIT 收據平掉示範部位；註冊並啟用策略後，進場成交 1 口（引擎有效口數為 1，既有行為）、減碼實現 +20,000、反向進場，權益 1,020,000；重啟實例後 `paper_book`、部位與權益帳本與重啟前逐項相同。瀏覽器開啟頁面，`executionReceipt` 正常顯示，沒有新的主控台錯誤（頁面自己對 `18432` 的請求被 CORS 擋下，是既有行為）。
+- 未驗證與限制：
+  - 掛單與部分成交在正常運作時到不了（沒有非同步成交來源）；它們只被單元測試與注入失敗驗證，沒有在真實流程中出現過。
+  - 沒有真實 OpenAI、實帳、長時間多程序的觀察；沒有跑完整測試。
+  - 同一個 `signal_id` 的重送保護在規則模式另有 `策略契約.claim`，兩層都在；這片的保護對裁量模式（訊號不能帶 `signal_id`）不生效。
+- 發布狀態：僅 PR，未合併、未發布。生效須更新主工作樹、重建 `wavedeck/data/程式版本.json` 後重啟 WaveDeck。
+
 ## 2026-11-05 WaveDeck 付費請求的每日費用上限（WD P0 分片移植，第 3 片）
 
 - 基底：`557531f77c3b3d83f61aa0a1bef50dc83a950ed7`（origin/main）；分支 `claude/wd-cost-budget`。

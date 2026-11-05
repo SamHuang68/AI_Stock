@@ -2,33 +2,39 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "557531f77c3b3d83f61aa0a1bef50dc83a950ed7",
+  "baseCommit": "e41b2c2c2e0f358c503c1a3b6aa7f4200882af1d",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "WaveDeck付費請求費用准入",
+      "id": "WaveDeck紙上委託與成交收據",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "付費模型請求送出前先在持久化帳本原子預留；價目只來自設定、未配置即阻擋；逾時或缺 usage 保留預留且費用為未知而非零；退回規則引擎不讓費用消失；engine 的今日金額採已用及預留。同時重跑 providers／engine 的直接使用者（供應者回退、行情閘門、規則模式整合、完整審查）",
+      "reason": "紙上意圖先成為持久化委託，部位與紙上權益帳本只由通過驗證的成交收據更新；收據與意圖冪等、價格未知時部位照記權益未知、收據被拒維持待成交並由同步重試、平倉與急停取消進行中的委託；對外 execution 欄位維持既有形狀。同時重跑 broker／engine／state 的直接使用者（成交確認、減碼與紙上隔離、紙上權益、策略訊號整合、完整審查、策略 HTTP、不留倉、回撤、行情閘門）",
       "targets": [
-        "wavedeck.tests.test_cost_budget",
-        "wavedeck.tests.test_smoke",
-        "wavedeck.tests.test_quote_contract",
+        "wavedeck.tests.test_paper_orders",
+        "wavedeck.tests.test_成交確認",
+        "wavedeck.tests.test_reduce_and_paper_isolation",
+        "wavedeck.tests.test_paper_sim_equity",
         "wavedeck.tests.test_策略訊號整合",
-        "wavedeck.tests.test_完整審查執行"
+        "wavedeck.tests.test_完整審查執行",
+        "wavedeck.tests.test_策略HTTP",
+        "wavedeck.tests.test_smoke",
+        "wavedeck.tests.test_不留倉",
+        "wavedeck.tests.test_dd_reference_account",
+        "wavedeck.tests.test_quote_contract"
       ],
       "changes": [
-        "wavedeck/server/config.py",
-        "wavedeck/server/cost_budget.py",
+        "wavedeck/server/broker.py",
         "wavedeck/server/engine.py",
-        "wavedeck/server/providers.py",
-        "wavedeck/server/server.py",
-        "wavedeck/tests/test_cost_budget.py"
+        "wavedeck/server/paper_orders.py",
+        "wavedeck/server/state.py",
+        "wavedeck/tests/test_paper_orders.py"
       ],
       "inputs": [
         ".gitignore",
+        "tests/fixtures/固定策略版本.json",
         "wavedeck/README.md",
         "wavedeck/VERSION",
         "wavedeck/server/__init__.py",
@@ -42,6 +48,7 @@
         "wavedeck/server/exec_md.py",
         "wavedeck/server/override_notify.py",
         "wavedeck/server/paper_account.py",
+        "wavedeck/server/paper_orders.py",
         "wavedeck/server/providers.py",
         "wavedeck/server/request_guard.py",
         "wavedeck/server/review_loop.py",
@@ -56,23 +63,29 @@
         "wavedeck/server/版本身分.py",
         "wavedeck/server/程序單例.py",
         "wavedeck/server/策略契約.py",
-        "wavedeck/tests/test_cost_budget.py",
+        "wavedeck/tests/test_dd_reference_account.py",
+        "wavedeck/tests/test_paper_orders.py",
+        "wavedeck/tests/test_paper_sim_equity.py",
         "wavedeck/tests/test_quote_contract.py",
+        "wavedeck/tests/test_reduce_and_paper_isolation.py",
         "wavedeck/tests/test_smoke.py",
+        "wavedeck/tests/test_不留倉.py",
         "wavedeck/tests/test_完整審查執行.py",
+        "wavedeck/tests/test_成交確認.py",
+        "wavedeck/tests/test_策略HTTP.py",
         "wavedeck/tests/test_策略訊號整合.py"
       ]
     },
     {
-      "id": "ST橋接與費用估算契約",
+      "id": "ST橋接讀取WaveDeck狀態契約",
       "kind": "unittest",
       "timeoutSeconds": 300,
-      "reason": "estimate_openai_usd 不再內建猜測價目，只依設定檔的精確價目計費；橋接測試改為自帶價目 fixture，不讀實機設定檔",
+      "reason": "狀態預設值新增 paper_book；ST 橋接測試載入 WaveDeck 的 server 套件，確認橋接契約不受影響",
       "targets": [
         "tests.test_bridge_http"
       ],
       "changes": [
-        "tests/test_bridge_http.py"
+        "wavedeck/server/state.py"
       ],
       "inputs": [
         ".gitignore",
@@ -90,6 +103,7 @@
         "wavedeck/server/exec_md.py",
         "wavedeck/server/override_notify.py",
         "wavedeck/server/paper_account.py",
+        "wavedeck/server/paper_orders.py",
         "wavedeck/server/providers.py",
         "wavedeck/server/request_guard.py",
         "wavedeck/server/review_loop.py",
@@ -107,30 +121,10 @@
       ]
     },
     {
-      "id": "WaveDeck費用面板畫面契約",
-      "kind": "node",
-      "timeoutSeconds": 120,
-      "prepare": [
-        "node"
-      ],
-      "reason": "費用面板以帳本為準顯示已用及預留、預留、可用、未知費用與阻擋原因；付費請求失敗退回規則引擎後不得顯示「API 費用 $0」；整支 render 必須跑得完（函式內新增 var 蓋掉外層 money 會讓面板之前的區塊丟例外）",
-      "targets": [
-        "wavedeck/tests/cost_panel_selftest.js"
-      ],
-      "changes": [
-        "wavedeck/web/js/deck.js",
-        "wavedeck/tests/cost_panel_selftest.js"
-      ],
-      "inputs": [
-        "wavedeck/web/js/deck.js",
-        "wavedeck/tests/cost_panel_selftest.js"
-      ]
-    },
-    {
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "新增的費用設定說明與修訂紀錄不得含絕對使用者路徑",
+      "reason": "新增的紙上委託說明與修訂紀錄不得含絕對使用者路徑",
       "targets": [
         "tests.test_dist_scrub"
       ],
