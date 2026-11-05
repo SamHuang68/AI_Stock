@@ -5,7 +5,7 @@
 狀態放在 state["paper_book"]：
     order     最近一筆委託（pending／partial／confirmed／cancelled）
     receipts  成交收據，receipt_id → 收據。冪等：同 id 同內容重放不重複套用，同 id 不同內容拒絕
-    intents   已受理的意圖，intent_id → {symbol, action, target, order_id}
+    intents   已受理的意圖，intent_key(策略與訊號識別) → {symbol, action, target, order_id}
 
 與分支版的差異（依 main 現行契約）：
 - 目標部位由 broker._target 決定（減碼減半、反手），這裡只把「現有部位→目標部位」變成委託與收據；
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import json
 import math
 from typing import Any
 from uuid import uuid4
@@ -57,6 +58,16 @@ def _identifier(value: Any, name: str) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
+def intent_key(decision: dict[str, Any]) -> str:
+    """意圖的冪等鍵：(strategy_id, signal_id)，與 策略契約.claim 的去重範圍一致。
+
+    兩個策略可以各自使用同一個 signal_id（啟用別的策略不會清掉 paper_book），不能互相當成重複。
+    沒有 signal_id 的意圖（裁量模式）每次產生新的識別碼，等於不做去重。"""
+    signal_id = _identifier(decision.get("signal_id") or uuid4().hex, "意圖識別碼")
+    strategy_id = decision.get("strategy_id")
+    return json.dumps([strategy_id if isinstance(strategy_id, str) else "", signal_id], ensure_ascii=False)
 
 
 def _book(state: dict[str, Any]) -> dict[str, Any]:
@@ -119,7 +130,7 @@ def submit(state: dict[str, Any], decision: dict[str, Any], target: int) -> dict
         return reject("不支援的紙上委託動作")
     try:
         symbol = _identifier(state.get("symbol") or "TXF", "商品代碼")
-        intent_id = _identifier(decision.get("signal_id") or uuid4().hex, "意圖識別碼")
+        intent_id = intent_key(decision)
         target = _integer(target, "目標部位")
         book = _book(state)
         positions = deepcopy(original)

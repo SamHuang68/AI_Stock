@@ -29,9 +29,12 @@ def fixture(position=0, price=45020, **extra):
     return state
 
 
-def submit(state, action="ENTER_LONG", target=3, signal_id="intent-1"):
+def submit(state, action="ENTER_LONG", target=3, signal_id="intent-1", strategy_id=None):
+    decision = {"action": action, "signal_id": signal_id}
+    if strategy_id is not None:
+        decision["strategy_id"] = strategy_id
     with mock.patch("server.paper_orders._now", return_value=CREATED):
-        return paper_orders.submit(state, {"action": action, "signal_id": signal_id}, target)
+        return paper_orders.submit(state, decision, target)
 
 
 def merged(state, out):
@@ -134,6 +137,24 @@ class 紙上委託純模組測試(unittest.TestCase):
         self.assertFalse(conflict["accepted"])
         self.assertEqual(conflict["paper_book"], pending["paper_book"])
 
+    def test_不同策略使用同一個_signal_id_互不視為重複(self):
+        # 策略契約.claim 的去重範圍是 (strategy_id, signal_id)；啟用別的策略不會清掉 paper_book。
+        a_enter = merged(fixture(), submit(fixture(), target=2, signal_id="entry-1", strategy_id="A"))
+        a_held = filled(a_enter, quantity=2)
+        a_exit = merged(a_held, submit(a_held, action="EXIT", target=0, signal_id="exit-1", strategy_id="A"))
+        flat = filled(a_exit, quantity=2, receipt_id="exit-fill")
+        self.assertEqual(flat["positions"]["account"], 0)
+        b_enter = submit(flat, target=2, signal_id="entry-1", strategy_id="B")
+        self.assertTrue(b_enter["accepted"])
+        self.assertFalse(b_enter["duplicate"])
+        self.assertEqual((b_enter["order"]["action"], b_enter["order"]["quantity"]), ("ENTER_LONG", 2))
+        # 同一個策略重送同一個 signal_id 仍是重複；沒有策略識別的意圖維持原本以 signal_id 為準。
+        self.assertTrue(submit(flat, target=2, signal_id="entry-1", strategy_id="A")["duplicate"])
+        self.assertTrue(submit(flat, target=2, signal_id="entry-1", strategy_id="A")["accepted"])
+        no_strategy = filled(merged(fixture(), submit(fixture(), target=2, signal_id="x")), quantity=2)
+        self.assertTrue(submit(no_strategy, target=2, signal_id="x")["duplicate"])
+        self.assertFalse(submit(no_strategy, target=2, signal_id="x", strategy_id="A")["duplicate"])
+
     def test_進行中的委託擋下進場與減碼_平倉意圖取消它再平倉(self):
         partial = filled(merged(fixture(), submit(fixture())), quantity=1)     # 目標 3、已成交 1、餘量 2
         for action, target in (("ENTER_SHORT", -2), ("REDUCE", 0)):
@@ -220,8 +241,8 @@ class 紙上委託純模組測試(unittest.TestCase):
         book = state["paper_book"]
         self.assertEqual(len(book["intents"]), paper_orders.MAX_HISTORY)
         self.assertEqual(len(book["receipts"]), paper_orders.MAX_HISTORY)
-        self.assertIn(f"id-{paper_orders.MAX_HISTORY + 6}", book["intents"])
-        self.assertNotIn("id-0", book["intents"])
+        self.assertIn(paper_orders.intent_key({"signal_id": f"id-{paper_orders.MAX_HISTORY + 6}"}), book["intents"])
+        self.assertNotIn(paper_orders.intent_key({"signal_id": "id-0"}), book["intents"])
 
     def test_帳簿格式不明時拒絕而不丟例外(self):
         bad = fixture(paper_book={"order": None, "receipts": [], "intents": {}})
@@ -294,6 +315,20 @@ class 紙上券商測試(unittest.TestCase):
         self.assertEqual(out["positions"]["account"], -2)
         self.assertEqual((out["paper_ledger"]["position"], out["paper_ledger"]["avgPrice"]), (-2, 45100.0))
         self.assertEqual(out["paper_ledger"]["realized"], (45100 - 45000) * 1 * PV)
+
+    def test_換策略後同一個_signal_id_的進場照常成交(self):
+        state = fixture()
+        enter_a = self.apply(state, signal_id="entry-1", strategy_id="A")
+        held = self.after(state, enter_a)
+        exit_a = self.apply(held, "EXIT", 0, signal_id="exit-1", strategy_id="A")
+        flat = self.after(held, exit_a)
+        self.assertEqual(flat["positions"]["account"], 0)
+        enter_b = self.apply(flat, signal_id="entry-1", strategy_id="B")               # 與 A 同名的 signal_id
+        self.assertNotIn("blocked", enter_b)
+        self.assertEqual(enter_b["positions"]["account"], 2)
+        self.assertEqual(enter_b["order_action"], "紙上模擬成交")
+        replay = self.apply(self.after(flat, enter_b), signal_id="entry-1", strategy_id="B")
+        self.assertEqual(replay["order_action"], "紙上重複意圖已忽略，維持原委託與部位")
 
     def test_同_signal_id_重送不重複成交_內容不同被擋(self):
         state = fixture()
@@ -463,12 +498,13 @@ class 紙上委託引擎整合測試(unittest.TestCase):
         book = state["paper_book"]
         self.assertEqual(book["order"]["status"], "confirmed")
         self.assertEqual(len(book["receipts"]), 1)
-        self.assertEqual(book["intents"]["signal-001"]["order_id"], book["order"]["order_id"])
+        orders, broker_module = self.modules()
+        decision = {"action": "ENTER_LONG", "strategy_id": self.manifest["strategy_id"], "signal_id": "signal-001"}
+        self.assertEqual(book["intents"][orders.intent_key(decision)]["order_id"], book["order"]["order_id"])
         # 真的重新載入狀態檔（同一個資料目錄），帳簿與冪等識別都還在。
         reloaded = self.state.Runtime().snapshot()
         self.assertEqual(reloaded["paper_book"], book)
-        _, broker_module = self.modules()
-        again = broker_module.PaperBroker().apply_intent(reloaded, {"action": "ENTER_LONG", "signal_id": "signal-001"}, 2)
+        again = broker_module.PaperBroker().apply_intent(reloaded, decision, 2)
         self.assertEqual(again["order_action"], "紙上重複意圖已忽略，維持原委託與部位")
         self.assertEqual(again["positions"]["account"], 2)
 
