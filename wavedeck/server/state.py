@@ -33,6 +33,8 @@ def _default_state() -> dict[str, Any]:
         "data_contract_version": 1,
         "strategy_execution": {"mode": "discretionary", "strategy_id": None, "version": None, "max_signal_age_sec": 300},
         "execution": {},
+        # 紙上委託與成交收據、已受理意圖（paper_orders）；只有紙上券商會寫，重啟後保留冪等識別。
+        "paper_book": {"order": None, "receipts": {}, "intents": {}},
         "overnight_enforcement": {},
         "kill_switch": False,
         "style": 50,  # 35 / 50 / 65 / custom

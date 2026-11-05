@@ -137,7 +137,7 @@ def _confirmed_fsm(state: dict, applied: dict) -> str:
 
 
 def _apply_patch(state: dict, applied: dict) -> dict:
-    patch = {key: applied[key] for key in ("positions", "execution", "lights", "account", "paper_ledger") if key in applied}
+    patch = {key: applied[key] for key in ("positions", "execution", "lights", "account", "paper_ledger", "paper_book") if key in applied}
     patch["fsm"] = _confirmed_fsm(state, applied)
     if all(state.get(key) == value for key, value in patch.items()):
         return state
