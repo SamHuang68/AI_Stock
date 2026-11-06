@@ -1,0 +1,32 @@
+{
+  "note": "server/ 內直接 sqlite3.connect 且不是 mode=ro 唯讀 URI、也沒有先呼叫 runtime_storage.assert_write_allowed 的位置數，依檔案計。只能降（單一資料根階段 3a）。掃描是保守的：用變數傳入的 URI 看不出是否唯讀，一律算可寫，所以這裡面有些位置實際上只讀。接上守衛的方式：在連線之前、同一函式裡呼叫 runtime_storage.assert_write_allowed(資料庫路徑)；legacy 下它是 no-op。尚未涵蓋的還有直接寫檔（open(...,'w')、os.replace、write_text 等），階段 3a 沒有棘輪。",
+  "counts": {
+    "server/conditional_expectation.py": 1,
+    "server/datasources.py": 3,
+    "server/datastore.py": 2,
+    "server/decision_context.py": 2,
+    "server/decision_store.py": 1,
+    "server/early_warning.py": 4,
+    "server/job_queue.py": 1,
+    "server/macro_track.py": 1,
+    "server/margin_cycle.py": 1,
+    "server/ohlc_ledger.py": 1,
+    "server/override_alpha.py": 1,
+    "server/peak_approvals.py": 1,
+    "server/pulse_history.py": 1,
+    "server/pulse_orchestration.py": 1,
+    "server/pulse_updates.py": 1,
+    "server/sector_history.py": 4,
+    "server/tdcc_holders.py": 1,
+    "server/touxin_ledger.py": 1,
+    "server/個股訊號帳本.py": 3,
+    "server/公司行動更新.py": 1,
+    "server/台股日線.py": 11,
+    "server/每日個股留存.py": 2,
+    "server/突破影子紀錄.py": 2,
+    "server/證據限制回報.py": 1
+  },
+  "reasons": {
+    "server/datastore.py": "2 處：get_conn 是讀寫混用的連線工廠（datastore 內部與 6 個外部檔案都在呼叫，get_bars_bulk／list_symbols／last_ts 等是讀取），守衛不能掛在這裡，否則已綁定狀態下唯讀的呼叫者也被擋；寫入入口 init_db／upsert_bars／merge_source_bars 已各自先過守衛。另一處是 _backup_before_market_key_migration 的備份目標連線，只經由 init_db 到達。"
+  }
+}

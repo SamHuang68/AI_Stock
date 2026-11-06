@@ -220,6 +220,7 @@ REQUIRED_SHARE_FILES = (
     "server/daemon_lock.py",
     "server/data_paths.py",
     "server/atomic_store.py",
+    "server/runtime_storage.py",
     "server/deadline.py",
     "server/台股交易參考.py",
     "server/台股交易參考.json",

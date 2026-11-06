@@ -7,10 +7,14 @@ import os
 import re
 from pathlib import Path
 from typing import BinaryIO
+if __package__:
+    from . import data_paths
+else:
+    import data_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_LOCK_DIR = ROOT / "data" / "runtime_locks"
+DEFAULT_LOCK_DIR = data_paths.data_path("runtime_locks", code_root=ROOT)
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 
 
