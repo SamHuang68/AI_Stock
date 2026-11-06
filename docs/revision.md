@@ -1,3 +1,16 @@
+## 2026-11-06 補記 #295（單一資料根階段 2a）的合併、清理與發布狀態
+
+- 基底：`62316d3cc5cc4b4e2220d803cb8e3962eb3ee8f2`（origin/main，#295 的合併提交）；分支 `claude/revision-295-merged`。補上前一節（2026-11-05 單一資料根階段 2（2a））留下的「實作與合併 SHA 待 PR 合併後補記」；前一節是歷史段落，不改。
+- 授權：Sam 2026-11-06 依序下達「合併 #295」「清理分支和 worktree」「補記 revision.md 的合併狀態」。
+- SHA：實作 `35284ea237cfef02cae72eda9a31c63e1039a98a`（2026-11-05 19:11）、審查與 CI 處理 `281bb95cce39396cd929df8ec3cfe1b2c5c2020f`（19:26，PR 最終 head）；合併提交 `62316d3cc5cc4b4e2220d803cb8e3962eb3ee8f2`，2026-11-05 23:44:12 UTC（台北 2026-11-06 07:44），以 merge commit 合併，並用 `--match-head-commit` 鎖定 `281bb95…`，合併的就是審閱過的那個 head。
+- 合併當下實測的條件：四項檢查全過（test ubuntu-latest、test windows-latest、Cursor Approval Agent: Pull Request Router、Cursor Security Agent: Security Reviewer）；唯一的審查討論串（Codex，`server/ai_api.py` 的套件模式匯入）已回覆並關閉；`mergeStateStatus` 為 CLEAN，分支已含當時最新的 main（`7b16bf4…`）。
+- 合併後觀察：main 的 push CI（workflow `ci`）對 `62316d3…` 完成且成功；`origin/main` 含 `server/data_paths.py` 與 `tests/test_data_paths.py`。日常 CI 依專案規則只跑驗證計畫涵蓋的局部案例（`AGENTS.md` 第 2 節第 9 點），**不代表完整測試套件通過**。
+- 清理（2026-11-06，Sam 授權）：移除 worktree `data-root-stage2` 與 `data-root-stage2-baseline`（兩者都沒有未提交內容）、本機分支與遠端分支 `claude/data-root-stage2`。先核對 PR 為 MERGED、分支頭 `281bb95…` 是 `origin/main` 的祖先；移除 worktree 不加強制旗標，遠端以 SHA 租約刪除。基準 worktree 一併移除，之後若要重跑「改前」路徑快照，需從 `7b16bf4b70919177260c34a02494637dd9486dc7` 重建；證明工具與快照留在 `AI-Workspace/docs/stock-terminal/single-data-root-stage2-20261105/`（不在 Git 內）。倉庫共用的 82 筆 stash 沒有動。
+- 發布狀態：**已合併，未發布。** 2026-11-06 10:25（台北）唯讀檢查：本機受管安裝與正式站的 `current` 收據 commit 都是 `d4aa47127d6925e19bf0bf41025f1f5a455d7466`（含 #285、#286，不含其後各項），所以 #295 還沒進任何一套 runtime。開發工作樹（主工作樹）仍在 `7b16bf4b70919177260c34a02494637dd9486dc7`，尚未 fast-forward 到 `62316d3…`。生效須走 stage → promote，發布不由此處執行；本階段不改變任何資料位置。
+- 仍未驗證：完整測試套件（沒跑，依規則需 Sam 同意）；合併後的 main 沒有用真實 `data/` 端到端啟動；沒有量測啟動時間。這些與前一節的「未驗證與限制」相同，合併不會讓它們變成已驗證。
+- 後續（待 Sam 決定，不在本補記範圍）：發布；是否跑完整測試套件；接著做 2b（WaveDeck 消費者）或階段 3（寫入租約與守衛）。
+- 驗證：本節只改文件。`.github/驗證計畫.json` 以目前 origin/main 為基底，只含一個文件案例（`tests.test_dist_scrub`，確認文件不含絕對使用者路徑），做法同 #271、#287。
+
 ## 2026-11-05 單一資料根階段 2（2a）：伺服器端資料路徑解析器與消費者改接
 
 - 基底：`7b16bf4b70919177260c34a02494637dd9486dc7`（origin/main）；分支 `claude/data-root-stage2`。實作與合併 SHA 待 PR 合併後補記。
