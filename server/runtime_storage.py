@@ -55,16 +55,30 @@ def current_lease():
     return _state.lease
 
 
+def _absolute(path) -> str:
+    """補成絕對路徑，但**不收縮** `..`：接上目前目錄就好，`..` 留給 `realpath` 依序處理。"""
+    raw = os.fspath(path)
+    return raw if os.path.isabs(raw) else os.path.join(os.getcwd(), raw)
+
+
 def _canonical(path) -> str:
-    """絕對、解開連結、依平台正規化大小寫的路徑字串；路徑可以還不存在。"""
-    return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(path))))
+    """絕對、解開連結、依平台正規化大小寫的路徑字串；路徑可以還不存在。
+
+    不能先 `abspath`：它純字串地收縮 `..`，但 POSIX 是先跟著目錄連結走、再處理 `..`，
+    `<資料根內的連結>/../x` 實際落在「連結指向處的上一層」，不是「連結所在處的上一層」。
+    `realpath` 依序處理每一段；Windows 的 `realpath` 會先正規化，與 Win32 以字串收縮 `..` 的語意一致。
+    """
+    return os.path.normcase(os.path.realpath(_absolute(path)))
 
 
 def _destinations(path) -> tuple[str, str]:
     """這個寫入可能落地的兩個位置：連結解開後的終點，以及「解開後的父目錄＋檔名」。"""
-    absolute = os.path.abspath(os.fspath(path))
+    absolute = _absolute(path)
+    target = _canonical(absolute)
     parent, name = os.path.split(absolute)
-    return _canonical(absolute), os.path.normcase(os.path.join(os.path.realpath(parent), name))
+    if name in ('', os.curdir, os.pardir):      # 結尾是分隔符、`.` 或 `..`：沒有可被取代的目錄項目，落地位置就是終點
+        return target, target
+    return target, os.path.normcase(os.path.join(os.path.realpath(parent), name))
 
 
 def _inside(child: str, parent: str) -> bool:
