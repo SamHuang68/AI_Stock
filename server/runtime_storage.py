@@ -71,14 +71,25 @@ def _canonical(path) -> str:
     return os.path.normcase(os.path.realpath(_absolute(path)))
 
 
-def _destinations(path) -> tuple[str, str]:
-    """這個寫入可能落地的兩個位置：連結解開後的終點，以及「解開後的父目錄＋檔名」。"""
-    absolute = _absolute(path)
-    target = _canonical(absolute)
+def _places(absolute: str) -> tuple[str, str]:
+    """用同一種讀法，這個寫入可能落地的兩個位置：連結解開後的終點，以及「解開後的父目錄＋檔名」。"""
+    target = os.path.normcase(os.path.realpath(absolute))
     parent, name = os.path.split(absolute)
     if name in ('', os.curdir, os.pardir):      # 結尾是分隔符、`.` 或 `..`：沒有可被取代的目錄項目，落地位置就是終點
         return target, target
     return target, os.path.normcase(os.path.join(os.path.realpath(parent), name))
+
+
+def _destinations(path) -> tuple[str, ...]:
+    """這個寫入可能落地的所有位置，涵蓋路徑的兩種讀法。
+
+    作業系統的讀法：先跟著目錄連結走、再處理 `..`（`open`、`mkstemp`、`pathlib` 都是這樣）。
+    純字串的讀法：先收縮 `..` 再走（寫入端常見的 `os.path.abspath`，例如 `datastore.get_conn` 的
+    `os.makedirs(dirname(abspath(...)))`）。沒有目錄連結時兩種讀法一致；有的時候不一致，而守衛不能替寫入端猜它用哪一種，
+    所以兩種讀法落地的位置都必須在資料根之內（保守：任何一種讀法會落到根外就拒絕）。
+    """
+    absolute = _absolute(path)
+    return tuple(dict.fromkeys(_places(absolute) + _places(os.path.abspath(absolute))))
 
 
 def _inside(child: str, parent: str) -> bool:

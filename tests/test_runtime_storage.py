@@ -48,6 +48,32 @@ HELPERS = textwrap.dedent('''
                                                              capture_output=True).returncode == 0:
                 return 'junction'
             return None
+    def fake_posix_realpath(link, target):
+        # 讓 os.path.realpath 照 POSIX 規則走路徑（先跟著目錄連結走、再處理 `..`），假裝 link 是指向 target 的目錄連結；
+        # 不依賴作業系統能不能建立連結，也不依賴它處理 `..` 的語意。回傳還原函式。
+        real = os.path.realpath
+        def parts_of(path):
+            drive, rest = os.path.splitdrive(path)
+            return drive, [x for x in rest.replace(os.sep, '/').split('/') if x]
+        target_parts = parts_of(target)[1]
+        def pretend(path, *args, **kwargs):
+            drive, parts = parts_of(os.fspath(path))
+            walked = []
+            for part in parts:
+                if part == '.':
+                    continue
+                if part == '..':
+                    if walked:
+                        walked.pop()            # 在「已解開連結的前綴」上取上一層
+                    continue
+                walked.append(part)
+                if os.path.normcase(drive + os.sep + os.sep.join(walked)) == os.path.normcase(link):
+                    walked = list(target_parts)  # 走進連結：換成它指向的位置
+            return drive + os.sep + os.sep.join(walked)
+        os.path.realpath = pretend
+        def restore():
+            os.path.realpath = real
+        return restore
 ''')
 
 
@@ -444,28 +470,7 @@ class DotDotFollowsTheLinkNotTheText(unittest.TestCase):
                 sub = os.path.join(outside, 'sub')
                 link = os.path.join(root, 'link')
                 rs.bootstrap_runtime(data_root=root)
-
-                def parts_of(path):
-                    drive, rest = os.path.splitdrive(path)
-                    return drive, [x for x in rest.replace(os.sep, '/').split('/') if x]
-
-                def pretend(path, *args, **kwargs):
-                    drive, parts = parts_of(os.fspath(path))
-                    sub_parts = parts_of(sub)[1]
-                    walked = []
-                    for part in parts:
-                        if part == '.':
-                            continue
-                        if part == '..':
-                            if walked:
-                                walked.pop()            # 在「已解開連結的前綴」上取上一層
-                            continue
-                        walked.append(part)
-                        if os.path.normcase(drive + os.sep + os.sep.join(walked)) == os.path.normcase(link):
-                            walked = list(sub_parts)    # 走進連結：換成它指向的位置
-                    return drive + os.sep + os.sep.join(walked)
-
-                os.path.realpath = pretend
+                restore = fake_posix_realpath(link, sub)
                 try:
                     attempt('dotdot_after_link', lambda: rs.assert_write_allowed(os.path.join(link, '..', 'x.json')))
                     attempt('atomic_dotdot_after_link', lambda: atomic_store.atomic_write_text(os.path.join(link, '..', 'x.json'), 'x'))
@@ -473,7 +478,7 @@ class DotDotFollowsTheLinkNotTheText(unittest.TestCase):
                     attempt('inside_through_link', lambda: rs.assert_write_allowed(os.path.join(link, 'x.json')))
                     attempt('plain_dotdot_inside', lambda: rs.assert_write_allowed(os.path.join(root, 'plain', '..', 'ok.json')))
                 finally:
-                    os.path.realpath = real
+                    restore()
                 out['outside_entries'] = sorted(os.listdir(outside))
                 done()
             ''', *d.args())
@@ -483,6 +488,68 @@ class DotDotFollowsTheLinkNotTheText(unittest.TestCase):
             self.assertEqual(result['inside_through_link'], 'REFUSED', '連結本身指向資料根之外，經由它寫入也不行')
             self.assertEqual(result['plain_dotdot_inside'], 'OK', '沒有連結的 `..` 收縮後仍在資料根內，不能誤擋')
             self.assertEqual(result['outside_entries'], [], '被拒絕的寫入不能在資料根之外留下檔案')
+
+    def test_a_path_whose_two_readings_disagree_is_refused_and_leaves_no_trace(self):
+        # 路徑有兩種讀法：作業系統的（先跟著連結走、再處理 `..`）與寫入端常用的 abspath（先收縮 `..`）。
+        # root/link 指向 root/d1/d2（兩層深、仍在根內）：`root/link/../../outside/sub/x.db` 在 POSIX 實際落在 root/outside/...（根內），
+        # 字串式收縮卻落在資料根旁邊的 outside/...（根外）；datastore.get_conn 的 makedirs(dirname(abspath(...))) 就是後者。
+        # Windows 兩種讀法一致（都在根外），所以本機一樣會拒絕；兩種讀法真的不一致的 POSIX 由 Linux CI 驗證，本機由下一項替身涵蓋。
+        with Dirs() as d:
+            result = run_child('''
+                import runtime_storage as rs, atomic_store, datastore
+                root, outside = sys.argv[1], sys.argv[2]
+                deep = os.path.join(root, 'd1', 'd2')
+                os.makedirs(deep)
+                link = os.path.join(root, 'link')
+                out['kind'] = make_link(link, deep, True) or 'UNAVAILABLE'
+                if out['kind'] != 'UNAVAILABLE':
+                    rs.bootstrap_runtime(data_root=root)
+                    tricky = os.path.join(link, '..', '..', 'outside', 'sub', 'x.db')
+                    attempt('guard', lambda: rs.assert_write_allowed(tricky))
+                    attempt('atomic', lambda: atomic_store.atomic_write_text(tricky, 'x'))
+                    attempt('init_db', lambda: datastore.init_db(tricky))
+                    out['outside_entries'] = sorted(os.listdir(outside))
+                    out['root_entries'] = sorted(os.listdir(root))
+                done()
+            ''', *d.args())
+            if result['kind'] == 'UNAVAILABLE':
+                self.skipTest('這個環境不能建立目錄符號連結或目錄接合點')
+            self.assertEqual(result['guard'], 'REFUSED')
+            self.assertEqual(result['atomic'], 'REFUSED')
+            self.assertEqual(result['init_db'], 'REFUSED')
+            self.assertEqual(result['outside_entries'], [], '被拒絕的寫入不能在資料根之外建立目錄或暫存檔')
+            self.assertNotIn('outside', result['root_entries'], '也不能在資料根之內留下痕跡')
+
+    def test_both_readings_of_a_path_must_stay_inside_even_without_os_support(self):
+        # 同上，但不依賴作業系統能不能建立連結：用照 POSIX 規則走路徑的 realpath 替身，假裝 root/link 是指向 root/d1/d2 的目錄連結。
+        # 只看作業系統讀法時（替身的結果在根內）會放行，寫入端的 abspath 卻會在資料根旁邊建立目錄。
+        with Dirs() as d:
+            result = run_child('''
+                import runtime_storage as rs, atomic_store, datastore
+                real = os.path.realpath
+                root, outside = real(sys.argv[1]), real(sys.argv[2])
+                os.makedirs(os.path.join(root, 'd1', 'd2'))
+                link = os.path.join(root, 'link')
+                rs.bootstrap_runtime(data_root=root)
+                restore = fake_posix_realpath(link, os.path.join(root, 'd1', 'd2'))
+                try:
+                    tricky = os.path.join(link, '..', '..', 'outside', 'sub', 'x.db')
+                    attempt('guard', lambda: rs.assert_write_allowed(tricky))
+                    attempt('atomic', lambda: atomic_store.atomic_write_text(tricky, 'x'))
+                    attempt('init_db', lambda: datastore.init_db(tricky))
+                    attempt('one_level_up_is_fine', lambda: rs.assert_write_allowed(os.path.join(link, '..', 'ok.json')))
+                    attempt('plain_dotdot_is_fine', lambda: rs.assert_write_allowed(os.path.join(root, 'plain', '..', 'ok.json')))
+                finally:
+                    restore()
+                out['outside_entries'] = sorted(os.listdir(outside))
+                done()
+            ''', *d.args())
+            self.assertEqual(result['guard'], 'REFUSED', '字串式讀法落在資料根之外')
+            self.assertEqual(result['atomic'], 'REFUSED')
+            self.assertEqual(result['init_db'], 'REFUSED')
+            self.assertEqual(result['one_level_up_is_fine'], 'OK', '兩種讀法都在資料根內，不能誤擋')
+            self.assertEqual(result['plain_dotdot_is_fine'], 'OK')
+            self.assertEqual(result['outside_entries'], [], '被拒絕的寫入不能在資料根之外留下目錄')
 
 
 class BootstrapValidatesBeforeLocking(unittest.TestCase):
