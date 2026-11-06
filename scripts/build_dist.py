@@ -214,6 +214,7 @@ REQUIRED_SHARE_FILES = (
     "START_WAVEDECK.cmd",
     "wavedeck/START_WAVEDECK.cmd",
     "wavedeck/start_wavedeck.ps1",
+    "wavedeck/server/data_paths.py",
     "stock_terminal.html",
     "server/server.py",
     "server/daemon_lock.py",

@@ -23,7 +23,7 @@ class 不留倉測試(unittest.TestCase):
         module.__path__ = [str(package_dir)]
         sys.modules[cls.package] = module
         source = Path(__file__).resolve().parents[1] / "server"
-        for name in ("state.py", "data_contract.py", "risk.py", "review_loop.py", "不留倉.py"):
+        for name in ("data_paths.py", "state.py", "data_contract.py", "risk.py", "review_loop.py", "不留倉.py"):
             shutil.copyfile(source / name, package_dir / name)
         cls.clock = importlib.import_module(cls.package + ".不留倉")
         cls.risk = importlib.import_module(cls.package + ".risk")

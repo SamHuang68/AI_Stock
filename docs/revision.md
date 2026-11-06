@@ -1,3 +1,46 @@
+## 2026-11-06 單一資料根階段 2b：WaveDeck 資料根解析入口與消費者改接
+
+- 基底：`69f8a6524eaad71cec0b84e705f8f5c6131b10df`（origin/main，#296 的合併提交）；分支 `claude/data-root-stage2b`。實作與合併 SHA 待 PR 合併後補記。
+- 授權與範圍：Sam 2026-11-06「做 2b WaveDeck 消費者」。這是 2026-11-04 的《單一正式資料根：分階段計畫》第 2 階段的 WaveDeck 端（伺服器端 2a 是 #295）。**未合併、未發布。**
+- 前一輪狀態：#295（合併 `62316d3cc5cc4b4e2220d803cb8e3962eb3ee8f2`）與補記 #296（`69f8a6524eaad71cec0b84e705f8f5c6131b10df`）已合併，**未發布**；2026-11-06 10:25 唯讀檢查本機受管安裝與正式站的 `current` 仍是 `d4aa47127d69…`；#295／#296 的分支與 worktree 已清理。
+- 既有資源查核：
+  1. WaveDeck 自己組 `ROOT / "data"` 的位置共 4 處（用 #295 棘輪的同一個 AST 規則掃描）：`state.py` 的 `DATA`、`server.py` 的實例鎖與 `PORT_FILE`、`版本身分.py` 的發布收據。`config`／`audit`／`exec_md`／`providers` 的路徑都是 `from .state import DATA` 再往下接，所以改 `state.DATA` 一處就涵蓋它們。
+  2. 掃描器看不到、但同樣落在 `data/` 底下的位置：`broker.py` 的 `_txt_dir()`，預設值是字串 `"data/master"`（`config.py` 的 `broker.txt_dir`），相對於程式目錄，也可以設成絕對路徑。
+  3. 主站已有 `server/data_paths.py`（#295），語意直接適用（`<code_root>/data`），但 WaveDeck **不能直接匯入它**：(a) WaveDeck 的 `server` 套件與主站 `server/` 同名，同一個程序只會載入其中一個；(b) `版本身分.py` 啟動時只逐檔核對 `wavedeck/server/*.py` 與發布收據的雜湊，決定資料落點的程式放在 `wavedeck/` 之外就不在收據涵蓋範圍內。
+- 設計決定：
+  1. **在 `wavedeck/server/data_paths.py` 放一份精簡入口**：只有 `data_root`／`data_path`／`BindingError`／`BINDING_ENV`，純函式、只用標準庫。沒有 `log_path` 與路徑覆寫環境變數（WaveDeck 沒有需要，不寫沒人用的程式）。
+  2. **兩份各自存在，就用測試鎖住不分岔**：`tests/test_wavedeck_data_paths_parity.py` 以檔案路徑載入兩個模組，比對 8 個程式目錄 × 12 種相對路徑 × 7 種環境的結果與拒絕訊息、保留環境變數名稱、簽章子集，並檢查 WaveDeck 那份只用標準庫、沒有相對匯入。
+  3. **同樣 fail closed**：`ST_DATA_ROOT`／`ST_RUNTIME_ROLE`／`ST_DATA_BINDING` 設為非空值，WaveDeck 啟動時在取得實例鎖之前就拋 `BindingError`，不建立任何檔案。
+  4. **`server.py` 的兩處直接用 `data_paths`，不繞道 `state.DATA`**：實例鎖必須早於 `state`／`audit` 的匯入（既有測試鎖住這個順序），而 `data_paths` 是純函式、匯入它不會初始化任何狀態。`state.DATA` 一處改接，其餘衍生路徑不逐一改成 `data_path(...)`，避免不必要的變動。
+- 做了什麼：
+  1. 新增 `wavedeck/server/data_paths.py`。
+  2. 改接 3 處：`state.DATA`、`server.py` 的實例鎖、`server.py` 的 `PORT_FILE`。WaveDeck 自己組 `data` 路徑的位置 4 → 1。
+  3. 靜態棘輪（`tests/test_no_raw_data_paths.py`）延伸到 `wavedeck/server`，基準登記 `wavedeck/server/版本身分.py` 1 處與理由；解析器自己免檢。
+  4. 新增 `wavedeck/tests/test_data_paths.py`（11 項）與 `tests/test_wavedeck_data_paths_parity.py`（7 項）。
+  5. `scripts/build_dist.py` 的 `REQUIRED_SHARE_FILES` 登記 `wavedeck/server/data_paths.py`，`tests/test_dist_scrub.py` 加一條斷言：`state` 在匯入時就依賴它，忘記加入 Git 索引時要在建包前明確失敗。
+  6. `wavedeck/tests/test_不留倉.py` 的夾具手挑 5 個檔案在暫存目錄組迷你套件，`state.py` 多了新相依後匯入失敗（`ImportError: cannot import name 'data_paths'`）；把 `data_paths.py` 加進複製清單。斷言沒有改。
+- 刻意**沒有**改接（各有歸屬與理由）：
+  1. `wavedeck/server/版本身分.py` 的 `data/程式版本.json`（發布收據）：這個模組刻意只用標準庫、可單獨以檔案路徑載入，既有測試 `發布身分測試` 就是這樣載入它的，不能為了路徑解析讓它依賴同套件的其他檔；收據屬於發布身分，隨階段 4 處理。登記在棘輪基準。
+  2. `broker.py` 的 `txt_dir`（預設 `data/master`）：這是使用者設定值，也是 WaveDeck 與外部下單程式交換委託檔的通道，不是內部執行期資料。搬到哪裡會改變外部程式讀到的內容，需要另行決定（階段 3／4 或 Sam）；改前改後快照有涵蓋它，確認路徑未變。
+  3. `start_wavedeck.ps1`、`wait_ready.ps1`、`CHECK_WAVEDECK.ps1` 讀取的 `data\wavedeck.port`：階段 4（啟動器）。
+- 行為變更：
+  1. legacy 路徑：**無變更**，見下方快照。
+  2. 新的啟動失敗條件：上述三個保留環境變數設為非空值時，WaveDeck 在載入 `server.server` 時拋 `BindingError`（在取得實例鎖與建立任何檔案之前）。倉庫、啟動腳本與文件都沒有使用這些名稱（已搜尋確認，只有兩份解析器與它們的測試）。
+  3. **新檔案要進發布收據**：`版本身分` 會要求收據涵蓋 `wavedeck/server/*.py` 的全部檔案，所以這個變更到主工作樹後，**必須重建 WaveDeck 發布收據**（和先前每一片的做法相同），否則 `releaseVerified` 會是 `False`（`發布收據缺少必要程式檔案`）。
+- 驗證（逐層分開，沒有以低層結果宣稱高層結論）：
+  1. **改前改後路徑快照**（`AI-Workspace/docs/stock-terminal/single-data-root-stage2b-20261106/snapshot_wd_paths.py`）：在暫存複本上以 `python -I -X utf8` 匯入 `server.server` 與 `server` 套件下的每個模組，列舉所有值裡含根目錄的屬性（16 個）、8 個探針（`exec_md._dir()`、`broker._txt_dir()`、設定載入、狀態存檔、稽核寫入、埠檔寫入、實例鎖路徑、發布收據讀取）與資料目錄實際長出的 5 個檔案，匯入失敗 0 個：改前（`69f8a65`）改後**零差異**。工具本身做了負向對照：植入 8 種錯誤（資料夾名、埠檔名、實例鎖改鎖程式目錄、忽略 relative、改用上層目錄等）全數被抓到。
+  2. **新測試**：WaveDeck 側 11 項（解析器 8 項；契約 3 項：12 個路徑與期望值逐項相等、檔案只落在 `data/`、拒絕啟動時不得先動到資料），一致性 7 項；棘輪 3 項（既有，已延伸）。契約的期望值是測試裡獨立用 `os.path.join` 寫死的，不經過 `data_paths`。
+  3. **突變檢查**：16 種（解析器 6、分岔 2、隔離驗證「自成一體」2、循環匯入 1、消費者改錯 3、退回自己組路徑 2）全數被抓到，對照組（不突變）全過；其中「退回自己組路徑」只有棘輪抓得到，契約測試抓不到（路徑還是對的），所以兩者缺一不可。
+  4. **既有測試（局部）**：WaveDeck 全部 16 個既有測試模組 290 項通過；`tests.test_bridge_http` 3 項通過。
+  5. 計畫實跑：`.github/驗證計畫.json`（4 個案例）由官方執行器實跑通過——解析入口、legacy 契約、一致性與棘輪 21 項（1.5 秒）；WaveDeck 既有行為 290 項（13.7 秒，16 個測試模組）；ST 橋接 3 項（0.6 秒）；分享包必備檔案與文件 12 項（47.5 秒）。`--check` 確認 12 個變更檔全部被案例涵蓋、沒有無關案例。
+  6. **實作中發現並修正的兩個問題**：(a) 上面第 6 點 `test_不留倉` 夾具的連動，第一次跑 WaveDeck 既有測試時 271 項中 1 項 `setUpClass` 錯誤才發現；同類掃描只有這一處手挑檔案組迷你套件（其他夾具用 `copytree` 複製整個 `server/`）。(b) 一致性測試第一版以檔案路徑載入主站模組時，`@dataclass` 找不到 `sys.modules[cls.__module__]` 而失敗（測試載入器的問題，不是解析器），改為先登記再執行。
+- 未驗證與限制：
+  1. **沒有跑完整測試套件**（依規則需 Sam 同意）；上面是 WaveDeck 全部既有測試加受影響的橋接與分享包測試，不等於全倉庫。
+  2. 沒有在執行中的 WaveDeck 實機（主工作樹，埠 18433）載入驗證，也沒有重建發布收據或重啟；這些屬於生效步驟。
+  3. `tests/test_start_all.py`（會在 18433 啟動真的 WaveDeck，與執行中的實例衝突）與 `tests/test_wavedeck_launcher.py`（PowerShell 啟動器）**沒有跑**：啟動腳本沒有改，`data\wavedeck.port` 的位置由契約測試證明不變。
+  4. 沒有在 Linux 本機執行（CI 的 Ubuntu 會跑）。外置模式沒有任何實作與驗證——刻意的，不是遺漏。
+- 發布狀態：僅分支，**未合併、未發布**。生效須合併後：更新主工作樹、重建 WaveDeck 發布收據、依既有程序重啟 WaveDeck（重啟前需確認紙上模式、`Flat`、持倉 0）；本階段不改變任何資料位置。
+
 ## 2026-11-06 補記 #295（單一資料根階段 2a）的合併、清理與發布狀態
 
 - 基底：`62316d3cc5cc4b4e2220d803cb8e3962eb3ee8f2`（origin/main，#295 的合併提交）；分支 `claude/revision-295-merged`。補上前一節（2026-11-05 單一資料根階段 2（2a））留下的「實作與合併 SHA 待 PR 合併後補記」；前一節是歷史段落，不改。
