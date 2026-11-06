@@ -23,9 +23,11 @@ from contextlib import closing, nullcontext, contextmanager
 from pathlib import Path
 if __package__:
     from . import data_paths
+    from . import runtime_storage
     from . import 日線來源收據 as source_provenance
 else:
     import data_paths
+    import runtime_storage
     import 日線來源收據 as source_provenance
 
 # 進程內全域寫入鎖
@@ -151,6 +153,7 @@ def _migrate_market_identity(conn, path=None):
 
 def init_db(path=None):
     global _db_ready_logged
+    runtime_storage.assert_write_allowed(path or DB_PATH)   # 單一資料根階段 3a：legacy 為 no-op
     with _db_write_lock:
         with closing(get_conn(path)) as conn:
             current_version = conn.execute('PRAGMA user_version').fetchone()[0]
@@ -324,6 +327,7 @@ def completed_daily_rows(rows, market, *, now=None, symbol=None, path=None, conn
 
 def merge_source_bars(sym, market, rows, source, *, check=lambda: None, fetched_range=None, ingest_receipt=None, job_id=None):
     """來源更新保留首次日線，修訂另存；不把短區段覆寫成不同價格基準。"""
+    runtime_storage.assert_write_allowed(DB_PATH)           # 單一資料根階段 3a：legacy 為 no-op
     from stock_signals import bar_date
     from 台股交易參考 import eligible_bar
     counts = {'runId': uuid.uuid4().hex, 'symbol': sym, 'market': market, 'source': source,
@@ -457,6 +461,7 @@ def source_revision_status(symbol=None, market='TW', *, connection=None):
 
 
 def upsert_bars(sym, market, rows, *, source=None, source_hash='', path=None, check=lambda: None, source_receipt=None, ingest_receipt=None):
+    runtime_storage.assert_write_allowed(path or DB_PATH)   # 單一資料根階段 3a：legacy 為 no-op
     if ingest_receipt and source != 'Yahoo Finance':
         raise ValueError('一般來源收據目前僅支援 Yahoo 日線')
     if source in ('TWSE', 'TPEX'):

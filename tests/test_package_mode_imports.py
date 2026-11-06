@@ -6,7 +6,8 @@
 所以這些模組必須用 `if __package__: from . import data_paths else: import data_paths`（datastore 本來就是這樣）。
 
 這份名單是改接前實測「可以套件模式匯入」的模組（改接後退化的 20 個，加上本來就用雙模式匯入的
-datastore）。在暫存複本上執行，匯入的副作用不會落在 repo。
+datastore）。階段 3a 再加入 atomic_store、daemon_lock、runtime_storage：它們原本沒有同層相依，
+現在 atomic_store 要匯入 runtime_storage、daemon_lock 要匯入 data_paths。在暫存複本上執行，匯入的副作用不會落在 repo。
 """
 from __future__ import annotations
 
@@ -22,9 +23,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 PACKAGE_MODE_MODULES = [
-    'ai_api', 'ai_local', 'alert_daemon', 'datastore', 'early_warning', 'feature_settings', 'llm_gate',
+    'ai_api', 'ai_local', 'alert_daemon', 'atomic_store', 'daemon_lock', 'datastore', 'early_warning', 'feature_settings', 'llm_gate',
     'macro_track', 'margin_cycle', 'ohlc_ledger', 'override_alpha', 'peak_approvals', 'postmarket_report',
-    'signal_digest', 'signal_stats_pool', 'slog', 'stock_signals_routes', 'tdcc_holders', 'touxin_ledger',
+    'runtime_storage', 'signal_digest', 'signal_stats_pool', 'slog', 'stock_signals_routes', 'tdcc_holders', 'touxin_ledger',
     'universe', 'wavedeck_bus',
 ]
 

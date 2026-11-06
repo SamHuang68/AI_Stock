@@ -12,6 +12,10 @@ import tempfile
 import threading
 import time
 from typing import Any
+if __package__:
+    from . import runtime_storage
+else:
+    import runtime_storage
 
 
 class StoreCorruptError(RuntimeError):
@@ -104,6 +108,7 @@ def atomic_write_bytes(
     backup: bool = True,
     private: bool = False,
 ) -> None:
+    runtime_storage.assert_write_allowed(path)      # 單一資料根階段 3a：legacy 為 no-op，必須早於建立目錄
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     lock = _path_lock(target)
@@ -192,6 +197,7 @@ def load_json(
                 raise StoreCorruptError(
                     f'{target.name} is corrupt; backup unavailable or invalid'
                 ) from backup_error
+            runtime_storage.assert_write_allowed(target)    # 復原會把損毀檔改名並重寫，也是寫入
             stamp = time.strftime('%Y%m%d-%H%M%S')
             quarantine = target.with_name(f'{target.name}.corrupt-{stamp}')
             suffix = 1

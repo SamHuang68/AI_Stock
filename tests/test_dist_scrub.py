@@ -274,6 +274,7 @@ print(json.dumps(list(cases(unittest.defaultTestLoader.loadTestsFromName('tests.
                 build_dist.validate_required_share_files()
         self.assertIn("server/data_paths.py", required)   # 約 40 個 server 模組在匯入時就依賴它
         self.assertIn("wavedeck/server/data_paths.py", required)   # WaveDeck 的 state 在匯入時就依賴它
+        self.assertIn("server/runtime_storage.py", required)   # atomic_store 與 datastore 在匯入時就依賴它（寫入守衛）
         self.assertIn("server/decision_context.py", required)
         self.assertIn("server/options_exposure.py", required)
         self.assertIn("docs/architecture/archify-manifest.json", required)
