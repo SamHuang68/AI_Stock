@@ -3,6 +3,10 @@ data/wavedeck_config.json
 data/wavedeck_secrets.json
 data/wavedeck_audit.db
 data/wavedeck.port
+data/wavedeck.instance.lock
+data/*.sqlite3
+data/*.sqlite3-wal
+data/*.sqlite3-shm
 data/程式版本.json
 data/master/
 data/exec_md/*.md

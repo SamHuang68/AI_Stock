@@ -1,3 +1,23 @@
+## 2026-11-06 WaveDeck 執行期檔案的 .gitignore 補漏與防再發測試
+
+- 基底：`e3414e3702bfde9335c6c6f00d5ca63e5c118041`（origin/main，#298 的合併提交）；分支 `claude/wd-gitignore-runtime-files`。實作與合併 SHA 待 PR 合併後補記。
+- 授權與來源：Sam 2026-11-06「做階段 3」並要求「順便做這個」；這是「補記 #297」一節「後續」裡列為另案的小問題。**未合併、未發布；不改任何執行期程式，只改 `.gitignore` 與新增測試。**
+- 問題：`wavedeck/data/wavedeck.instance.lock` 沒被 `wavedeck/.gitignore` 忽略。在 worktree 跑 WaveDeck 相關測試（例如 `tests.test_bridge_http`）會留下這個未追蹤檔，驗證計畫執行器把它當成「沒有對應案例的變更」而拒絕（`尚未對應驗證的變更`），每次都要手動刪掉自己 worktree 的那一份。
+- 根因：`wavedeck/.gitignore` 是逐檔列出執行期檔案，每次新增檔案時沒人回頭補；沒有任何東西檢查「WaveDeck 寫出的檔案都被忽略」。
+- 同類掃描（修之前先掃，不只修被指出的那一個）：WaveDeck 在 `data/` 底下建立的檔案有 `runtime_state.json`、`wavedeck_config.json`、`wavedeck_secrets.json`、`wavedeck_audit.db`（SQLite，另有 -wal／-shm）、`wavedeck.port`、`wavedeck.instance.lock`、發布收據 `程式版本.json`、`wavedeck_cost_budget.sqlite3`（#293 新增，另有 -wal／-shm），以及資料夾 `exec_md/`、`master/`。用 `git check-ignore` 逐一判定，**未被忽略的是 4 個**：鎖檔，以及成本帳本的 `.sqlite3`、`-wal`、`-shm`。成本帳本在主工作樹上還沒長出來，是因為執行中的 WaveDeck 尚未載入 #293；載入並重啟後就會變成第二個同類未追蹤檔，所以一併補，不留到下一次再踩。
+- 做了什麼：
+  1. `wavedeck/.gitignore` 在 `data/wavedeck.port` 之後補 4 條：`data/wavedeck.instance.lock`、`data/*.sqlite3`、`data/*.sqlite3-wal`、`data/*.sqlite3-shm`。後三條與既有的 `data/*.db-wal`／`data/*.db-shm` 同風格，也涵蓋之後新增的 SQLite 檔案。
+  2. 新增 `tests/test_wavedeck_gitignore.py`（3 項）：(a) 明列已知的執行期檔案（含 SQLite 的 -wal／-shm）都被忽略；(b) 掃描 `wavedeck/server` 原始碼的 `DATA / "檔名"` 寫法，掃到的有副檔名檔案都要被忽略（之後有人用同樣寫法新增檔案卻沒補規則會在這裡失敗），並要求掃描必須找得到 4 個既有檔名，掃描規則失效時明確失敗而不是空轉通過；(c) 反向檢查被追蹤的兩個 `.gitkeep` 沒被誤忽略。
+  3. 判定用 `git check-ignore`，帶 `--no-index`（預設不判定已被追蹤的檔案，反向檢查會因此空轉）並清掉個人的全域忽略設定 `core.excludesFile`，免得開發者自己的全域規則掩蓋缺漏。不在 git 工作樹內（例如單機分享包）或沒有 git 時整組跳過，不算通過也不算失敗。
+- 行為變更：**無**。`.gitignore` 只影響 git 怎麼看未追蹤檔，不影響程式執行、資料位置與發布內容；已被追蹤的檔案不受忽略規則影響。
+- 驗證（逐層分開）：
+  1. **先紅後綠**：修 `.gitignore` 之前新測試失敗，且**正好**是上面那 4 個檔案；修之後 3 項全過。
+  2. **突變檢查**：10 種。移除 4 條規則各一（4）、規則寫太寬 `data/*`（會連 `.gitkeep` 一起忽略）、忽略整個 `data/`、原始碼新增 `DATA / "new_thing.dat"` 與 `"new_thing.json"` 卻沒補規則（2）、把 `runtime_state.json` 改成拼接寫法讓掃描看不到（掃描失效）——9 種全數被抓到；另 1 種是**預期通過**的對照（新增 `new_thing.sqlite3` 已被通用規則 `data/*.sqlite3` 涵蓋，測試通過才是對的）。對照組（不突變）與還原後都通過。第一版的反向檢查沒有 `--no-index`，會在「規則寫太寬」時空轉通過，突變檢查前就已發現並修正。
+  3. **原失敗情境**：在 worktree 放一個空的 `wavedeck/data/wavedeck.instance.lock`（與 WaveDeck 相關測試留下的相同），`git status` 不再列出它；驗證計畫 `--check` 確認 4 個變更檔（`.github/驗證計畫.json`、`docs/revision.md`、`tests/test_wavedeck_gitignore.py`、`wavedeck/.gitignore`）都被案例涵蓋，鎖檔沒有被當成變更。
+  4. **計畫實跑**：`.github/驗證計畫.json`（2 個案例）由官方執行器實跑通過，鎖檔仍留在原地——忽略規則測試 3 項（0.7 秒）、文件案例 `tests.test_dist_scrub`（48.1 秒）。
+- 未驗證與限制：沒有跑完整測試套件（依規則需 Sam 同意）；測試依賴 `git check-ignore`，沒有 git 或不在工作樹時跳過；`.git/info/exclude`（個人本機忽略清單）沒有清掉，若有人在那裡忽略了這些檔案會掩蓋缺漏，這個情形沒有處理。掃描只認 `DATA / "檔名"` 這一種寫法，`data_path("檔名")`、`directory / "檔名"` 等寫法建立的檔案要靠「已知的執行期檔案」清單手動維護（目前只有鎖檔、埠檔、稽核庫、發布收據四個）。
+- 發布狀態：僅分支，**未合併、未發布**。本變更不改變任何執行期行為，不需要發布或重啟。
+
 ## 2026-11-06 補記 #297（單一資料根階段 2b）的合併、清理與發布狀態
 
 - 基底：`cabbc368e091949f1cc5508e1d5f435381d6587f`（origin/main，#297 的合併提交）；分支 `claude/revision-297-merged`。補上前一節（2026-11-06 單一資料根階段 2b）留下的「實作與合併 SHA 待 PR 合併後補記」；前一節是歷史段落，不改。
