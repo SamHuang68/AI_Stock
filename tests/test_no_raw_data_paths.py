@@ -1,7 +1,8 @@
-"""棘輪：`server/` 內「自己組 data／logs 路徑」的位置只能減少，不能增加（單一資料根階段 2）。
+"""棘輪：`server/` 與 `wavedeck/server/` 內「自己組 data／logs 路徑」的位置只能減少，不能增加（單一資料根階段 2、2b）。
 
 所有執行期資料與日誌路徑都要經過 `server/data_paths.py`（`data_path`／`data_root`／`log_path`），
 否則日後切換到單一資料根時，這個模組會悄悄繼續寫回舊位置。
+WaveDeck（`wavedeck/server/`）的 `server` 套件與主站同名，走它自己的 `wavedeck/server/data_paths.py`（階段 2b）。
 
 偵測兩種寫法（AST，不看註解與字串內容）：
   * ``os.path.join(<根>, 'data'|'logs'[, …])``
@@ -20,7 +21,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = Path(__file__).with_name('raw_data_paths_baseline.json')
-EXEMPT = {'server/data_paths.py'}
+SCAN_DIRS = ('server', 'wavedeck/server')
+EXEMPT = {'server/data_paths.py', 'wavedeck/server/data_paths.py'}
 SEGMENTS = {'data', 'logs'}
 
 
@@ -31,7 +33,7 @@ def _is_runtime_dir_literal(node: ast.AST) -> bool:
 
 def scan(root: Path = ROOT) -> dict[str, list[int]]:
     found: dict[str, list[int]] = {}
-    for path in sorted((root / 'server').rglob('*.py')):
+    for path in sorted(p for directory in SCAN_DIRS for p in (root / directory).rglob('*.py')):
         if '__pycache__' in path.parts:
             continue
         relative = path.relative_to(root).as_posix()
@@ -59,7 +61,7 @@ class RawDataPathRatchet(unittest.TestCase):
             now, was = len(current.get(name, [])), baseline.get(name, 0)
             if now > was:
                 problems.append(f'{name}: 自己組 data／logs 路徑 {was} → {now}（新增 {now - was} 處，行 {current[name]}）。'
-                                f'請改用 server/data_paths.py 的 data_path／data_root／log_path。')
+                                f'請改用該區的 data_paths（server/data_paths.py 或 wavedeck/server/data_paths.py）。')
             elif now < was:
                 problems.append(f'{name}: {was} → {now}（減少了，很好）。請把 tests/raw_data_paths_baseline.json 的'
                                 f' "{name}" 降到 {now}（為 0 就移除該項與其 reasons），讓棘輪保持緊。')
@@ -85,8 +87,12 @@ class RawDataPathRatchet(unittest.TestCase):
                 "E = os.path.join('data', name)\n"                   # 不算：第一個參數是封存內名稱
                 "F = {'data': 1}\nG = row.get('data')\nH = base / 'database'\n", encoding='utf-8')
             (server / 'data_paths.py').write_text("X = Path(a) / 'data'\n", encoding='utf-8')   # 解析器本身免檢
+            wd = Path(tmp) / 'wavedeck' / 'server'
+            wd.mkdir(parents=True)
+            (wd / 'b.py').write_text("Y = ROOT / 'data'\n", encoding='utf-8')               # WaveDeck 也要掃（第 1 行）
+            (wd / 'data_paths.py').write_text("Z = Path(a) / 'data'\n", encoding='utf-8')   # WaveDeck 解析器免檢
             hits = scan(Path(tmp))
-        self.assertEqual(hits, {'server/a.py': [3, 4, 5, 6]})
+        self.assertEqual(hits, {'server/a.py': [3, 4, 5, 6], 'wavedeck/server/b.py': [1]})
 
 
 if __name__ == '__main__':

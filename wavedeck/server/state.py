@@ -10,9 +10,11 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
+from . import data_paths
+
 TZ8 = timezone(timedelta(hours=8))
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "data"
+DATA = data_paths.data_root(code_root=ROOT)
 STATE_PATH = DATA / "runtime_state.json"
 
 VALID_STATES = ("Idle", "Arming", "InPosition", "Reducing", "Halted", "Flat")

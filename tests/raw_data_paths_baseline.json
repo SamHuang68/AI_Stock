@@ -1,13 +1,15 @@
 {
-  "note": "server/ 內仍自己組 data／logs 路徑（os.path.join 或 pathlib /）的位置數，依檔案計。只能下降（單一資料根階段 2）。新增程式請用 server/data_paths.py。",
+  "note": "server/ 與 wavedeck/server/ 內仍自己組 data／logs 路徑（os.path.join 或 pathlib /）的位置數，依檔案計。只能下降（單一資料根階段 2、2b）。新增程式請用該區的 data_paths（server/data_paths.py 或 wavedeck/server/data_paths.py）。",
   "counts": {
     "server/daemon_lock.py": 1,
     "server/etf_snapshot_health.py": 1,
-    "server/private_web_gateway.py": 7
+    "server/private_web_gateway.py": 7,
+    "wavedeck/server/版本身分.py": 1
   },
   "reasons": {
     "server/daemon_lock.py": "DEFAULT_LOCK_DIR 指向 data/runtime_locks。runtime_locks 是階段 3（寫入租約與守衛）要接管的保留目錄，與租約一起改接；階段 2 不動，legacy 路徑由 tests/test_data_path_legacy_contract.py 鎖住。",
     "server/etf_snapshot_health.py": "日誌目錄由 etf_paths.resolve_history_dir() 的上一層推得（%LOCALAPPDATA% 下的 ETF 共享目錄），不在程式目錄的 data/ 底下；ETF 歷史目錄的搬遷是另一個決定。",
-    "server/private_web_gateway.py": "閘道的設定、權杖、存取申請檔與日誌屬於階段 4（發布、啟動器、host、gateway）；權杖是存取控制狀態，不在階段 2 搬動。"
+    "server/private_web_gateway.py": "閘道的設定、權杖、存取申請檔與日誌屬於階段 4（發布、啟動器、host、gateway）；權杖是存取控制狀態，不在階段 2 搬動。",
+    "wavedeck/server/版本身分.py": "發布收據 data/程式版本.json。該模組刻意只用標準庫、可單獨以檔案路徑載入（wavedeck/tests/test_策略HTTP.py 的 發布身分測試 就這樣載入），不能為了路徑解析依賴同套件的其他檔；收據屬於發布身分，隨階段 4（發布與啟動器）處理。legacy 路徑由 wavedeck/tests/test_data_paths.py 的契約測試鎖住。"
   }
 }
