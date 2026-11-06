@@ -1,3 +1,16 @@
+## 2026-11-06 補記 #297（單一資料根階段 2b）的合併、清理與發布狀態
+
+- 基底：`cabbc368e091949f1cc5508e1d5f435381d6587f`（origin/main，#297 的合併提交）；分支 `claude/revision-297-merged`。補上前一節（2026-11-06 單一資料根階段 2b）留下的「實作與合併 SHA 待 PR 合併後補記」；前一節是歷史段落，不改。
+- 授權：Sam 2026-11-06 依序下達「合併 #297」「清理分支和 worktree」「補記 revision.md 的合併狀態」。
+- SHA：#297 只有一個提交 `9924254a781f2e48d0da01da03538680e3b8c5dc`（2026-11-06 14:51，也是 PR 最終 head；Codex 審查沒有發現，所以沒有後續處理提交）；合併提交 `cabbc368e091949f1cc5508e1d5f435381d6587f`，2026-11-06 08:10:39 UTC（台北 16:10:39），以 merge commit 合併，並用 `--match-head-commit` 鎖定 `9924254…`，合併的就是審閱過的那個 head。合併提交的兩個父提交是 `69f8a65…`（基底）與 `9924254…`。
+- 合併當下實測的條件：四項檢查全過（test ubuntu-latest、test windows-latest、Cursor Approval Agent: Pull Request Router、Cursor Security Agent: Security Reviewer）；審查討論串 0 個（GraphQL 查詢）；Codex 對 `9924254…` 的審查狀態摘要為 completed、無發現、無未解決發現；`mergeStateStatus` 為 CLEAN、`mergeable` 為 MERGEABLE，`origin/main` 仍是基底 `69f8a65…`。
+- 合併後觀察：main 的 push CI（workflow `ci`）對 `cabbc368…` 完成且成功；`origin/main` 含 `wavedeck/server/data_paths.py`、`wavedeck/tests/test_data_paths.py` 與 `tests/test_wavedeck_data_paths_parity.py`；`69f8a65…` 到 `cabbc368…` 的變更檔共 12 個，與 PR 一致。日常 CI 依專案規則只跑驗證計畫涵蓋的局部案例（`AGENTS.md` 第 2 節第 9 點），**不代表完整測試套件通過**；CI 的 Ubuntu 與 Windows 局部案例通過，是前一節「沒有在 Linux 本機執行」的補充觀察，不改變它的限制。
+- 清理（2026-11-06，Sam 授權）：移除 worktree `data-root-stage2b` 與 `data-root-stage2b-baseline`（detached 在 `69f8a65…`；兩者的未提交與未追蹤項目都是 0）、本機分支與遠端分支 `claude/data-root-stage2b`。先核對 PR 為 MERGED、本機與遠端分支頭都是 `9924254…` 且是 `origin/main` 的祖先；移除 worktree 不加強制旗標，遠端以 SHA 租約刪除。基準 worktree 一併移除，之後若要重跑「改前」路徑快照，需從 `69f8a6524eaad71cec0b84e705f8f5c6131b10df` 重建；證明工具與快照留在 `AI-Workspace/docs/stock-terminal/single-data-root-stage2b-20261106/`（不在 Git 內）。主工作樹的執行期 `data/` 修改、`update_jobs.sqlite3*` 與執行中實例的 `wavedeck/data/wavedeck.instance.lock` 都沒有動；倉庫共用的 82 筆 stash 也沒有動。
+- 發布狀態：**已合併，未發布。** 2026-11-06 16:34（台北）唯讀檢查：本機受管安裝與正式站的 `current` 收據 commit 都是 `d4aa47127d6925e19bf0bf41025f1f5a455d7466`，所以 #295 與 #297 都還沒進任何一套 runtime。開發工作樹（主工作樹）仍在 `7b16bf4b70919177260c34a02494637dd9486dc7`，尚未 fast-forward 到 `cabbc368…`。生效須走 stage → promote，發布不由此處執行；WaveDeck 另須重建發布收據（新檔案 `wavedeck/server/data_paths.py` 要進收據，否則 `releaseVerified` 為 `False`），再依既有程序重啟（重啟前需確認紙上模式、`Flat`、持倉 0）。本階段不改變任何資料位置。
+- 仍未驗證：完整測試套件（沒跑，依規則需 Sam 同意）；合併後的程式沒有在執行中的 WaveDeck 實機（主工作樹，埠 18433）載入；`tests/test_start_all.py` 與 `tests/test_wavedeck_launcher.py` 沒有跑；外置模式沒有任何實作與驗證——刻意的，不是遺漏。這些與前一節的「未驗證與限制」相同，合併不會讓它們變成已驗證。
+- 後續（待 Sam 決定，不在本補記範圍）：發布與 WaveDeck 重建收據、重啟；是否跑完整測試套件；階段 3（`daemon_lock` 的 `runtime_locks`、寫入租約與守衛）；`broker.py` 的 `txt_dir`（與外部下單程式交換委託檔的通道）與 `版本身分.py` 發布收據的位置，留待階段 3／4 決定；另案：`wavedeck/data/wavedeck.instance.lock` 沒被 `wavedeck/.gitignore` 忽略，在 worktree 跑 WaveDeck 相關測試會留下未追蹤鎖檔，使驗證計畫執行器拒絕。
+- 驗證：本節只改文件。`.github/驗證計畫.json` 以目前 origin/main 為基底，只含一個文件案例（`tests.test_dist_scrub`，確認文件不含絕對使用者路徑），做法同 #271、#287、#296。
+
 ## 2026-11-06 單一資料根階段 2b：WaveDeck 資料根解析入口與消費者改接
 
 - 基底：`69f8a6524eaad71cec0b84e705f8f5c6131b10df`（origin/main，#296 的合併提交）；分支 `claude/data-root-stage2b`。實作與合併 SHA 待 PR 合併後補記。
