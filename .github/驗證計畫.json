@@ -511,9 +511,17 @@
       "inputs": [
         "docs/revision.md",
         "scripts/build_dist.py",
+        "server/atomic_store.py",
+        "server/daemon_lock.py",
+        "server/datastore.py",
         "server/runtime_storage.py",
+        "tests/raw_data_paths_baseline.json",
+        "tests/sqlite_write_guard_baseline.json",
         "tests/test_dist_scrub.py",
-        "tests/test_review_regressions.py"
+        "tests/test_package_mode_imports.py",
+        "tests/test_review_regressions.py",
+        "tests/test_runtime_storage.py",
+        "tests/test_sqlite_write_guard.py"
       ]
     }
   ]

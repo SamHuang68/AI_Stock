@@ -36,6 +36,18 @@ HELPERS = textwrap.dedent('''
             out[label] = 'REFUSED' if type(exc).__name__ == 'StorageOwnershipError' else type(exc).__name__ + ': ' + str(exc)[:200]
     def done():
         print('@@R@@' + json.dumps(out, ensure_ascii=False))
+    def make_link(link, target, is_dir):
+        # 回傳 'symlink'／'junction'／None（這個環境建不出來）。Windows 一般使用者建不了符號連結，
+        # 但目錄接合點（junction）不需要權限，realpath 同樣會解開它；檔案沒有 junction 可用。
+        import subprocess
+        try:
+            os.symlink(target, link, target_is_directory=is_dir)
+            return 'symlink'
+        except (OSError, NotImplementedError):
+            if is_dir and os.name == 'nt' and subprocess.run(['cmd', '/c', 'mklink', '/J', link, target],
+                                                             capture_output=True).returncode == 0:
+                return 'junction'
+            return None
 ''')
 
 
@@ -73,23 +85,25 @@ class LegacyIsNoop(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('runtime_storage_legacy_probe', SERVER / 'runtime_storage.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        self.assertIsNone(module._lease)
+        self.assertIsNone(module.current_lease())
         with tempfile.TemporaryDirectory(prefix='st-rtstore-legacy-') as tmp:
             before = sorted(os.listdir(tmp))
             # 沒有租約時連參數都不檢查：任何東西都放行，且不碰檔案系統。
             for value in (None, '', 123, object(), os.path.join(tmp, 'x', 'y.json'), '/definitely/outside'):
                 self.assertIsNone(module.assert_write_allowed(value), repr(value))
             self.assertEqual(sorted(os.listdir(tmp)), before)
-        self.assertIsNone(module._lease)
+        self.assertIsNone(module.current_lease())
 
     def test_importing_the_modules_takes_no_lease_and_creates_nothing(self):
         with tempfile.TemporaryDirectory(prefix='st-rtstore-import-', ignore_cleanup_errors=True) as tmp:
-            root = Path(tmp) / 'root'
+            # resolve()：CI 的暫存目錄可能是 8.3 短檔名（使用者資料夾名稱被縮成 `RUNNER~1` 的形式），而子行程裡
+            # daemon_lock 的 ROOT 是 Path(__file__).resolve() 的長檔名；兩邊都用 resolve 後的形式才能逐字比較。
+            root = Path(tmp).resolve() / 'root'
             shutil.copytree(SERVER, root / 'server', ignore=shutil.ignore_patterns('__pycache__'))
             (root / 'data').mkdir()
             code = (f"import sys, os, json\nsys.path.insert(0, {str(root / 'server')!r})\n"
                     "import runtime_storage, atomic_store, daemon_lock, datastore\n"
-                    "print('@@R@@' + json.dumps({'lease': repr(runtime_storage._lease), 'data': sorted(os.listdir(sys.argv[1])),"
+                    "print('@@R@@' + json.dumps({'lease': repr(runtime_storage.current_lease()), 'data': sorted(os.listdir(sys.argv[1])),"
                     " 'lockdir': str(daemon_lock.DEFAULT_LOCK_DIR)}))\n")
             proc = subprocess.run([sys.executable, '-I', '-X', 'utf8', '-B', '-c', code, str(root / 'data')],
                                   capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=90, cwd=tmp)
@@ -114,7 +128,7 @@ class Bootstrap(unittest.TestCase):
                 attempt('missing', lambda: rs.bootstrap_runtime(data_root=sys.argv[2]))
                 out['missing_created'] = os.path.exists(sys.argv[2])
                 out['lockdir_created'] = os.path.exists(os.path.join(root, 'runtime_locks'))
-                out['lease_after_failures'] = repr(rs._lease)
+                out['lease_after_failures'] = repr(rs.current_lease())
                 done()
             ''', str(d.root), missing)
             self.assertEqual(result['relative_existing'], 'REFUSED', '相對路徑即使存在也必須拒絕')
@@ -321,6 +335,150 @@ class GuardWhenBound(unittest.TestCase):
             self.assertFalse(result['outside_has_sub'], '守衛必須早於 get_conn 建立資料夾')
             self.assertEqual(result['init_inside'], 'OK')
             self.assertTrue(result['inside_db_exists'])
+
+
+class ReplacingADirectoryEntryLandsWhereTheEntryLives(unittest.TestCase):
+    """`atomic_store` 在目標所在目錄建暫存檔再 `os.replace`：被取代的是目錄項目（連結本身），不是連結指向的檔案。"""
+
+    def test_an_outside_link_pointing_inside_is_refused_without_needing_os_symlink_support(self):
+        # 不依賴作業系統能不能建立符號連結：假裝 outside/link.json 是指向 root/inside.json 的連結。
+        # 沒有檢查「解開後的父目錄＋檔名」時，守衛只看到終點在資料根內而放行，atomic_write 就會在資料根外建檔。
+        with Dirs() as d:
+            result = run_child('''
+                import runtime_storage as rs, atomic_store
+                root, outside = sys.argv[1], sys.argv[2]
+                inside_file = os.path.join(root, 'inside.json')
+                open(inside_file, 'w', encoding='utf-8').write('{"v": 1}')
+                link = os.path.join(outside, 'link.json')
+                rs.bootstrap_runtime(data_root=root)
+                real = os.path.realpath
+                def pretend(path, *args, **kwargs):
+                    if os.path.abspath(os.fspath(path)) == os.path.abspath(link):
+                        return real(inside_file)
+                    return real(path, *args, **kwargs)
+                os.path.realpath = pretend
+                try:
+                    attempt('guard_via_link', lambda: rs.assert_write_allowed(link))
+                    attempt('atomic_via_link', lambda: atomic_store.atomic_write_text(link, 'x'))
+                finally:
+                    os.path.realpath = real
+                out['outside_entries'] = sorted(os.listdir(outside))
+                out['inside_content'] = open(inside_file, encoding='utf-8').read()
+                done()
+            ''', *d.args())
+            self.assertEqual(result['guard_via_link'], 'REFUSED')
+            self.assertEqual(result['atomic_via_link'], 'REFUSED')
+            self.assertEqual(result['outside_entries'], [], '被拒絕的寫入不能在資料根之外留下檔案')
+            self.assertEqual(result['inside_content'], '{"v": 1}')
+
+    def test_a_real_file_symlink_outside_pointing_inside_is_not_replaced(self):
+        with Dirs() as d:
+            result = run_child('''
+                import runtime_storage as rs, atomic_store
+                root, outside = sys.argv[1], sys.argv[2]
+                inside_file = os.path.join(root, 'inside.json')
+                open(inside_file, 'w', encoding='utf-8').write('{"v": 1}')
+                link = os.path.join(outside, 'link.json')
+                out['kind'] = make_link(link, inside_file, False) or 'UNAVAILABLE'
+                if out['kind'] != 'UNAVAILABLE':
+                    rs.bootstrap_runtime(data_root=root)
+                    attempt('atomic_via_link', lambda: atomic_store.atomic_write_text(link, 'x'))
+                    out['still_a_link'] = os.path.islink(link)
+                    out['inside_content'] = open(inside_file, encoding='utf-8').read()
+                done()
+            ''', *d.args())
+            if result['kind'] == 'UNAVAILABLE':
+                self.skipTest('這個環境不能建立檔案符號連結（Windows 一般使用者沒有權限）；上一項用模擬方式涵蓋同一個判斷')
+            self.assertEqual(result['atomic_via_link'], 'REFUSED')
+            self.assertTrue(result['still_a_link'], '連結本身不能被取代成一般檔案')
+            self.assertEqual(result['inside_content'], '{"v": 1}')
+
+
+class BootstrapValidatesBeforeLocking(unittest.TestCase):
+    def test_a_lock_directory_linking_outside_is_refused_before_anything_is_created(self):
+        with Dirs() as d:
+            result = run_child('''
+                import runtime_storage as rs
+                root, outside = sys.argv[1], sys.argv[2]
+                out['kind'] = make_link(os.path.join(root, 'runtime_locks'), outside, True) or 'UNAVAILABLE'
+                if out['kind'] != 'UNAVAILABLE':
+                    attempt('bootstrap', lambda: rs.bootstrap_runtime(data_root=root))
+                    out['outside_entries'] = sorted(os.listdir(outside))
+                    out['lease'] = repr(rs.current_lease())
+                done()
+            ''', *d.args())
+            if result['kind'] == 'UNAVAILABLE':
+                self.skipTest('這個環境不能建立符號連結或目錄接合點')
+            self.assertEqual(result['bootstrap'], 'REFUSED')
+            self.assertEqual(result['outside_entries'], [], '先驗證再取鎖：被拒絕時資料根之外不能多出 writer.lock')
+            self.assertEqual(result['lease'], 'None', '被拒絕的 bootstrap 不能讓守衛進入已綁定狀態')
+
+    def test_a_lock_file_symlink_pointing_outside_is_refused_and_not_written_through(self):
+        with Dirs() as d:
+            result = run_child('''
+                import runtime_storage as rs
+                root, outside = sys.argv[1], sys.argv[2]
+                os.makedirs(os.path.join(root, 'runtime_locks'))
+                victim = os.path.join(outside, 'victim.lock')
+                open(victim, 'wb').close()
+                out['kind'] = make_link(os.path.join(root, 'runtime_locks', 'writer.lock'), victim, False) or 'UNAVAILABLE'
+                if out['kind'] != 'UNAVAILABLE':
+                    attempt('bootstrap', lambda: rs.bootstrap_runtime(data_root=root))
+                    out['victim_size'] = os.path.getsize(victim)     # acquire_daemon_lock 會對空檔寫入 1 個位元組
+                    out['lease'] = repr(rs.current_lease())
+                done()
+            ''', *d.args())
+            if result['kind'] == 'UNAVAILABLE':
+                self.skipTest('這個環境不能建立檔案符號連結（Windows 一般使用者沒有權限）')
+            self.assertEqual(result['bootstrap'], 'REFUSED')
+            self.assertEqual(result['victim_size'], 0, '不能經由連結寫進資料根之外的檔案')
+            self.assertEqual(result['lease'], 'None')
+
+
+class SharedRegistryAcrossImportNames(unittest.TestCase):
+    """`server/` 的模組可以頂層匯入（`import runtime_storage`），也可以當套件成員匯入（`server.runtime_storage`），
+    同一個程序可能兩種都有（server.py 刻意讓自己同時是模組與套件）。租約必須是程序級的，不是各份模組各一份。"""
+
+    def test_a_lease_taken_through_one_name_binds_the_guards_of_the_other(self):
+        with Dirs() as d:
+            result = run_child('''
+                import types
+                # 與 server/server.py 相同的技巧：只有 __path__ 的假 server 套件，不必匯入整個應用程式。
+                package = types.ModuleType('server')
+                package.__path__ = [sys.argv[4]]
+                sys.modules['server'] = package
+                import server.runtime_storage as pkg_rs
+                import server.atomic_store as pkg_atomic
+                import runtime_storage as top_rs
+                import atomic_store as top_atomic
+                root, outside, evil = sys.argv[1], sys.argv[2], sys.argv[3]
+                out['distinct_module_objects'] = pkg_rs is not top_rs and pkg_atomic is not top_atomic
+                out['same_error_class'] = pkg_rs.StorageOwnershipError is top_rs.StorageOwnershipError
+                lease = pkg_rs.bootstrap_runtime(data_root=root)
+                out['top_sees_the_lease'] = top_rs.current_lease() is lease
+                attempt('top_guard_outside', lambda: top_rs.assert_write_allowed(os.path.join(outside, 'x.json')))
+                attempt('top_atomic_outside', lambda: top_atomic.atomic_write_text(os.path.join(outside, 'x.txt'), 'x'))
+                attempt('pkg_atomic_outside', lambda: pkg_atomic.atomic_write_text(os.path.join(outside, 'y.txt'), 'y'))
+                attempt('top_second_root', lambda: top_rs.bootstrap_runtime(data_root=outside))
+                attempt('top_same_root', lambda: top_rs.bootstrap_runtime(data_root=root))
+                top_atomic.atomic_write_text(os.path.join(root, 'ok.txt'), 'ok')
+                out['inside_ok'] = open(os.path.join(root, 'ok.txt'), encoding='utf-8').read()
+                out['outside_entries'] = sorted(os.listdir(outside))
+                lease.close()
+                attempt('top_guard_after_close', lambda: top_rs.assert_write_allowed(os.path.join(root, 'x.json')))
+                done()
+            ''', *d.args(), str(SERVER))
+            self.assertTrue(result['distinct_module_objects'], '這個測試要有兩份模組物件才有意義')
+            self.assertTrue(result['same_error_class'], '兩份模組要拋同一個例外類別，呼叫端才接得住')
+            self.assertTrue(result['top_sees_the_lease'])
+            self.assertEqual(result['top_guard_outside'], 'REFUSED', '經套件名稱取得的租約，頂層名稱的守衛也要看得到')
+            self.assertEqual(result['top_atomic_outside'], 'REFUSED')
+            self.assertEqual(result['pkg_atomic_outside'], 'REFUSED')
+            self.assertEqual(result['top_second_root'], 'REFUSED', '另一種匯入名稱不能再綁定第二個資料根')
+            self.assertEqual(result['top_same_root'], 'OK', '同一資料根從另一種匯入名稱重複呼叫要回傳既有租約')
+            self.assertEqual(result['inside_ok'], 'ok')
+            self.assertEqual(result['outside_entries'], [])
+            self.assertEqual(result['top_guard_after_close'], 'REFUSED', '從一種名稱釋放租約，另一種名稱的守衛也要保持已綁定')
 
 
 if __name__ == '__main__':

@@ -7,8 +7,10 @@
 - 新增的 `sqlite3.connect` 若沒先過守衛，這個測試失敗（請改走已接守衛的入口，或在連線前呼叫守衛）。
 - 某個檔案接上守衛後，把基準降到實際數字（這個測試會要求，免得基準虛高、之後又悄悄退化）。
 
-掃描是保守的：用變數傳進去的 URI（看不出是不是 `mode=ro`）一律當成可寫。
-這只證明「連線前有呼叫守衛」，不證明路徑引數正確；守衛本身的行為由 tests/test_runtime_storage.py 驗證。
+掃描是保守的：用變數傳進去的 URI（看不出是不是 `mode=ro`）一律當成可寫；外層函式要自己呼叫守衛，
+巢狀函式裡的守衛不替外層背書（看不出它有沒有被呼叫），外層的守衛則涵蓋它裡面的連線。
+這只證明「語法上、連線之前有呼叫守衛」（不看分支與路徑是否真的會走到），不證明路徑引數正確；
+守衛本身的行為由 tests/test_runtime_storage.py 驗證。
 """
 from __future__ import annotations
 
@@ -41,6 +43,20 @@ def _is_read_only(call: ast.Call, source: str) -> bool:
     return bool(args) and 'mode=ro' in (ast.get_source_segment(source, args[0]) or '')
 
 
+def _own_scope_nodes(function: ast.AST):
+    """函式自己這一層的節點：不走進巢狀函式／lambda 的內容。
+
+    巢狀函式有沒有被呼叫、什麼時候被呼叫，從語法上看不出來，所以它裡面的守衛不能替外層的連線背書
+    （例如外層定義了一個含守衛的 `check()` 卻沒有呼叫它，再直接連線）。
+    """
+    stack = list(ast.iter_child_nodes(function))
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, FUNCTIONS):
+            stack.extend(ast.iter_child_nodes(node))
+
+
 def unguarded_write_connects(source: str) -> int:
     """這份原始碼裡，沒有先過守衛的可寫 `sqlite3.connect` 數量。"""
     tree = ast.parse(source)
@@ -53,7 +69,7 @@ def unguarded_write_connects(source: str) -> int:
         guarded, node = False, parents.get(call)
         while node is not None and not guarded:
             if isinstance(node, FUNCTIONS):
-                guarded = any(_is_guard_call(g) and (g.lineno, g.col_offset) < position for g in ast.walk(node))
+                guarded = any(_is_guard_call(g) and (g.lineno, g.col_offset) < position for g in _own_scope_nodes(node))
             node = parents.get(node)
         total += 0 if guarded else 1
     return total
@@ -111,6 +127,18 @@ class ScannerClassification(unittest.TestCase):
 
     def test_guard_in_outer_function_covers_a_nested_helper(self):
         self.assertEqual(self.count("def f(p):\n    runtime_storage.assert_write_allowed(p)\n    def g():\n        return sqlite3.connect(p)\n    return g()\n"), 0)
+
+    def test_guard_in_an_uncalled_nested_helper_does_not_cover_the_outer_connection(self):
+        self.assertEqual(self.count(
+            "def f(p):\n    def check():\n        runtime_storage.assert_write_allowed(p)\n    return sqlite3.connect(p)\n"), 1)
+
+    def test_guard_and_connect_both_inside_a_nested_helper_count_as_guarded(self):
+        self.assertEqual(self.count(
+            "def f(p):\n    def g():\n        runtime_storage.assert_write_allowed(p)\n        return sqlite3.connect(p)\n    return g()\n"), 0)
+
+    def test_guard_inside_a_lambda_does_not_cover(self):
+        self.assertEqual(self.count(
+            "def f(p):\n    check = lambda: runtime_storage.assert_write_allowed(p)\n    return sqlite3.connect(p)\n"), 1)
 
     def test_guard_in_a_different_function_does_not_cover(self):
         self.assertEqual(self.count("def a(p):\n    runtime_storage.assert_write_allowed(p)\ndef b(p):\n    return sqlite3.connect(p)\n"), 1)

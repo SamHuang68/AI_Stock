@@ -11,16 +11,18 @@
   5. 棘輪基準 `tests/raw_data_paths_baseline.json` 對 `server/daemon_lock.py` 寫明：`runtime_locks` 是「階段 3 要接管的保留目錄，與租約一起改接」。
 - 設計決定：
   1. **legacy 是 no-op**：沒有租約時 `assert_write_allowed` 立刻返回，不讀、不寫、不檢查參數。租約只由明確呼叫 `bootstrap_runtime(data_root=...)` 取得（預定由階段 4 的啟動流程呼叫）；匯入模組、解析路徑、繼承環境變數都不會取得。**階段 3a 沒有任何正式程式呼叫 `bootstrap_runtime`。**
-  2. **已綁定後的規則刻意最小**：路徑必須在租約所屬資料根之內（`realpath`＋大小寫正規化＋`commonpath`；名字以資料根開頭的兄弟目錄、經符號連結或 junction 逃出都拒絕）、租約仍有效且由本程序持有（fork 出來的子程序不繼承）、租約檔本身不可當資料寫入。釋放租約後守衛仍保持已綁定狀態（拒絕所有寫入），不退回 legacy 的放行。
+  2. **已綁定後的規則刻意最小**：寫入的**兩個落地位置**都必須在租約所屬資料根之內——連結解開後的終點（直接寫入落在這裡），以及「解開後的父目錄＋檔名」（建立、改名、取代目錄項目落在這裡：`atomic_store` 在目標所在目錄建暫存檔再 `os.replace`，所以資料根外的連結即使指向資料根內的檔案，被取代的也是連結本身）。比對用 `realpath`＋大小寫正規化＋`commonpath`；名字以資料根開頭的兄弟目錄、經符號連結或 junction 逃出都拒絕。另外：租約仍有效且由本程序持有（fork 出來的子程序不繼承）、租約檔本身不可當資料寫入。釋放租約後守衛仍保持已綁定狀態（拒絕所有寫入），不退回 legacy 的放行。
   3. **一個程序只綁一個資料根，不做命名空間**：統一後 WaveDeck 與主站的資料根佈局在計畫裡尚未決定，不預先發明。
   4. **守衛一定早於建立任何目錄或檔案**：被拒絕的寫入不能留下痕跡（`atomic_write_bytes` 先守衛再 `mkdir`；`datastore` 先守衛再 `get_conn`）。
   5. **SQLite 用棘輪登記現況，不一次改 48 處**：延續階段 2 的做法（`tests/test_no_raw_data_paths.py`）。
+  6. **bootstrap 先驗證、再取鎖**：租約目錄與租約檔（含經由連結指到資料根之外的情形）必須在資料根之內，被拒絕時不會在資料根之外建立或寫入任何東西。
+  7. **租約狀態放在 `sys` 的程序級登記簿**：`server/` 的模組可以頂層匯入、也可以當套件成員匯入（`server.py` 刻意讓自己同時是模組與套件），同一個程序可能兩份都載入；租約狀態與例外類別放在 `sys._st_runtime_storage`，兩份共用，從任一種名稱取得或釋放租約，所有接了守衛的入口都看得到。
 - 做了什麼：
-  1. 新增 `server/runtime_storage.py`（只用標準庫；`daemon_lock` 在取得租約時才延遲匯入，使 legacy 的匯入圖不多出相依）。
+  1. 新增 `server/runtime_storage.py`（只用標準庫；`daemon_lock` 在取得租約時才延遲匯入，使 legacy 的匯入圖不多出相依；對外有 `bootstrap_runtime`、`assert_write_allowed`、`current_lease`）。
   2. 守衛接 5 處：`atomic_store.atomic_write_bytes`、`atomic_store.load_json` 的損毀復原（會把損毀檔改名並重寫，也是寫入）、`datastore.init_db`／`upsert_bars`／`merge_source_bars`。
   3. `daemon_lock.DEFAULT_LOCK_DIR` 改走 `data_paths.data_path("runtime_locks", code_root=ROOT)`，路徑逐字不變；路徑棘輪基準 `server/daemon_lock.py` 1 → 0（移除該項與理由）。
   4. 新增 SQLite 寫入棘輪 `tests/test_sqlite_write_guard.py` 與基準 `tests/sqlite_write_guard_baseline.json`：可寫的 `sqlite3.connect`（非 `mode=ro`），必須在同一函式鏈、連線**之前**呼叫 `assert_write_allowed`；現況 24 個檔案 48 處登記為基準，只能降。掃描保守：用變數傳入的 URI 一律算可寫。
-  5. 新增 `tests/test_runtime_storage.py`（12 項）。已綁定的情境一律在子行程跑（租約是程序級全域狀態），跨程序互斥用真的第二個程序驗證。
+  5. 新增 `tests/test_runtime_storage.py`（17 項）。已綁定的情境一律在子行程跑（租約是程序級全域狀態），跨程序互斥用真的第二個程序驗證；混合匯入情境在同一個子行程裡同時載入頂層與套件兩份模組。
   6. `scripts/build_dist.py` 的 `REQUIRED_SHARE_FILES` 登記 `server/runtime_storage.py`（`atomic_store`、`datastore` 在匯入時就依賴它），`tests/test_dist_scrub.py` 加一條斷言；`tests/test_package_mode_imports.py` 加入 `atomic_store`、`daemon_lock`、`runtime_storage`（它們原本沒有同層相依，現在有了，必須維持雙模式匯入）。
 - 刻意**沒有**做（各有歸屬與理由）：
   1. 其餘 48 處可寫 `sqlite3.connect`（棘輪基準）以及直接寫檔：`open(...,'w'/'a'/'x')` 23 處／13 檔、`os.replace` 10 處／6 檔、`.write_text` 5 處／4 檔、`shutil.copy/move` 2 處／2 檔、`tempfile` 2 處／2 檔（位置會重疊）。**直接寫檔沒有棘輪**。已綁定狀態下這些位置不受守衛保護，階段 4 開啟已綁定模式之前必須處理或明確接受。
@@ -33,16 +35,16 @@
   3. 新增一個正式程式碼不會觸發的 API：`bootstrap_runtime`。
 - 驗證（逐層分開，沒有以低層結果宣稱高層結論）：
   1. **改前改後路徑快照**（`AI-Workspace/docs/stock-terminal/single-data-root-stage3-20261106/`，沿用階段 2 的 `snapshot_paths.py`）：改前＝`e3414e3…`、改後＝本分支，乾淨環境與覆寫環境各一組，各 45 個模組（100／101 個屬性、25 個探針）**零差異**，匯入失敗 0；快照裡確實含 `daemon_lock.DEFAULT_LOCK_DIR`，兩邊都是 `<ROOT>\data\runtime_locks`。
-  2. **新測試**：`test_runtime_storage` 12 項（legacy no-op 2、bootstrap 4、已綁定守衛 6）、`test_sqlite_write_guard` 12 項（棘輪 2、掃描器判定 10）。
-  3. **突變檢查**（`mutate_stage3.py`，在暫存複本上）：28 種——守衛本身 14、掛點 6、路徑棘輪 1、SQLite 掃描器 4、SQLite 棘輪對真實程式碼 3——27 種該失敗的全數被抓到，1 種預期通過的對照（新增有先過守衛的連線）正確通過；對照組與還原後都通過。**第一輪抓到一個測試漏洞**：移除「資料根必須是絕對路徑」檢查後測試仍通過，因為我用的相對路徑本來就不存在，被「資料根必須存在」擋下，測試是因為錯的理由通過；改成用「確實存在的相對路徑」後才抓得到。
+  2. **新測試**：`test_runtime_storage` 17 項（legacy no-op 2、bootstrap 與 bootstrap 前驗證 6、已綁定守衛 6、取代目錄項目 2、混合匯入 1）、`test_sqlite_write_guard` 15 項（棘輪 2、掃描器判定 13）。
+  3. **突變檢查**（`mutate_stage3.py`，在暫存複本上）：33 種——守衛本身 14、PR 審查意見的四個發現 5、掛點 6、路徑棘輪 1、SQLite 掃描器 4、SQLite 棘輪對真實程式碼 3——32 種該失敗的全數被抓到，1 種預期通過的對照（新增有先過守衛的連線）正確通過；對照組與還原後都通過。**第一輪抓到一個測試漏洞**：移除「資料根必須是絕對路徑」檢查後測試仍通過，因為我用的相對路徑本來就不存在，被「資料根必須存在」擋下，測試是因為錯的理由通過；改成用「確實存在的相對路徑」後才抓得到。
   4. **既有測試（局部）**：呼叫 `init_db`／`upsert_bars`／`merge_source_bars` 的既有測試，加 `secret_store`／`secret_migration`／`datastore_universe_codes`，共 39 個模組 488 項通過（38.3 秒）；另有路徑棘輪、legacy 契約、套件模式匯入、`atomic_store`、`daemon_lock`、`dist_scrub`（含從實際建出的分享包跑 `test_review_regressions`）。
   5. 守衛的實際落點由測試證明：已綁定時資料根之外的 `atomic_write_json`、`init_db`、`upsert_bars`、`merge_source_bars`、`load_json` 復原都被拒絕，且**不留下任何痕跡**（沒有新目錄、沒有改名、原檔內容不變）。
-  6. **實作中發現並修正**：(a) 上面第 3 點的測試漏洞；(b) 新模組沒進 Git 索引時，`test_dist_scrub` 的分享包預檢明確失敗（`not in Git index`）——這正是 `REQUIRED_SHARE_FILES` 登記要攔的情形。
-  7. **計畫實跑**：`.github/驗證計畫.json`（3 個案例）由官方執行器實跑通過，三個案例都是實際執行而不是沿用舊證據——租約與守衛及 SQLite 棘輪 7 個測試模組（5.4 秒）、datastore 與 atomic_store 的既有行為 39 個測試模組（40.1 秒）、分享包必備檔案與文件（49.4 秒）。`--check` 確認 13 個變更檔全部被案例涵蓋、沒有無關案例。
+  6. **實作中發現並修正**：(a) 上面第 3 點的測試漏洞；(b) 新模組沒進 Git 索引時，`test_dist_scrub` 的分享包預檢明確失敗（`not in Git index`）——這正是 `REQUIRED_SHARE_FILES` 登記要攔的情形；(c) PR #300 開出後 Windows CI 失敗：我寫的 `test_importing_the_modules_takes_no_lease_and_creates_nothing` 拿暫存目錄路徑（CI 上是 8.3 短檔名 `RUNNER~1`）去比對子行程裡 `Path(__file__).resolve()` 的長檔名，本機使用者名沒有短名所以看不出來，是測試的缺陷、不是產品的，兩邊都改用 `resolve()` 後的形式；(d) Codex 的四個審查發現全部核對屬實並修正：守衛只驗證連結終點而漏掉「取代目錄項目」的落地位置、`bootstrap_runtime` 先取鎖才驗證、SQLite 棘輪把未被呼叫的巢狀函式裡的守衛算給外層、頂層與套件兩種匯入各有一份租約狀態；每一項都有對應的新測試，拆掉修正時測試會紅（見第 3 點的突變）；(e) 修完 (c) 後 CI 前的本機驗證計畫又失敗一次：分享包的敏感內容掃描攔下我在新測試註解裡為了說明 8.3 短檔名而寫的一行字面使用者路徑（`windows-user-path`，掃描攔得對），已改寫註解；同時發現這是**驗證計畫的缺陷**——分享包案例的 `inputs` 只列 5 個檔案，但掃描會掃所有會被打包的檔案，修了之後指紋沒變、執行器依規則拒絕原樣重跑。已把本次變更中會被打包的 13 個檔案補進 `inputs`（不是繞過執行器）。
+  7. **計畫實跑**：`.github/驗證計畫.json`（3 個案例）由官方執行器實跑通過，三個案例在目前的輸入上都實際執行過並通過（其中前兩個是同一輪稍早實際執行、輸入未變而沿用的證據）——租約與守衛及 SQLite 棘輪 7 個測試模組（5.7 秒）、datastore 與 atomic_store 的既有行為 39 個測試模組（41.0 秒）、分享包必備檔案與文件（45.7 秒）。`--check` 確認 13 個變更檔全部被案例涵蓋、沒有無關案例。
 - 未驗證與限制：
   1. **沒有跑完整測試套件**（依規則需 Sam 同意）；上面是受影響範圍的局部驗證。
   2. **沒有任何正式程式在已綁定狀態下跑過**：已綁定的行為只由合成情境（臨時資料根、子行程、真的第二個程序）驗證，不代表階段 4 接上之後的整體行為。
-  3. 沒有在 Linux 本機執行（CI 的 Ubuntu 會跑）；符號連結逃逸在本機以 junction 驗證（`realpath` 同樣解開），fork 子程序以「竄改租約登記的 pid」模擬，因為 Windows 沒有 fork。
+  3. 沒有在 Linux 本機執行（CI 的 Ubuntu 會跑）。本機有 2 項跳過：檔案符號連結在 Windows 一般使用者建不出來——「外部連結指向內部檔案」另有不依賴作業系統的模擬版測試，「租約檔是指向外部的符號連結」則只在 Linux CI 驗證；目錄符號連結以 junction 驗證（`realpath` 同樣解開）；fork 子程序以「竄改租約登記的 pid」模擬，因為 Windows 沒有 fork。檢查與實際寫入之間沒有原子性（檢查通過後連結才被換掉不在防範範圍）。
   4. 沒有量測守衛對寫入效能的影響；legacy 路徑上是一次 `None` 判斷，預期可忽略，但不是量測結果。
   5. 沒有在真實的大型資料庫（2.5 GB 等級）上做端對端驗證；WaveDeck 沒有涵蓋。
 - 發布狀態：僅分支，**未合併、未發布**。本階段不改變任何資料位置，也沒有任何程式取得租約，所以發布後行為不變；階段 4 之前不會有可見效果。
