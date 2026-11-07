@@ -2,41 +2,16 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "565aecd7b8d2a1018106f24b49fcd18e4b54cd23",
+  "baseCommit": "0b06b15a2a3da2bc98aa7715f157bcf1ecb608a3",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "報價與選股端點測試補齊正式名稱",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "兩個以 ast 取出 server.py 函式的測試缺少函式用到的名稱而 NameError；改成載入真正的模組（報價）與沿用正式的 import 宣告（三合一選股），只改測試",
-      "targets": [
-        "tests.test_台股即時報價",
-        "tests.test_三合一選股"
-      ],
-      "changes": [
-        "tests/test_三合一選股.py",
-        "tests/test_台股即時報價.py"
-      ],
-      "inputs": [
-        "server/server.py",
-        "server/data_paths.py",
-        "server/market_routes.py",
-        "server/market_contract.py",
-        "server/三合一選股.py",
-        "server/chip_api.py",
-        "server/chip_history_tracker.py",
-        "tests/test_三合一選股.py",
-        "tests/test_台股即時報價.py"
-      ]
-    },
-    {
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "補記兩個測試缺名稱的修正；只改文件，由 test_dist_scrub 確認修訂紀錄不含絕對使用者路徑",
+      "reason": "補記 #305 的合併與清理；只改文件，由 test_dist_scrub 確認修訂紀錄不含絕對使用者路徑",
       "targets": [
         "tests.test_dist_scrub"
       ],
