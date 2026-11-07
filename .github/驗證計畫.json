@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "f0e9c8b9abf84e98ef51b1031c213d4e00f4c385",
+  "baseCommit": "e68bcb721b8d2538c04959ec77a8ef17d3883eea",
   "documentation": [
     "docs/revision.md"
   ],
@@ -11,7 +11,7 @@
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "補記 #302 的合併與 #295～#302 的發布狀態；只改文件，由 test_dist_scrub 確認修訂紀錄不含絕對使用者路徑",
+      "reason": "補記 #303 的合併與 WaveDeck 主工作樹更新、重啟；只改文件，由 test_dist_scrub 確認修訂紀錄不含絕對使用者路徑",
       "targets": [
         "tests.test_dist_scrub"
       ],
