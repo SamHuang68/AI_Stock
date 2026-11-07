@@ -1,21 +1,16 @@
 """共用成交解析與四個正式 HTTP 路徑的回歸案例。"""
-import ast
+import importlib.util
 import json
-import math
-import re
 import sys
-import time
 import unittest
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
 from market_routes import twse_mis_stock_quote, quote_observation, guard_tw_quote
-from market_contract import cumulative_volume_contract
 
 NOW = datetime.fromisoformat('2026-09-17T09:20:00+08:00')
 
@@ -60,6 +55,14 @@ class MisQuoteTests(unittest.TestCase):
 
 
 class QuoteRouteTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            'st_server_realtime_quote_test', ROOT / 'server/server.py')
+        cls.server = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.server)
+        cls.addClassCleanup(cls.server._pool.shutdown)
+
     def setUp(self):
         self.pool = ThreadPoolExecutor(4)
         self.addCleanup(self.pool.shutdown)
@@ -67,25 +70,25 @@ class QuoteRouteTests(unittest.TestCase):
         self.yahoo = Mock(return_value=('2330.TW', json.dumps({'chart': {'result': [{'meta': {
             'regularMarketPrice': 2380, 'regularMarketTime': int(NOW.timestamp()) - 86400,
             'chartPreviousClose': 2385}}]}}), False))
-        ns = {'math': math, '_re': re, 'time': time, 'json': json, 'parse_qs': parse_qs, 'urlparse': urlparse,
-              '_src_fetch_json': self.fetch, 'SourceBreakerOpen': type('SourceBreakerOpen', (Exception,), {}),
-              'twse_mis_stock_quote': lambda r: twse_mis_stock_quote(r, NOW),
-              'quote_observation': lambda t: quote_observation(t, NOW),
-              'guard_tw_quote': lambda r: guard_tw_quote(r, NOW),
-              'cumulative_volume_contract': cumulative_volume_contract,
-              'fetch_one': self.yahoo, '_yf_prevclose': lambda m: m['chartPreviousClose'],
-              '_trusted_quote_override': lambda sym: None, '_pool': self.pool, 'as_completed': as_completed}
-        tree = ast.parse((ROOT / 'server/server.py').read_text(encoding='utf-8'))
-        selected = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_twse_mis_stock_quotes']
-        methods = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'Handler')
-        selected += [n for n in methods.body if isinstance(n, ast.FunctionDef) and n.name in
-                     ('_handle_twquote', '_handle_twquote_batch', '_handle_quote', '_handle_quote_batch')]
-        exec(compile(ast.Module(body=selected, type_ignores=[]), '<正式報價路徑>', 'exec'), ns)
-        self.Handler = type('Probe', (), {name: ns[name] for name in
-            ('_handle_twquote', '_handle_twquote_batch', '_handle_quote', '_handle_quote_batch')})
+        # Keep the real module namespace, including _trusted_prev_close and
+        # log_once. Only replace external data, wall-clock inputs and the pool.
+        # patch.object defaults to create=False: a removed production dependency
+        # must fail setup rather than silently acquiring a test-only stand-in.
+        for name, value in {
+            '_src_fetch_json': self.fetch,
+            'fetch_one': self.yahoo,
+            'twse_mis_stock_quote': lambda r: twse_mis_stock_quote(r, NOW),
+            'quote_observation': lambda t: quote_observation(t, NOW),
+            'guard_tw_quote': lambda r: guard_tw_quote(r, NOW),
+            '_pool': self.pool,
+        }.items():
+            dependency = patch.object(self.server, name, value)
+            dependency.start()
+            self.addCleanup(dependency.stop)
 
     def call(self, method, path, *args):
-        handler = self.Handler(); handler.path = path
+        handler = self.server.Handler.__new__(self.server.Handler)
+        handler.path = path
         handler._ok = lambda b: setattr(handler, 'result', json.loads(b))
         getattr(handler, method)(*args)
         return handler.result
