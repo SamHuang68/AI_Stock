@@ -1,3 +1,22 @@
+## 2026-11-08 補記 #305 的合併與清理（main 在 `0b06b15a`）
+
+- 基底：`0b06b15a2a3da2bc98aa7715f157bcf1ecb608a3`（origin/main，#305 的合併提交）；分支 `claude/revision-test-nameerror-0b06b15a`。補上下一節（#305）留下的「未合併、未發布」與「清理（尚未做）」；下一節是歷史段落，不改。
+- 授權：Sam 2026-11-07 依序下達「合併 #305」「清理分支和 worktree」，2026-11-08 下達「補記 revision.md 的 #305 合併與清理」。
+- #305：單一提交 `fac9ea87488fae1609b0f4abe3104d367fd20dac`（PR 最終 head）；合併提交 `0b06b15a2a3da2bc98aa7715f157bcf1ecb608a3`，GitHub 記錄 2026-11-07 13:50:40 UTC（台北 21:50:40），以 merge commit 合併並用 `--match-head-commit` 鎖定 `fac9ea87…`；父提交是 `565aecd7…` 與 `fac9ea87…`。合併當下四項檢查（test ubuntu-latest、test windows-latest、Cursor Approval Agent: Pull Request Router、Cursor Security Agent: Security Reviewer）皆為成功，`mergeStateStatus` 為 CLEAN。**Codex 審查顯示 Failed**：2026-11-07 12:19:50 UTC 的摘要留言寫「無法完成審查」，3 秒後另一則留言說明程式碼審查的用量額度已用完；沒有審查意見、也沒有討論串，沒有重試。那則摘要的隱藏狀態標記帶著 `has_any_findings`、`has_unresolved_findings` 為 true，但沒有任何內容可對應，含意不明（與 #302～#304 相同）；合併時只有其餘四項檢查可作依據。
+- CI 實際驗了什麼：PR 的 CI（run `42371982602`）驗的是 PR 合併參照提交 `1a3aab55…`（tree `82f88abb…`），ubuntu 與 windows 兩個工作的 `.github/驗證計畫.json` 兩個案例（兩個測試模組、`tests.test_dist_scrub`）都是 `EXECUTED` 且通過。main 的 push CI（run `42378810340`）對 `0b06b15a…` 成功，tree 與 PR 那次相同，兩個案例因此是 `REUSE`（沿用，沒有重跑）。這證明修正後的兩個測試模組在 CI 的 Linux 與 Windows 都通過；不代表完整套件通過，完整套件修正後沒有重跑。
+- 發布狀態：**不需要發布**。#305 只改兩個測試檔、`.github/驗證計畫.json` 與 `docs/revision.md`，沒有動 `server/`、`wavedeck/` 或任何資料契約。2026-11-08 01:5x（台北）唯讀查到：Private Web 與本機 18432 的 `current` 收據及 18432 `/health` 的 `runtimeCommit` 都是 `f0e9c8b9abf84e98ef51b1031c213d4e00f4c385`；WaveDeck（埠 18433）`/health` 為 PID 71752（2026-11-07 18:00:18 建立）、`runtimeCommit=e68bcb721b8d2538c04959ec77a8ef17d3883eea`、`releaseVerified=True`、紙上模式，都沒有變。正式站的 `/health` 要登入，這次沒有查，以 `current` 收據為準。
+- 主工作樹：仍在 `565aecd7b8d2a1018106f24b49fcd18e4b54cd23`，**沒有更新**，落後 main 一個合併（#305）；`data/` 下 6 項執行期修改與 3 個未追蹤檔原樣留著，stash 仍是 82 筆。本 PR 合併後會落後兩個合併；更新主工作樹需另外下令。
+- 清理（Sam 2026-11-07 指示，合併後同日完成）：
+  - 移除 worktree `fix-test-nameerror`、完整測試用的 `full-tests-565aecd` 與二分查找用的 `full-tests-843c8cee`（後兩個是 detached）。移除前三個的 `git status` 都沒有任何修改，所以沒有加強制旗標。
+  - 刪除分支 `claude/fix-test-nameerror-ast-namespace` 的本機與遠端。刪除前確認 `fac9ea87…` 是 `origin/main` 的祖先；本機 main 當時落後 origin/main 一個合併，所以本機分支改用 `-D`，沒有依賴本機 main 判斷「已合併」。
+  - 清理後 `git worktree list` 只剩主工作樹，`fix-test-nameerror` 相關的本機與遠端分支都查不到。`AI-Workspace/worktrees/stock-terminal/` 這個目錄本身沒有移除。
+  - 完整測試的 log 與驅動腳本在 session 暫存區（不在專案內），會自行消失；結果摘要已寫在下一節。
+- 沒有處理、仍保留：本機分支 `claude/runtime-unification-fixes`（未合併，含 #305 移植的改良版測試，也含啟動器、JS selftest、`.github` 工作流程等其餘改動）；82 筆 stash；去留待 Sam 決定。
+- 仍未驗證（沿用下一節，沒有新的證據）：修正後沒有重跑完整套件（依規則需 Sam 同意）；`tests.test_launcher_safety` 的 `test_real_listener_round_trip_on_windows` 沒處理，只在跑測試的環境失敗過，沒在其他環境重現；測試結束時「未關閉的實例鎖檔案」`ResourceWarning` 的來源沒查；Playwright、離線研究、`build_v2.py` 沒跑。
+- 後續建議（待 Sam 決定，不在本補記範圍）：之後改 `server/server.py` 的 Handler 方法或模組層級名稱時，在該 PR 的驗證計畫補選這兩個測試（#261、#295 的局部驗證都沒選到，才漏掉）；其餘待決事項同前幾節（階段 3b、發布工具的 `sourceCommit` 檢查前移、Codex 額度）。
+- 清理（尚未做，等 Sam 要求）：本節的 worktree `revision-test-nameerror-0b06b15a` 與分支 `claude/revision-test-nameerror-0b06b15a`（本機與遠端）。
+- 驗證：本節只改文件。`.github/驗證計畫.json` 以目前 origin/main（`0b06b15a…`）為基底，只含一個文件案例（`tests.test_dist_scrub`，確認文件不含絕對使用者路徑），做法同 #304。
+
 ## 2026-11-07 修正兩個以 AST 取出函式的測試缺少名稱而失敗（#261、#295 起）
 
 - 基底：`565aecd7b8d2a1018106f24b49fcd18e4b54cd23`（origin/main，#304 的合併提交）；分支 `claude/fix-test-nameerror-ast-namespace`。**只改測試，不改任何正式程式；未合併、未發布。**
