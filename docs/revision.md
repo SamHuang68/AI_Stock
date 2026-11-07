@@ -1,3 +1,19 @@
+## 2026-11-07 修正發布工具無法啟動：daemon_lock 延後匯入 data_paths（階段 3a 的迴歸）
+
+- 基底：`15ee54b8e1045bf6b112f9521184ec2a4d8bc419`（origin/main，#301 的合併提交）；分支 `claude/fix-release-daemon-lock-bootstrap`。實作與合併 SHA 待 PR 合併後補記。
+- 授權與來源：Sam 2026-11-07「發布 #295 到 #300」。發布的 stage 在 main 尖端 `15ee54b8…` 失敗，查出本迴歸；本修正是讓該次發布能進行的前提。**未合併、未發布；不改任何伺服器執行期行為。**
+- 錯誤類型與現象：stage 結束碼 1，`ModuleNotFoundError: No module named 'data_paths'`，堆疊是 `scripts/private_web_release.py` 第 34 行 `runpy.run_path(server/daemon_lock.py)` → `server/daemon_lock.py` 第 13 行 `import data_paths`。失敗發生在匯入階段、建立任何 stage 目錄之前，所以正式站與資料都沒有被動到（兩端 `current` 仍是 `d4aa47127d69…`）。
+- 根因：#300 把 `daemon_lock.DEFAULT_LOCK_DIR` 改走 `data_paths`（路徑棘輪基準 1→0），在檔案開頭 `import data_paths`。但 `daemon_lock.py` 同時是**發布 helper**：`scripts/private_web_release.py` 以 `runpy.run_path` 載入它，`scripts/local_release.py` 又以 `spec_from_file_location` 載入 `private_web_release.py`（所以 `local_release.py sync` 與 `status` 也會連帶失敗）。這兩種載入方式下 `__package__` 為空、`server/` 不在 `sys.path`，`import data_paths` 找不到。也就是除了「`server/` 在路徑上的腳本模式」與「套件模式」（`tests/test_package_mode_imports.py` 涵蓋）之外，還有第三種按檔案路徑載入的方式，發布 helper 原本只依賴標準函式庫，#300 悄悄打破了這個前提。
+- 為什麼沒被抓到：#300 的驗證計畫選了 `test_daemon_lock`、`test_package_mode_imports` 等案例，沒有選到發布工具自己的測試。`tests.test_private_web_release` 與 `tests.test_local_release` 在 main 上單獨執行時匯入就失敗（本次實測，兩者都是 `ImportError ... No module named 'data_paths'`），也就是現有測試本來就能抓到，只是沒被選進案例；#300 當時的「既有資源查核」沒有掃描「以檔案路徑載入 `daemon_lock` 的地方」。
+- 同類掃描：倉庫內以檔案路徑載入的地方（`run_path`、`spec_from_file_location`、`SourceFileLoader`、`exec(compile`，不含測試）共 6 行：`scripts/private_web_release.py` 第 34 行（壞）、`scripts/local_release.py` 第 82 行（載入前者，連帶壞）；`scripts/private_web_release.py` 第 93 行、`scripts/變更驗證.py` 兩行、`tools/codex/變更驗證.py` 第 24 行載入的是 `tools/codex` 的驗證器，不涉及 `server/` 模組。`server/` 其餘依賴 `data_paths` 的模組都在 `server/` 於路徑上或套件模式下載入，不受影響；正式服務的執行（`server.py` 腳本模式）也不受影響。受影響的只有發布與本機同步工具。
+- 修正：`server/daemon_lock.py` 把 `data_paths` 的匯入移進新函式 `default_lock_dir()`，只在沒給 `lock_dir` 時才解析預設值；`DEFAULT_LOCK_DIR` 這個既有的模組屬性（`tests/test_data_path_legacy_contract.py`、`tests/test_runtime_storage.py` 讀它）以模組層級 `__getattr__` 保留，值逐字不變（`data/runtime_locks`），其他不存在的名稱仍丟 `AttributeError`。發布 helper 一律明示 `lock_dir`（`install_root / ".locks"`），所以 helper 維持只依賴標準函式庫的兩個檔案（`scripts/private_web_release.py`、`server/daemon_lock.py`），`local_release.py` 的雜湊清單與 sealed stage 的測試 fixture 都不用改。
+- 考慮過但不採：在 `private_web_release.py` 載入前把 `server/` 暫時加進 `sys.path`。那會讓 helper 變成三個檔案（`data_paths.py` 在 `local_release` 的雜湊驗證之外被執行），並要同步改雜湊清單與好幾處測試 fixture，等於改測試去配合壞掉的程式。
+- 測試：`tests/test_daemon_lock.py` 新增 3 項——以 `python -I` 的乾淨子程序按檔案路徑載入並取鎖（先紅後綠，紅燈的錯誤與 stage 相同）、沒給 `lock_dir` 時鎖檔建在 `default_lock_dir()`、`DEFAULT_LOCK_DIR` 屬性相容且未知名稱仍失敗。這個檔案只要動到 `daemon_lock` 就一定會被選到，所以把「發布 helper 只依賴標準函式庫」的保護放在這裡。
+- 突變檢查（工具與結果在 `AI-Workspace/docs/stock-terminal/` 下，不在 Git 內）：5 種突變——回到匯入時就 `import data_paths`、拿掉 `__getattr__`、`__getattr__` 對任何名稱都回預設目錄、`acquire_daemon_lock` 不再使用預設目錄函式、預設目錄改指別處——最終 5/5 抓到。第一輪漏掉「不再使用預設目錄函式」（原本沒有任何測試走過預設目錄），補了第二項測試後才全抓到。
+- 驗證（本機 Windows，Python 3.12）：`tests.test_daemon_lock` 5 項、`tests.test_private_web_release` 22 項、`tests.test_local_release` 31 項、`tests.test_data_path_legacy_contract` 4 項、`tests.test_package_mode_imports` 2 項、`tests.test_runtime_storage` 21 項（2 項跳過：Windows 一般使用者建不了檔案符號連結），共 85 項。其中 `test_private_web_release` 與 `test_local_release` 修正前匯入即失敗。未跑完整測試套件（依規則需 Sam 同意）。
+- 發布影響：#295～#300 的發布因此暫停。本修正合併後，發布須以合併後的新 SHA 重做（驗證計畫要涵蓋 `d4aa47127d6925e19bf0bf41025f1f5a455d7466` 到新 SHA）；這次失敗的 stage 沒有留下任何 stage 目錄，也沒有停止或變更任何服務。
+- 驗證計畫：`.github/驗證計畫.json` 以 origin/main（`15ee54b8…`）為基底，兩個案例——上述發布 helper 載入案例，以及確認文件不含絕對使用者路徑的文件案例（同 #298 的做法）。
+
 ## 2026-11-07 補記 #299（WaveDeck .gitignore）與 #300（單一資料根階段 3a）的合併、清理與發布狀態
 
 - 基底：`7eeee251a9b09f3763b29a8921ac18c7b11158e3`（origin/main，#300 的合併提交）；分支 `claude/revision-299-300-merged`。補上「2026-11-06 單一資料根階段 3a」與「2026-11-06 WaveDeck 執行期檔案的 .gitignore 補漏與防再發測試」兩節留下的「實作與合併 SHA 待 PR 合併後補記」；那兩節是歷史段落，不改。
