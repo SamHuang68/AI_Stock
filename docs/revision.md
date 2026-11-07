@@ -1,3 +1,20 @@
+## 2026-11-07 修正兩個以 AST 取出函式的測試缺少名稱而失敗（#261、#295 起）
+
+- 基底：`565aecd7b8d2a1018106f24b49fcd18e4b54cd23`（origin/main，#304 的合併提交）；分支 `claude/fix-test-nameerror-ast-namespace`。**只改測試，不改任何正式程式；未合併、未發布。**
+- 授權與來源：Sam 2026-11-07 依序下達「跑完整測試套件」「移植改良版測試修掉三個 NameError」。完整測試套件在乾淨 worktree 的 `565aecd7…` 上跑（`compileall`、`tests/` 的 unittest、WaveDeck 隔離測試、`build_order.py`、70 個 JS selftest、啟動器 PowerShell 語法檢查；測試環境的 `ST_URL` 指向無人監聽的埠 9）：unittest 跑 2195 個，通過 2183、失敗 1、錯誤 3、跳過 8；其餘各步全部通過。瀏覽器（Playwright）與離線研究兩組、`build_v2.py` 沒跑（要下載依賴），本機沒有 `pyflakes`。
+- 現象：`tests.test_台股即時報價`（`QuoteRouteTests` 的 2 個案例）與 `tests.test_三合一選股`（`HandlerTests` 的 1 個案例）以 `NameError` 失敗。這兩個測試用 `ast` 把 `server/server.py` 裡的函式單獨取出，放進自己組的 namespace 執行；函式用到的名稱測試沒有提供（前者缺 `_trusted_prev_close`，其錯誤處理又呼叫缺少的 `log_once`；後者缺 `data_paths`），執行時才出錯。正式模組本身都有這些名稱（`server.py` 模組層級有 `import data_paths`，`log_once` 與 `_trusted_prev_close` 也都有定義），所以這是測試工具的缺口，不是正式程式的缺陷。
+- 起點（逐一檢出提交實測，不是推論）：`tests.test_台股即時報價` 在 #260（`7fa4119`）通過，在 #261（`2c7ae26`，2026-10-23）起 2 個錯誤；`tests.test_三合一選股` 在 #294（`7b16bf4`）通過，在單一資料根階段 2a 的 `35284ea`（#295，2026-11-05）起 1 個錯誤。這兩次的局部驗證都沒有選到這兩個測試，所以 CI 一直是綠的；這類缺口只有跑到這些測試才看得到。
+- 修正：
+  - `tests/test_台股即時報價.py`：整檔移植 `3da0e3c`（2026-10-23，在尚未合併的 `claude/runtime-unification-fixes` 分支，該分支的完整驗證曾在 `843c8cee` 通過）的改良版。改成載入真正的 `server/server.py` 模組，只用 `patch.object` 取代外部資料、時間相關輸入與執行緒池；`patch.object` 不帶 `create=True`，正式模組若拿掉某個相依，setup 就會失敗，而不是讓測試自己補上一個替身。檔案內容與該分支相同，沒有其他修改。
+  - `tests/test_三合一選股.py`：該分支對應的修改（`f3f7ebd`）取的是 `from data_paths import …`，但 main 的 `server.py` 是 `import data_paths`，所以不能原樣搬；改成從 `server.py` 的語法樹找出 `ast.Import`（`data_paths`）宣告，與函式一起編譯，沿用正式程式碼的宣告而不在測試裡自行編造。正式程式碼若改掉這個宣告，查找會失敗而不是靜默通過。
+  - 該分支其餘內容（啟動器、JS selftest、`.github` 工作流程等）不在本次範圍，沒有帶進來；那條分支仍然沒有合併。
+- 驗證：這兩個模組在 `565aecd7…` 上失敗（`tests.test_台股即時報價` 2 個錯誤、`tests.test_三合一選股` 1 個錯誤，同一指令重跑結果相同，不是偶發），修正後分別是 7 個與 14 個測試全過；修正後工作樹沒有多出任何檔案。
+- 完整測試的第四項不通過**沒有處理**：`tests.test_launcher_safety` 的 `test_real_listener_round_trip_on_windows`（`engine='powershell'`）。在跑測試的那個環境，連我當場自建的 listener，`Get-NetTCPConnection` 與 `netstat` 都查不到，測試因此拿到 0 個監聽程序而拋出「測試收據只接受一個 listener」；判斷是環境限制，但沒有在其他環境重現，不代表啟動器程式碼沒問題。要確認需在一般終端機單獨跑那個測試或看 CI 的 Windows 工作。
+- 完整套件的 8 個跳過各有原因：4 個真實程序啟動驗收（需明確設定 `ST_LAUNCHER_E2E=1`，刻意沒設）、1 個連外即時資料（`MARGIN_LIVE_TEST`）、1 個 `pyflakes` 未安裝、2 個環境不能建立檔案符號連結。另外 `tests/` 與 WaveDeck 的測試結束時有「未關閉的實例鎖檔案」`ResourceWarning`（只在垃圾回收階段出現，步驟仍通過），沒有查是哪個提交造成。
+- 未驗證：修正後**沒有重跑完整套件**（依規則需 Sam 同意）；只重跑了這兩個測試模組。
+- 清理（尚未做，等 Sam 要求）：本節的 worktree `fix-test-nameerror` 與分支 `claude/fix-test-nameerror-ast-namespace`；完整測試用的 worktree `full-tests-565aecd` 與二分查找用的 `full-tests-843c8cee`（皆 detached）。
+- 驗證計畫：`.github/驗證計畫.json` 以 `565aecd7…` 為基底，兩個案例：這兩個測試模組，以及文件案例（`tests.test_dist_scrub`，確認文件不含絕對使用者路徑）。
+
 ## 2026-11-07 補記 #303 的合併與 WaveDeck 主工作樹更新、重啟（WaveDeck 在 `e68bcb72`）
 
 - 基底：`e68bcb721b8d2538c04959ec77a8ef17d3883eea`（origin/main，#303 的合併提交）；分支 `claude/revision-wavedeck-e68bcb72`。補上下一節（#303）留下的「WaveDeck 沒有更新」「後續：WaveDeck 主工作樹更新、重建發布收據與重啟」，以及 #303 本身的合併 SHA；下一節是歷史段落，不改。
