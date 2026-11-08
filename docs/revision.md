@@ -1,3 +1,21 @@
+## 2026-11-08 補記 #307 的合併與清理（main 在 `f77e2b49`）
+
+- 基底：`f77e2b4911d4092bd12b04272f4daa95212c0648`（origin/main，#307 的合併提交）；分支 `claude/revision-gateway-role-307`。補上下一節（#307）留下的「未合併、未發布」；下一節是歷史段落，不改。
+- 授權：Sam 2026-11-08 依序下達「合併 #307」「清理分支和 worktree」「補記 revision.md 的 #307 合併與清理」。
+- #307：單一提交 `0c9ba8da0e0159b5db19a29c14c7f1c999655ef5`（PR 最終 head）；合併提交 `f77e2b4911d4092bd12b04272f4daa95212c0648`，GitHub 記錄 2026-11-08 09:25:48 UTC（台北 17:25:48），以 merge commit 合併並用 `--match-head-commit` 鎖定 `0c9ba8da…`；父提交是 `e9bb245e…` 與 `0c9ba8da…`。合併當下四項檢查（test ubuntu-latest、test windows-latest、Cursor Approval Agent: Pull Request Router、Cursor Security Agent: Security Reviewer）皆為成功，`mergeStateStatus` 為 CLEAN。
+- Codex 審查：這次**完成且沒有意見**，和 #302～#306 的額度用完不同。摘要留言的狀態標記是 `status: completed`、`has_any_findings: false`、`has_unresolved_findings: false`，對象是 `0c9ba8d`，完成時間 2026-11-08 08:17:35 UTC（台北 16:17:35），早於合併；沒有審查意見、沒有討論串。我先前（PR 剛開時）回報過它顯示「執行中」，那是當時的瞬間狀態，不是最終結果。這證明 Codex 這一輪沒有挑出問題，不等於修正沒有缺陷。
+- CI 實際驗了什麼：PR 的 CI（run `42462130962`）驗的是 PR 合併參照提交 `f6821ba1…`（tree `c5c1ca1e…`），ubuntu 與 windows 兩個工作的 `.github/驗證計畫.json` 兩個案例（私有閘道三個目標模組、`tests.test_dist_scrub`）都是 `EXECUTED` 且通過。main 的 push CI（run `42467149987`）對 `f77e2b49…` 成功，tree 同為 `c5c1ca1e…`，兩個案例因此都是 `REUSE`（沿用，沒有重跑）。這證明修正後的閘道測試模組在 CI 的 Linux 與 Windows 都通過；不代表完整套件通過，完整套件這次沒有重跑。
+- 發布狀態：**未發布**。#307 改的是 `server/private_web_gateway.py`，要生效須走 stage → promote（授權與流程見共用規則 `0007`），由 Sam 決定時機。2026-11-08 17:55（台北）唯讀重查：Private Web 與本機 18432 的 `current` 收據都是 `f0e9c8b9abf84e98ef51b1031c213d4e00f4c385`，18432 `/health` 的 `runtimeCommit` 同為 `f0e9c8b9…`；WaveDeck（埠 18433）`/health` 為 `runtimeCommit=e68bcb721b8d2538c04959ec77a8ef17d3883eea`、`releaseVerified=True`、紙上模式。三者都沒有變，也都**不含** #307 的修正，所以目前運行中的私有閘道仍會轉送客戶端自帶的角色標頭；影響範圍的判斷見下一節（依程式碼判斷，沒有實際越權請求）。正式站的 `/health` 要登入，這次沒有查，以 `current` 收據為準。
+- 主工作樹：仍在 `e9bb245e79277b78b07a071215d7a2cdec41937d`，**沒有更新**，落後 main 一個合併（#307）；`data/` 下 6 項執行期修改與 3 個未追蹤檔原樣留著，stash 仍是 82 筆。本 PR 合併後會落後兩個合併；更新主工作樹需另外下令。
+- 清理（Sam 2026-11-08 指示，合併後同日完成）：
+  - 移除 worktree `fix-gateway-role-header`。移除前 `git status` 沒有任何修改，`origin/main..HEAD` 也沒有未合併的提交，所以沒有加強制旗標。
+  - 刪除分支 `claude/fix-gateway-role-header` 的本機與遠端。刪除前確認 `0c9ba8da…` 是 `origin/main` 的祖先；本機 main 當時落後 origin/main 一個合併，所以本機分支改用 `-D`，沒有依賴本機 main 判斷「已合併」。
+  - 清理後 `git worktree list` 只剩主工作樹，本機分支只剩 `main`、`claude/runtime-unification-fixes`、`codex/wavedeck-paper-p0`，`claude/fix-gateway-role-header` 的遠端分支也查不到。`AI-Workspace/worktrees/stock-terminal/` 這個目錄本身沒有移除。
+- 沒有處理、仍保留：本機分支 `claude/runtime-unification-fixes`（未合併，Sam 2026-10-26 指定保留）；`codex/wavedeck-paper-p0`（這個 session 沒有檢查）；82 筆 stash。盤點那支舊分支留下的其餘項目（警報設定頁輸出編碼、WaveDeck 紙上模式切換的持倉還原、`overnight_intraday`／`exposure_lab`／`stock_signals` 缺值處理等）仍待 Sam 決定，細節見下一節與前面幾節。
+- 仍未驗證（沿用下一節，沒有新的證據）：沒有在實際運行的閘道上送請求；沒有檢查後端 18435 能否被繞過閘道直接連線；完整測試套件修正後沒有重跑（依規則需 Sam 同意），其中 `tests.test_launcher_safety` 的 `test_real_listener_round_trip_on_windows` 仍只在跑測試的環境失敗過、沒在其他環境重現。
+- 清理（尚未做，等 Sam 要求）：本節的 worktree `revision-gateway-role-307` 與分支 `claude/revision-gateway-role-307`（本機與遠端）。
+- 驗證：本節只改文件。`.github/驗證計畫.json` 以目前 origin/main（`f77e2b49…`）為基底，只含一個文件案例（`tests.test_dist_scrub`，確認文件不含絕對使用者路徑），做法同 #306。
+
 ## 2026-11-08 修正私有閘道轉送客戶端自帶的 X-ST-Gateway-Role 標頭
 
 - 基底：`e9bb245e79277b78b07a071215d7a2cdec41937d`（origin/main，#306 的合併提交）；分支 `claude/fix-gateway-role-header`。**未合併、未發布。**
