@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "f77e2b4911d4092bd12b04272f4daa95212c0648",
+  "baseCommit": "c883ceef635489f9b5b6bd48c485a61427190448",
   "documentation": [
     "docs/revision.md"
   ],
@@ -11,7 +11,7 @@
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "補記 #307 的合併與清理；由 test_dist_scrub 確認修訂紀錄不含絕對使用者路徑",
+      "reason": "補記 #307 閘道修正的正式發布；由 test_dist_scrub 確認修訂紀錄不含絕對使用者路徑",
       "targets": [
         "tests.test_dist_scrub"
       ],
