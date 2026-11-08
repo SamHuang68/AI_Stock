@@ -1,3 +1,18 @@
+## 2026-11-08 修正私有閘道轉送客戶端自帶的 X-ST-Gateway-Role 標頭
+
+- 基底：`e9bb245e79277b78b07a071215d7a2cdec41937d`（origin/main，#306 的合併提交）；分支 `claude/fix-gateway-role-header`。**未合併、未發布。**
+- 授權與來源：Sam 2026-11-08 依序下達「處理 `claude/runtime-unification-fixes` 分支」（選「先唯讀盤點再決定」）與「先修閘道角色標頭那一項」。起因是盤點那支舊分支時，把它的測試套到現行 main，發現其中的 `test_proxy_replaces_all_case_variants_of_client_role_header` 在 main 失敗。舊分支上對應的提交是 `243f75a`（2026-10-23）；本修正只取其核心一行與該測試，**沒有合併那支分支**，其餘內容另案評估。
+- 現象：用 Reader token 發請求，並帶上 `x-st-gateway-role: owner`（再加 `X-St-Gateway-Role`、`X-ST-Gateway-Role` 兩種大小寫寫法）。閘道轉送給上游的標頭同時含客戶端的 `owner` 與閘道自己加的 `X-ST-Gateway-Role: reader`。上游的標頭物件取值不分大小寫、重複時取第一個，我用 `http.client.parse_headers` 對同樣的重複標頭實測，`get('X-ST-Gateway-Role')` 回傳第一個，也就是客戶端偽造的值。
+- 根因：`server/private_web_gateway.py` 轉送客戶端標頭時，以 `blocked` 集合丟棄不該轉送的標頭（`authorization`、`cookie`、`host`、`x-forwarded-*` 等），名單漏了 `x-st-gateway-role`。之後以 `outbound_headers["X-ST-Gateway-Role"] = role` 設定閘道自己的值，但 `outbound_headers` 是字典、鍵區分大小寫，客戶端用其他大小寫寫法時不會被覆蓋，兩個標頭都被送出。
+- 影響範圍（依程式碼判斷，沒有做實際越權請求）：上游讀這個標頭的位置只有四處：`options_routes.py`、`overnight_intraday_routes.py`、`pulse_routes.py`（都是「非空且不是 owner 就拒絕」）與 `更新路由.py` 的 `_update_capabilities`（回報 `canSubmit`、`canRetry` 與可用類型）。閘道自己在 `route_permission` 依 token 角色限制路徑與方法，POST 控制路徑對 reader 一律拒絕，所以 reader 無法靠這個標頭通過閘道；能被影響的是「已通過閘道的 reader 請求，在上游被當成 owner」，例如能力清單把 `canSubmit` 報成 true。這四處對應的路由哪些是 reader 能到的 GET，我沒有逐一確認，所以不宣稱能借此執行任何寫入。
+- 修正：把 `"x-st-gateway-role"` 加進 `blocked`（比對用 `key.lower()`，涵蓋所有大小寫），並加一段註解；其餘轉送行為不變。同類掃描：`server/` 與 `scripts/` 裡只有 `private_web_gateway.py` 一處把客戶端標頭整批轉送到上游，沒有其他轉送點；設定這個標頭的也只有閘道這一處。
+- 測試：`tests/test_private_web_gateway.py` 新增 `test_proxy_replaces_all_case_variants_of_client_role_header`（取自舊分支 `243f75a` 的同名測試，內容不變）：以 Reader token 送三種大小寫的 owner 標頭，斷言上游收到的角色標頭恰好一個且為閘道設定的 `reader`。
+- 驗證：新測試在沒有修正時失敗（上游收到客戶端的 `owner` 與閘道的 `reader`），有修正時通過；`tests.test_private_web_gateway` 整個模組 37 個測試通過；計畫另外兩個目標模組（`tests.test_完整審查警報權限`、`tests.test_私有停止安全`）共 16 個測試通過。
+- 未驗證：沒有在實際運行的閘道上送請求；沒有檢查後端 18435 能否被繞過閘道直接連線（綁 loopback，不在本次範圍）；完整測試套件沒跑。
+- 發布狀態：**未發布**。這是私有閘道程式的修正，要生效須走 stage → promote 發布（授權與流程見共用規則 `0007`），由 Sam 決定時機。
+- 後續（不在本修正範圍）：舊分支 `claude/runtime-unification-fixes` 保留，盤點到的其餘項目另案——警報設定頁（`src/alert/alert_push_v3.js`）輸出沒有編碼、WaveDeck 紙上模式切換的持倉還原、`overnight_intraday`／`exposure_lab` 的缺值處理等，需 Sam 決定。
+- 驗證計畫：`.github/驗證計畫.json` 以 origin/main（`e9bb245e…`）為基底，兩個案例：私有閘道（三個目標模組，沿用先前閘道修正的案例形狀，inputs 加上 `server/private_web_access.py`；逾時上限依現行驗證工具的限制設為 600 秒，先前案例的 900 秒已不被接受，三個模組本機實測合計約 1 分鐘）與文件案例（`tests.test_dist_scrub`，確認文件不含絕對使用者路徑）。
+
 ## 2026-11-08 補記 #305 的合併與清理（main 在 `0b06b15a`）
 
 - 基底：`0b06b15a2a3da2bc98aa7715f157bcf1ecb608a3`（origin/main，#305 的合併提交）；分支 `claude/revision-test-nameerror-0b06b15a`。補上下一節（#305）留下的「未合併、未發布」與「清理（尚未做）」；下一節是歷史段落，不改。

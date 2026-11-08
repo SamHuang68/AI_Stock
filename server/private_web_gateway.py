@@ -1500,6 +1500,9 @@ button{{width:100%;min-height:48px;border:0;border-radius:11px;background:linear
             "x-forwarded-for",
             "x-forwarded-host",
             "x-forwarded-proto",
+            # 角色只能由閘道依登入結果設定；客戶端自帶的（任何大小寫）一律丟棄，
+            # 否則上游以標頭名稱不分大小寫取第一個值時，會讀到客戶端偽造的 owner。
+            "x-st-gateway-role",
         }
         for key, value in self.headers.items():
             if key.lower() not in blocked:
