@@ -1,3 +1,27 @@
+## 2026-11-08 補記 #307 閘道修正的正式發布（Private Web 與本機 18432 在 `c883ceef`）
+
+- 基底：`c883ceef635489f9b5b6bd48c485a61427190448`（origin/main，#308 的合併提交）；分支 `claude/revision-release-c883ceef`。補上下面幾節（#307、#308）留下的「未發布」；歷史段落不改。證據在 `AI-Workspace\docs\stock-terminal\release-c883ceef\`（不在 Git 內）。
+- 授權：Sam 2026-11-08 20:32（台北）下達「發布 #307 的閘道修正」。範圍與前一次（`f0e9c8b9`）相同：Private Web 的 stage → 停止 → 備份 → promote → 啟動 → 驗證，再把本機 18432 同步到同一版。WaveDeck 不在發布範圍，沒有更新也沒有重啟。
+- 發布目標與範圍：目標 `c883ceef…`（#307 的 `f77e2b49…` 加上 #308 的文件提交），前一版 `f0e9c8b9abf84e98ef51b1031c213d4e00f4c385`。該 SHA 的 push CI（run `42470417306`，workflow `ci`）ubuntu 與 windows 兩個工作皆成功，遠端 main 等於目標。前一版到目標只動 6 個檔案，**對執行有影響的只有 `server/private_web_gateway.py`（3 行）**，其餘是測試（`tests/test_private_web_gateway.py`、`tests/test_三合一選股.py`、`tests/test_台股即時報價.py`）、`docs/revision.md` 與 `.github/驗證計畫.json`。
+- 驗證計畫與 stage：以前一版為基底，把 #303～#308 各合併提交上的計畫聯集成一份（3 個案例：私有閘道、報價與選股端點測試、文件不含絕對使用者路徑），`變更驗證.py --check` 顯示 6 個變更檔全部涵蓋。stage 結束碼 0，manifest 為 `commit=c883ceef…`、`tests=passed`，3 個案例的收據都是 `EXECUTED`、結束碼 0。stage 在背景約 2.5 分鐘完成，沒有動任何服務。
+- 預檢：`PREFLIGHT-OK`（20:37）。發布前先把 `expected-databases.json` 的 `sourceCommit` 改成前一版 SHA（前一次發布因為沒改，備份後才檢查失敗，白停了一次機），資料庫檔名集合與正式站 `current\data` 的 14 個檔案完全相同；`update_jobs` 在 20:33 與停機前（20:38）都沒有執行中或排隊的工作。**走的是孤兒分支**：supervisor（PID 44616）已不存在，只剩後端 25996 與閘道 62048 兩個孤兒子程序（2026-11-07 15:28 建立，正是前一次發布啟動的時間），預檢逐項核對了 PID、建立時間、命令列、原父程序與前一版程式內容後才處理。
+- 正式執行（20:38:25 開始，20:44:04 完成，結束碼 0）：停止 20:38:37、備份 14 個 SQLite、promote 20:42:40、啟動並驗證 20:44:04。**正式站停機約 5 分 27 秒**（停止到健康回應）。`data-preserved.json`：341 個資料檔全部保留（`allPreserved: true`，沒有變更或遺失），排程定義不變。新的 supervisor 是 PID 20112，其下各一個後端（82704）與閘道（85588），結構恢復正常；舊的孤兒程序與 44616 都已結束。
+- 發布後驗證（正式站，發布完成後的 20:44 起，各項以當次查詢為準）：
+  - `current` 收據與後端 `/health` 的 `runtimeCommit` 都是 `c883ceef…`，閘道健康回應 `ok=true`、`upstream=true`。
+  - 已安裝的 `server/private_web_gateway.py` 雜湊 `c42104853d98879a6983502f2de5c3d9db6ab284c78ea5457d65363e1fe9d9fa`，與 Git 中該提交的內容、manifest 的 `contentSha256` 三者完全相同，含 `"x-st-gateway-role"` 這一行。工作樹那份雜湊不同只是 `core.autocrlf` 的 CRLF，去掉 CRLF 後與 Git 內容一致。
+  - 未登入請求（不帶任何 token）對閘道 `/` 與 `/api/pulse` 都回 401。
+  - 啟動後新日誌沒有新增錯誤：host 日誌新的一次執行（`35f16e34`）從 `backend_start` 到 `ready` 約 1.7 秒正常；日誌中的 `startup_failure` 是 2026-10-07 的舊紀錄，`upstream_stream_aborted` 最近一筆仍是 2026-11-06。
+- 本機 18432：`local_restart.ps1` 20:45:36 開始；登記的新程序 PID 78780（2026-11-08 12:48:18 UTC，台北 20:48:18）建立時間與 `local_process.json` 收據一致；`local_release.py status` 顯示 `installedCommit` 與 `desiredCommit` 都是 `c883ceef…`、`needsSync=false`；21:45 時 `/health` 的 `runtimeCommit` 為 `c883ceef…`。**包裝腳本到 21:45 檢查時仍未返回，`local-restart.log` 與結束碼檔尚未產生**（與前一次相同的已知行為：伺服器起來後包裝腳本仍可能長時間不返回，不終止它），所以本機是以 `/health`、`status` 與程序收據判斷，沒有包裝腳本的結束碼可引用。本機停機時間沒有直接紀錄，由 20:45 開始同步到 20:48:18 新程序建立，約 3 分鐘內。
+- WaveDeck（埠 18433）：21:46 `/health` 仍為 `runtimeCommit=e68bcb72…`、`releaseVerified=True`、紙上模式，沒有變；主工作樹已在 `c883ceef…`（發布前快轉），本次變更不在 WaveDeck 的發布收據範圍內。本機 18432 短暫停機期間 WaveDeck 對它的連線是否中斷，沒有檢查。
+- **未驗證**：
+  - 沒有對運行中的閘道送帶偽造角色標頭的請求（需要 Reader 或 Owner token，程序規定沒授權不跑）。目前證明的是「執行中的程式內容就是修正後的版本」與單元測試，不是「實際偽造請求被擋下」。
+  - 遠端 HTTPS（Tailscale 端）冒煙測試、Owner／Reader 權限與 `/notify` 的 403、localhost 與 Tailscale 位元組比對都沒有做。
+  - 版面驗證（直式、橫式、桌機）沒做：本次沒有改任何前端檔案。
+  - 完整測試套件沒有重跑；Playwright、`build_v2.py` 不在這次範圍。
+- **仍未解決的異常**：正式站 supervisor 在啟動後一天內又消失（PID 44616 在 2026-11-07 15:28 啟動，2026-11-08 20:37 預檢時已不存在），host 日誌沒有任何結束事件。這是第二次（前一次是 PID 12372，2026-11-04 00:41:21 UTC 之後無結束事件）。這次查到：排程 `StockTerminal_PrivateWeb_Host` 的 `ExecutionTimeLimit` 是 `PT0S`（沒有執行時間上限）、觸發條件為登入、`MultipleInstances=IgnoreNew`，所以不是排程逾時殺掉的；新 supervisor 的父程序是排程啟動的隱藏 powershell。原因仍然不明，不影響服務（兩個子程序仍在服務），但下次發布會再走孤兒分支。
+- 清理（尚未做，等 Sam 要求）：worktree `release-c883ceef`（detached，發布用）與 `revision-release-c883ceef`，以及分支 `claude/revision-release-c883ceef`（本機與遠端）。
+- 驗證：本節只改文件。`.github/驗證計畫.json` 以目前 origin/main（`c883ceef…`）為基底，只含一個文件案例（`tests.test_dist_scrub`，確認文件不含絕對使用者路徑），做法同 #308。
+
 ## 2026-11-08 補記 #307 的合併與清理（main 在 `f77e2b49`）
 
 - 基底：`f77e2b4911d4092bd12b04272f4daa95212c0648`（origin/main，#307 的合併提交）；分支 `claude/revision-gateway-role-307`。補上下一節（#307）留下的「未合併、未發布」；下一節是歷史段落，不改。
