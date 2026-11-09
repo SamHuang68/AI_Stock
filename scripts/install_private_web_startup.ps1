@@ -9,7 +9,9 @@ param(
 
     [string]$InstallRoot = '',
 
-    [ValidatePattern('^[A-Za-z0-9_.-]+$')]
+    # 啟動腳本（START_LOCAL_AND_WEB.cmd）與停止器（停止私有網站.ps1）都只認這個名稱；
+    # 用其他名稱裝出來的排程它們管不到，所以只接受這一個。
+    [ValidateSet('StockTerminal_PrivateWeb_Host')]
     [string]$TaskName = 'StockTerminal_PrivateWeb_Host',
 
     [System.Management.Automation.PSCredential]$Credential,
@@ -382,6 +384,9 @@ public static class PrivateWebCtrlLog
     private static string logPath;
     private static string releaseId;
 
+    // 記錄檔與備援檔都寫不進去時無處可記，只能留在記憶體；包裝腳本若還活著，會在 host_exit 一併記錄。
+    public static string LastError;
+
     public static bool Register(string path, string release)
     {
         logPath = path;
@@ -408,35 +413,85 @@ public static class PrivateWebCtrlLog
         }
     }
 
+    private static string Describe(Exception ex)
+    {
+        string text = ex.GetType().Name + ": " + ex.Message;
+        text = text.Replace("\r", " ").Replace("\n", " ");
+        if (text.Length > 200) { text = text.Substring(0, 200); }
+        return Esc(text);
+    }
+
+    // 最近 15 分鐘內啟動的程序（最多 40 筆）。讀不到的系統程序只計數，不是錯誤。
+    private static string SnapshotRecentProcesses(out int skipped)
+    {
+        skipped = 0;
+        StringBuilder recent = new StringBuilder();
+        int count = 0;
+        DateTime cutoff = DateTime.Now.AddMinutes(-15);
+        foreach (Process process in Process.GetProcesses())
+        {
+            try
+            {
+                DateTime started = process.StartTime;
+                if (started < cutoff || count >= 40) { continue; }
+                if (count > 0) { recent.Append(','); }
+                recent.Append("{\"pid\":").Append(process.Id)
+                      .Append(",\"name\":\"").Append(Esc(process.ProcessName))
+                      .Append("\",\"started\":\"").Append(started.ToUniversalTime().ToString("o")).Append("\"}");
+                count++;
+            }
+            catch (System.ComponentModel.Win32Exception) { skipped++; }  // 沒有權限讀取（系統程序）
+            catch (InvalidOperationException) { skipped++; }             // 程序已經結束
+            finally { process.Dispose(); }
+        }
+        return recent.ToString();
+    }
+
+    private static string Header(uint ctrlType)
+    {
+        return "{\"timestamp\":\"" + DateTime.UtcNow.ToString("o")
+            + "\",\"component\":\"private_web_startup\",\"event\":\"console_ctrl\""
+            + ",\"message\":\"啟動器的主控台收到控制事件。\",\"releaseId\":\"" + Esc(releaseId)
+            + "\",\"ctrlType\":" + ctrlType + ",\"ctrlName\":\"" + Name(ctrlType) + "\"";
+    }
+
+    // 原生執行緒呼叫的回呼，例外不能逃出去；所以每一層失敗都留下原因，不丟掉：
+    // 程序快照失敗 -> 仍寫主要紀錄並附 snapshotError；主要紀錄寫不進去 -> 改寫旁邊的備援檔；
+    // 兩處都寫不進去 -> 原因留在 LastError。
     private static bool OnControl(uint ctrlType)
     {
+        int skipped = 0;
+        string recent = "";
+        string snapshotError = null;
         try
         {
-            StringBuilder recent = new StringBuilder();
-            int count = 0;
-            DateTime cutoff = DateTime.Now.AddMinutes(-15);
-            foreach (Process process in Process.GetProcesses())
-            {
-                try
-                {
-                    DateTime started = process.StartTime;
-                    if (started < cutoff || count >= 40) { continue; }
-                    if (count > 0) { recent.Append(','); }
-                    recent.Append("{\"pid\":").Append(process.Id)
-                          .Append(",\"name\":\"").Append(Esc(process.ProcessName))
-                          .Append("\",\"started\":\"").Append(started.ToUniversalTime().ToString("o")).Append("\"}");
-                    count++;
-                }
-                catch { }
-            }
-            string line = "{\"timestamp\":\"" + DateTime.UtcNow.ToString("o")
-                + "\",\"component\":\"private_web_startup\",\"event\":\"console_ctrl\""
-                + ",\"message\":\"啟動器的主控台收到控制事件。\",\"releaseId\":\"" + Esc(releaseId)
-                + "\",\"ctrlType\":" + ctrlType + ",\"ctrlName\":\"" + Name(ctrlType)
-                + "\",\"recentProcesses\":[" + recent + "]}";
+            recent = SnapshotRecentProcesses(out skipped);
+        }
+        catch (Exception ex)
+        {
+            snapshotError = Describe(ex);
+        }
+
+        string line = Header(ctrlType) + ",\"skippedProcesses\":" + skipped
+            + (snapshotError == null ? "" : ",\"snapshotError\":\"" + snapshotError + "\"")
+            + ",\"recentProcesses\":[" + recent + "]}";
+        try
+        {
             File.AppendAllText(logPath, line + Environment.NewLine, new UTF8Encoding(false));
         }
-        catch { }
+        catch (Exception primary)
+        {
+            LastError = Describe(primary);
+            try
+            {
+                string fallback = Header(ctrlType) + ",\"primaryError\":\"" + LastError + "\"}";
+                File.AppendAllText(logPath + ".fallback", fallback + Environment.NewLine, new UTF8Encoding(false));
+            }
+            catch (Exception secondary)
+            {
+                LastError = LastError + " | " + Describe(secondary);
+            }
+        }
         return false;
     }
 }
@@ -508,7 +563,12 @@ function Invoke-CurrentHost {
         Pop-Location
     }
     if ($null -eq $hostExitCode) { $hostExitCode = 1 }
-    Write-StartupEvent -Release $Release -Event 'host_exit' -Message 'Private Web host 已結束。' -Details @{ exitCode = [int]$hostExitCode }
+    $exitDetails = @{ exitCode = [int]$hostExitCode }
+    if ('PrivateWebCtrlLog' -as [type]) {
+        $ctrlLoggerError = [PrivateWebCtrlLog]::LastError
+        if ($ctrlLoggerError) { $exitDetails['ctrlLoggerError'] = [string]$ctrlLoggerError }
+    }
+    Write-StartupEvent -Release $Release -Event 'host_exit' -Message 'Private Web host 已結束。' -Details $exitDetails
     return [int]$hostExitCode
 }
 

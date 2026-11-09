@@ -105,15 +105,17 @@ class PrivateWebStartupTests(unittest.TestCase):
             self.assertEqual(payload["RestartInterval"], "PT1M")
             self.assertEqual(payload["ExecutionTimeLimit"], "PT0S")
             self.assertTrue(payload["StartWhenAvailable"])
-            self.assertEqual(Path(payload["CurrentRoot"]), current)
-            self.assertEqual(Path(payload["ActionWorkingDirectory"]), current)
+            # 先 resolve()：CI 的暫存目錄用 8.3 短檔名（RUNNER~1），腳本回報長檔名。
+            self.assertEqual(Path(payload["CurrentRoot"]).resolve(), current.resolve())
+            self.assertEqual(Path(payload["ActionWorkingDirectory"]).resolve(), current.resolve())
             self.assertEqual(
-                Path(payload["RunnerPath"]), install_root / "startup" / "private_web_startup.ps1"
+                Path(payload["RunnerPath"]).resolve(),
+                (install_root / "startup" / "private_web_startup.ps1").resolve(),
             )
             self.assertFalse((current / "scripts" / SCRIPT.name).exists())
             self.assertIn("-Mode RunHost", payload["ActionArguments"])
             self.assertIn("-WindowStyle Hidden", payload["ActionArguments"])
-            self.assertIn(str(install_root), payload["ActionArguments"])
+            self.assertIn(str(install_root.resolve()), payload["ActionArguments"])
             self.assertNotIn("private_web_owner.token", payload["ActionArguments"])
 
     def test_password_startup_is_explicit_and_never_selected_silently(self):
@@ -313,7 +315,7 @@ class PrivateWebStartupStaticTests(unittest.TestCase):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("Register-ConsoleCtrlLogger -Release $Release", source.split("function Invoke-CurrentHost", 1)[1])
         handler = source.split("private static bool OnControl", 1)[1].split("PrivateWebCtrlLogSource", 1)[0]
-        self.assertIn("console_ctrl", handler)
+        self.assertIn("console_ctrl", source)
         self.assertIn("recentProcesses", handler)
         self.assertIn("return false;", handler)  # 記錄後交還預設處理，不吞掉事件
         # 記錄器失敗不能擋住 host 啟動。
