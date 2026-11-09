@@ -2,43 +2,25 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "a0f1dc07dcf174a56cb09e65c64084fa38a24296",
+  "baseCommit": "edb2ec2466ab688100073f4529d1899f65369baa",
   "documentation": [
     "docs/revision.md"
   ],
   "cases": [
     {
-      "id": "私有網站啟動器的host使用獨立主控台",
-      "kind": "unittest",
-      "timeoutSeconds": 600,
-      "reason": "復原正式站啟動器 private_web_startup.ps1 的來源與測試（先前只存在孤立提交），並修正 host 與啟動器共用隱藏主控台、視窗被關閉時一起無聲死亡的問題；新增主控台控制事件記錄。由啟動器測試涵蓋（含行為測試：host 的主控台上不能有啟動器），並確認停止器的安全測試不受影響",
-      "targets": [
-        "tests.test_private_web_startup",
-        "tests.test_私有停止安全"
-      ],
-      "changes": [
-        "scripts/install_private_web_startup.ps1",
-        "tests/test_private_web_startup.py"
-      ],
-      "inputs": [
-        "scripts/install_private_web_startup.ps1",
-        "tests/test_private_web_startup.py",
-        "scripts/停止私有網站.ps1",
-        "tests/test_私有停止安全.py"
-      ]
-    },
-    {
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "補記啟動器修正與 supervisor 消失的調查；由 test_dist_scrub 確認修訂紀錄不含絕對使用者路徑",
+      "reason": "修正 docs/macro-source-date-contract.md 的兩個簡體字並記錄 repo 內其他殘留；沒有程式或測試引用這份文件，由 test_dist_scrub 確認文件與修訂紀錄不含絕對使用者路徑",
       "targets": [
         "tests.test_dist_scrub"
       ],
       "changes": [
+        "docs/macro-source-date-contract.md",
         "docs/revision.md"
       ],
       "inputs": [
+        "docs/macro-source-date-contract.md",
         "docs/revision.md",
         "tests/test_dist_scrub.py"
       ]
