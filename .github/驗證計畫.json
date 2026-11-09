@@ -2,7 +2,7 @@
   "project": "SamHuang68/AI_Stock",
   "schemaVersion": 1,
   "scope": "targeted",
-  "baseCommit": "c883ceef635489f9b5b6bd48c485a61427190448",
+  "baseCommit": "a0f1dc07dcf174a56cb09e65c64084fa38a24296",
   "documentation": [
     "docs/revision.md"
   ],
@@ -11,14 +11,16 @@
       "id": "文件不含絕對使用者路徑",
       "kind": "unittest",
       "timeoutSeconds": 600,
-      "reason": "補記 #307 閘道修正的正式發布；由 test_dist_scrub 確認修訂紀錄不含絕對使用者路徑",
+      "reason": "修正 docs/macro-source-date-contract.md 的兩個簡體字並記錄 repo 內其他殘留；沒有程式或測試引用這份文件，由 test_dist_scrub 確認文件與修訂紀錄不含絕對使用者路徑",
       "targets": [
         "tests.test_dist_scrub"
       ],
       "changes": [
+        "docs/macro-source-date-contract.md",
         "docs/revision.md"
       ],
       "inputs": [
+        "docs/macro-source-date-contract.md",
         "docs/revision.md",
         "tests/test_dist_scrub.py"
       ]
