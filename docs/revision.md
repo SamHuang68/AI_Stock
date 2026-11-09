@@ -27,6 +27,10 @@
   - 完整測試套件沒有重跑。
 - **部署（尚未做）**：安裝版 `%LOCALAPPDATA%\StockTerminalPrivateWeb\startup\private_web_startup.ps1` 不在 `current` 內，stage → promote 不會更新它，必須另外覆蓋，且要先備份舊檔、以雜湊驗證。覆蓋與驗證是合併後的獨立步驟；現場目前沒有包裝腳本在執行，覆蓋不影響運行中的服務。
 - 正式站目前狀態（2026-11-09 14:33，唯讀）：包裝腳本與 supervisor 已不存在，後端 82704 與閘道 85588 仍在服務（閘道 `ok=true`、`upstream=true`），也就是**目前沒有 supervisor 監督**，後端或閘道若當掉不會自動重啟。直接執行排程不會補回：包裝腳本發現閘道健康會回報 `already_healthy` 並結束。要恢復監督必須停止這兩個孤兒再啟動，會有停機；今天是平日，14:00～21:00 是更新排程的處理窗口，不宜此時重啟，建議在 21:00 之後或下次發布時（發布會用修正後的啟動器重新建立完整結構）處理。
+- CI 與審查的後續（提交 `b31d9b5` 與其後的測試補強）：
+  - 第一次推送後 `test (windows-latest)` 失敗：復原的舊測試 `test_inspect_builds_interactive_logon_contract_from_promoted_current` 在 GitHub 的 Windows runner 上把暫存目錄的 8.3 短檔名（`RUNNER~1`）與腳本回報的長檔名當成不同路徑。這是原測試在 CI 環境下的缺陷，與本修正無關；路徑比對改為先 `resolve()`。
+  - Codex 審查兩則行內意見，逐條對照程式碼後都成立並已修正：（P1）C# 回呼裡有兩個空 `catch`，其中一個把所有未預期的失敗整個吞掉，會讓這個診斷在失敗時又變成無聲；現改為預期的例外（無權限讀取系統程序、程序已結束）只計入 `skippedProcesses`，快照失敗仍寫主要紀錄並附 `snapshotError`，主要紀錄寫不進去就改寫旁邊的 `.fallback`，兩處都失敗才把原因留在記憶體的 `LastError`（包裝腳本若還活著，在 `host_exit` 補記 `ctrlLoggerError`）。（P2）安裝器的 `-TaskName` 接受任意名稱，但 `停止私有網站.ps1` 與 `START_LOCAL_AND_WEB.cmd` 只認 `StockTerminal_PrivateWeb_Host`；現限制為 `ValidateSet` 只接受這一個，repo 與測試裡沒有地方傳入其他名稱。
+  - 新增 5 項測試（啟動器測試現為 18 項）：直接呼叫回呼的三項（正常寫入並附程序快照、主要紀錄失敗時寫入備援檔、兩處都失敗時原因留在 `LastError` 且沒有例外逃出回呼），以及兩項靜態檢查（C# 內沒有空 `catch`、`-TaskName` 限制）。回呼是以反射直接呼叫，沒有真的送出主控台事件；真實事件的路徑由前面的端對端演練涵蓋。
 - 驗證計畫：`.github/驗證計畫.json` 以 origin/main（`a0f1dc07…`）為基底，兩個案例：啟動器測試（含停止器安全測試）與文件案例（`tests.test_dist_scrub`）。
 
 ## 2026-11-08 補記 #307 閘道修正的正式發布（Private Web 與本機 18432 在 `c883ceef`）

@@ -258,6 +258,72 @@ class PrivateWebStartupTests(unittest.TestCase):
             self.assertEqual(next(e for e in events if e["event"] == "host_spawned")["hostPid"], report["pid"])
             self.assertEqual(next(e for e in events if e["event"] == "host_exit")["exitCode"], 0)
 
+    def _invoke_ctrl_logger(self, temp: Path, log_path: Path) -> subprocess.CompletedProcess[str]:
+        # 從腳本取出內嵌的 C# 記錄器，編譯後直接呼叫回呼（傳入 CTRL_CLOSE），不需要真的送出主控台事件。
+        driver = temp / "invoke_ctrl_logger.ps1"
+        driver.write_text(CTRL_LOGGER_DRIVER, encoding="ascii")
+        return subprocess.run(
+            [_powershell(), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", str(driver)],
+            cwd=ROOT, text=True, encoding="utf-8", capture_output=True, timeout=90, check=False,
+            env=dict(os.environ, CTRL_SCRIPT=str(SCRIPT), CTRL_LOG=str(log_path)),
+        )
+
+    def test_console_event_logger_writes_the_event_and_a_process_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            log = temp / "ctrl.jsonl"
+            result = self._invoke_ctrl_logger(temp, log)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("returned=False", result.stdout)  # 交還預設處理，不吞掉事件
+            record = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual((record["event"], record["ctrlType"], record["ctrlName"]), ("console_ctrl", 2, "CTRL_CLOSE"))
+            self.assertIsInstance(record["recentProcesses"], list)
+            self.assertIsInstance(record["skippedProcesses"], int)
+            self.assertNotIn("snapshotError", record)
+            self.assertIn("lasterror_set=False", result.stdout)
+
+    def test_console_event_logger_falls_back_when_the_log_cannot_be_written(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            log = temp / "ctrl.jsonl"
+            log.mkdir()  # 主要紀錄路徑被目錄占用，寫入必定失敗
+            result = self._invoke_ctrl_logger(temp, log)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("returned=False", result.stdout)
+            record = json.loads(Path(str(log) + ".fallback").read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual((record["event"], record["ctrlName"]), ("console_ctrl", "CTRL_CLOSE"))
+            self.assertTrue(record["primaryError"])
+            self.assertIn("lasterror_set=True", result.stdout)
+            self.assertIn("lasterror_both=False", result.stdout)
+
+    def test_console_event_logger_keeps_the_reason_when_both_files_fail(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            log = temp / "ctrl.jsonl"
+            log.mkdir()
+            Path(str(log) + ".fallback").mkdir()  # 備援檔也寫不進去：沒有例外逃出回呼，原因留在 LastError
+            result = self._invoke_ctrl_logger(temp, log)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("returned=False", result.stdout)
+            self.assertIn("lasterror_both=True", result.stdout)
+
+
+CTRL_LOGGER_DRIVER = r"""
+$ErrorActionPreference = 'Stop'
+$text = Get-Content -LiteralPath $env:CTRL_SCRIPT -Raw -Encoding UTF8
+$m = [regex]::Match($text, "PrivateWebCtrlLogSource = @'\r?\n(.*?)\r?\n'@", 'Singleline')
+if (-not $m.Success) { throw 'source block not found' }
+Add-Type -TypeDefinition $m.Groups[1].Value
+[void][PrivateWebCtrlLog]::Register($env:CTRL_LOG, 'test-release')
+$method = [PrivateWebCtrlLog].GetMethod('OnControl', [Reflection.BindingFlags]'NonPublic,Static')
+$returned = $method.Invoke($null, @([uint32]2))
+Write-Output ('returned=' + $returned)
+$last = [PrivateWebCtrlLog]::LastError
+Write-Output ('lasterror_set=' + [bool]$last)
+Write-Output ('lasterror_both=' + [bool]($last -like '* | *'))
+"""
+
 
 class PrivateWebStartupStaticTests(unittest.TestCase):
     def test_script_never_places_a_password_or_token_in_task_arguments(self):
@@ -322,6 +388,19 @@ class PrivateWebStartupStaticTests(unittest.TestCase):
         register = source.split("function Register-ConsoleCtrlLogger", 1)[1].split("function Invoke-CurrentHost", 1)[0]
         self.assertIn("catch", register)
         self.assertIn("ctrl_logger_unavailable", register)
+
+    def test_console_logger_has_no_empty_catch_blocks(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        csharp = source.split("PrivateWebCtrlLogSource = @'", 1)[1].split("\n'@", 1)[0]
+        self.assertIsNone(re.search(r"catch\s*(\([^)]*\))?\s*\{\s*\}", csharp), "回呼不得無記錄地吞例外")
+        self.assertIn(".fallback", csharp)
+        self.assertIn("LastError", csharp)
+
+    def test_task_name_is_restricted_to_the_name_the_lifecycle_scripts_know(self):
+        # 停止私有網站.ps1 與 START_LOCAL_AND_WEB.cmd 都只認這個名稱；其他名稱裝出來的排程它們管不到。
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("[ValidateSet('StockTerminal_PrivateWeb_Host')]", source)
+        self.assertIn("'StockTerminal_PrivateWeb_Host'", (ROOT / "scripts" / "停止私有網站.ps1").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
