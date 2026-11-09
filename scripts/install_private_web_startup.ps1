@@ -359,6 +359,105 @@ function Test-LocalPortOpen {
     finally { $client.Dispose() }
 }
 
+# 診斷用：本腳本的隱藏主控台收到控制事件（關閉視窗、Ctrl+C／Break、登出、關機）時，
+# 先把事件種類、時間與最近 15 分鐘內啟動的程序寫進 private_web_startup.jsonl，再交還預設處理。
+# 2026-11 連續三次發現包裝腳本與 host 在沒有任何紀錄下消失，排程最後結果是 0xC000013A
+# （STATUS_CONTROL_C_EXIT）；實驗證實「對隱藏主控台視窗送出關閉訊息」會重現全部特徵，
+# 但發送者無法由現有日誌判定，所以在這裡留下下一次的時間與當時程序快照。
+$script:PrivateWebCtrlLogSource = @'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class PrivateWebCtrlLog
+{
+    public delegate bool HandlerRoutine(uint ctrlType);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetConsoleCtrlHandler(HandlerRoutine handler, bool add);
+
+    private static HandlerRoutine keepAlive;
+    private static string logPath;
+    private static string releaseId;
+
+    public static bool Register(string path, string release)
+    {
+        logPath = path;
+        releaseId = release;
+        keepAlive = OnControl;
+        return SetConsoleCtrlHandler(keepAlive, true);
+    }
+
+    private static string Esc(string value)
+    {
+        return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
+    private static string Name(uint ctrlType)
+    {
+        switch (ctrlType)
+        {
+            case 0: return "CTRL_C";
+            case 1: return "CTRL_BREAK";
+            case 2: return "CTRL_CLOSE";
+            case 5: return "CTRL_LOGOFF";
+            case 6: return "CTRL_SHUTDOWN";
+            default: return "UNKNOWN";
+        }
+    }
+
+    private static bool OnControl(uint ctrlType)
+    {
+        try
+        {
+            StringBuilder recent = new StringBuilder();
+            int count = 0;
+            DateTime cutoff = DateTime.Now.AddMinutes(-15);
+            foreach (Process process in Process.GetProcesses())
+            {
+                try
+                {
+                    DateTime started = process.StartTime;
+                    if (started < cutoff || count >= 40) { continue; }
+                    if (count > 0) { recent.Append(','); }
+                    recent.Append("{\"pid\":").Append(process.Id)
+                          .Append(",\"name\":\"").Append(Esc(process.ProcessName))
+                          .Append("\",\"started\":\"").Append(started.ToUniversalTime().ToString("o")).Append("\"}");
+                    count++;
+                }
+                catch { }
+            }
+            string line = "{\"timestamp\":\"" + DateTime.UtcNow.ToString("o")
+                + "\",\"component\":\"private_web_startup\",\"event\":\"console_ctrl\""
+                + ",\"message\":\"啟動器的主控台收到控制事件。\",\"releaseId\":\"" + Esc(releaseId)
+                + "\",\"ctrlType\":" + ctrlType + ",\"ctrlName\":\"" + Name(ctrlType)
+                + "\",\"recentProcesses\":[" + recent + "]}";
+            File.AppendAllText(logPath, line + Environment.NewLine, new UTF8Encoding(false));
+        }
+        catch { }
+        return false;
+    }
+}
+'@
+
+function Register-ConsoleCtrlLogger {
+    param([Parameter(Mandatory = $true)]$Release)
+
+    # 盡力而為：記錄器無法啟用只留下事件，不影響 host 啟動。
+    try {
+        if (-not ('PrivateWebCtrlLog' -as [type])) {
+            Add-Type -TypeDefinition $script:PrivateWebCtrlLogSource -ErrorAction Stop
+        }
+        $logPath = Join-Path (Join-Path $Release.CurrentRoot 'logs') 'private_web_startup.jsonl'
+        [void][PrivateWebCtrlLog]::Register($logPath, [string]$Release.ReleaseId)
+    }
+    catch {
+        Write-StartupEvent -Release $Release -Event 'ctrl_logger_unavailable' -Message '主控台事件記錄器無法啟用；不影響 host 啟動。' -Details @{ error = $_.Exception.Message }
+    }
+}
+
 function Invoke-CurrentHost {
     param(
         [Parameter(Mandatory = $true)]$Release,
@@ -386,10 +485,24 @@ function Invoke-CurrentHost {
     }
 
     Write-StartupEvent -Release $Release -Event 'host_start' -Message '從已驗證的 current 版本啟動 Private Web host。' -Details @{ backendPort = $SelectedBackendPort; gatewayPort = $SelectedGatewayPort }
+    Register-ConsoleCtrlLogger -Release $Release
     Push-Location -LiteralPath $Release.CurrentRoot
     try {
-        & $Release.PythonPath -u $Release.HostPath --backend-port $SelectedBackendPort --gateway-port $SelectedGatewayPort
-        $hostExitCode = $LASTEXITCODE
+        # host 必須使用自己的隱藏主控台（CreateNoWindow），不能與本腳本共用。
+        # 以前用 `& python` 前景執行，host 與本腳本共用同一個隱藏主控台：該視窗一收到關閉訊息，
+        # 本腳本（結束碼 0xC000013A）與 host 會一起無聲死亡，來不及寫 host_exit；後端與閘道因為
+        # 是 CREATE_NO_WINDOW 啟動、有各自的主控台而存活，成為沒有 supervisor 的孤兒。
+        # 分開之後，本腳本即使被關閉，host 仍然存活並繼續監督後端與閘道。
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $Release.PythonPath
+        $startInfo.Arguments = ('-u "{0}" --backend-port {1} --gateway-port {2}' -f $Release.HostPath, $SelectedBackendPort, $SelectedGatewayPort)
+        $startInfo.WorkingDirectory = $Release.CurrentRoot
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $hostProcess = [Diagnostics.Process]::Start($startInfo)
+        Write-StartupEvent -Release $Release -Event 'host_spawned' -Message 'Private Web host 已在自己的隱藏主控台啟動。' -Details @{ hostPid = $hostProcess.Id }
+        $hostProcess.WaitForExit()
+        $hostExitCode = $hostProcess.ExitCode
     }
     finally {
         Pop-Location

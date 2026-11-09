@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -216,6 +217,45 @@ class PrivateWebStartupTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_runhost_starts_the_host_in_its_own_console_and_logs_its_exit(self):
+        # 2026-11 事故：host 與啟動器共用同一個隱藏主控台，視窗一被關閉兩者一起無聲死亡。
+        # 假 host 回報自己主控台上的程序清單；啟動器（host 的父程序）不能在其中。
+        host = (
+            "import ctypes, json, os\n"
+            "from pathlib import Path\n"
+            "buf = (ctypes.c_uint32 * 64)()\n"
+            "n = ctypes.windll.kernel32.GetConsoleProcessList(buf, 64)\n"
+            "Path(__file__).resolve().parents[1].joinpath('console.json').write_text(\n"
+            "    json.dumps({'pid': os.getpid(), 'ppid': os.getppid(), 'console': list(buf)[:n]}))\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            install_root = Path(temp_dir) / "private-web"
+            current, _ = _fake_current(install_root)
+            _write(current / "scripts" / "private_web_host.py", host)
+            sockets = [socket.socket() for _ in range(2)]
+            try:
+                for sock in sockets:
+                    sock.bind(("127.0.0.1", 0))
+                backend_port, gateway_port = (sock.getsockname()[1] for sock in sockets)
+            finally:
+                for sock in sockets:
+                    sock.close()
+            result = self._run(
+                "-Mode", "RunHost", "-InstallRoot", str(install_root),
+                "-GatewayPort", str(gateway_port), "-BackendPort", str(backend_port),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads((current / "console.json").read_text(encoding="utf-8"))
+            self.assertNotIn(report["ppid"], report["console"], "host 與啟動器共用了主控台")
+            lines = (current / "logs" / "private_web_startup.jsonl").read_text(encoding="utf-8-sig").splitlines()
+            events = [json.loads(line) for line in lines if line.strip()]
+            self.assertEqual(
+                [e["event"] for e in events if e["event"] in ("host_start", "host_spawned", "host_exit")],
+                ["host_start", "host_spawned", "host_exit"],
+            )
+            self.assertEqual(next(e for e in events if e["event"] == "host_spawned")["hostPid"], report["pid"])
+            self.assertEqual(next(e for e in events if e["event"] == "host_exit")["exitCode"], 0)
+
 
 class PrivateWebStartupStaticTests(unittest.TestCase):
     def test_script_never_places_a_password_or_token_in_task_arguments(self):
@@ -258,6 +298,28 @@ class PrivateWebStartupStaticTests(unittest.TestCase):
         self.assertIn("RunnerPath", ownership)
         self.assertIn("-Mode RunHost", ownership)
         self.assertIn("避免覆寫無關工作", source)
+
+    def test_host_is_started_with_its_own_console_not_a_foreground_call(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        launcher = source.split("function Invoke-CurrentHost", 1)[1].split("function Install-PrivateWebTask", 1)[0]
+        self.assertIn("CreateNoWindow = $true", launcher)
+        self.assertIn("UseShellExecute = $false", launcher)
+        self.assertIn("WaitForExit()", launcher)
+        # `& python` 前景呼叫會與啟動器共用主控台，正是 2026-11 三次消失的結構。
+        self.assertNotIn("& $Release.PythonPath", launcher)
+        self.assertIn("host_exit", launcher)
+
+    def test_console_control_events_are_logged_and_not_swallowed(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("Register-ConsoleCtrlLogger -Release $Release", source.split("function Invoke-CurrentHost", 1)[1])
+        handler = source.split("private static bool OnControl", 1)[1].split("PrivateWebCtrlLogSource", 1)[0]
+        self.assertIn("console_ctrl", handler)
+        self.assertIn("recentProcesses", handler)
+        self.assertIn("return false;", handler)  # 記錄後交還預設處理，不吞掉事件
+        # 記錄器失敗不能擋住 host 啟動。
+        register = source.split("function Register-ConsoleCtrlLogger", 1)[1].split("function Invoke-CurrentHost", 1)[0]
+        self.assertIn("catch", register)
+        self.assertIn("ctrl_logger_unavailable", register)
 
 
 if __name__ == "__main__":
