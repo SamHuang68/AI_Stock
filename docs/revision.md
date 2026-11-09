@@ -1,12 +1,47 @@
 ## 2026-11-09 修正 `docs/macro-source-date-contract.md` 的簡體字殘留
 
-- 基底：`a0f1dc07dcf174a56cb09e65c64084fa38a24296`（origin/main，#309 的合併提交）；分支 `claude/fix-macro-doc-simplified`。**只改文件，不動任何程式；未合併。**
+- 基底：`a0f1dc07dcf174a56cb09e65c64084fa38a24296`（origin/main，#309 的合併提交）；分支 `claude/fix-macro-doc-simplified`。**只改文件，不動任何程式；未合併。** 同日 #310 先合併為 `edb2ec2466ab688100073f4529d1899f65369baa`，本分支已把它合併進來，`docs/revision.md` 與 `.github/驗證計畫.json` 的衝突是兩邊各自新增的段落與案例，兩邊都保留。
 - 授權與來源：Sam 2026-11-09 要求處理該文件第 9、15 行的簡體字殘留並查明原因。
 - 修正：第 9 行 U+7EED 改為 U+7E8C（續）、第 15 行 U+6765 改為 U+4F86（來）。替換以碼位精準進行，只動這兩個字，CRLF 換行保留，diff 只有這 2 行；修正後以簡體字掃描工具檢查該檔案 0 命中。
 - 原因：這份文件在 2026-10-01 寫成，比簡體字防呆工具上線（2026-10-14，規則 0017）早 13 天，當時沒有任何機制；之後工具只檢查新寫入的內容，不回頭檢查舊檔案。10-14 上線的字表只有 443 字，U+6765 不在其中，即使重掃也抓不到。字表缺口已在 2026-11-08 以編碼規則補上（規則 0020）。
 - 水平展開：以補強後的工具掃描 repo 追蹤的 837 個文字檔，除本次修正的 2 行外還有 6 行命中，**都沒有在本 PR 改動**：程式註解中的 U+7EDD（3 行，分布在 `server/chart_registry.py` 與 `src/core/chart_registry_v3.js`）、U+8FC1（`src/ui/polish_v3.js`）、U+8D34（`src/ui/toolbar_v3.js`）。它們在已發布程式檔的註解裡，修改會改變下一次發布的內容雜湊，應跟著一次正常的程式變更走，是否處理待 Sam 決定。另有 `src/ui/pulse_v5.js:4218` 的正規表示式**刻意**同時比對繁體與簡體的指數名稱（含 U+743C），不是殘留，不能改。
 - 工具誤判：公司名「軒郁」（`data/tw_names_backup.json`、`data/universe.json`）的 U+90C1 是正統繁體字、不在 cp950 內，被編碼規則誤判為簡體；已在工具中列為歧義字例外並補測試，對這個 repo 沒有影響。
 - 驗證：本節只改文件。`.github/驗證計畫.json` 以目前 origin/main（`a0f1dc07…`）為基底，只含一個文件案例（`tests.test_dist_scrub`）。沒有測試或程式引用這份文件。
+
+## 2026-11-09 修正 Private Web 啟動器：host 與啟動器共用隱藏主控台，視窗被關閉時一起無聲死亡（supervisor 消失的根因）
+
+- 基底：`a0f1dc07dcf174a56cb09e65c64084fa38a24296`（origin/main，#309 的合併提交）；分支 `claude/fix-private-web-runner-console`。**未合併；正式站安裝版啟動器尚未更新，所以還沒有任何現場效果。**
+- 授權與來源：Sam 2026-11-09 要求針對「supervisor 為什麼會在一天內消失（第二次，原因不明）」「查明原因並修正」。
+- 現象（三次，結構相同）：
+  1. 2026-11-04 08:41 啟動的 supervisor（PID 12372）在 11-07 15:21 發布前已不存在。
+  2. 11-07 15:28 啟動的 PID 44616 在 11-08 20:37 預檢前已不存在（20:33 查到排程為 `Ready`，不是 `Running`）。
+  3. 11-08 20:43:58 啟動的 PID 20112 與其包裝腳本 76920，在 11-08 22:46 的盤點仍在，到 11-09 14:33 已不存在（這次是全新現場）。
+  每次都是 supervisor 與啟動包裝腳本一起消失，後端與閘道存活成孤兒子程序、仍正常服務；`private_web_host.jsonl` 沒有 `stopped`，`private_web_startup.jsonl` 沒有 `host_exit`。
+- 證據：
+  - 第三次現場：排程 `StockTerminal_PrivateWeb_Host` 為 `Ready`，**`LastTaskResult = 0xC000013A`（STATUS_CONTROL_C_EXIT）**，也就是包裝腳本被主控台控制事件終止，不是 Python 當機，也不是排程逾時（`ExecutionTimeLimit` 是 `PT0S`）。
+  - 排程動作執行的是 `startup\private_web_startup.ps1 -Mode RunHost`，它以前景 `& python` 執行 host；所以包裝腳本與 host **共用同一個隱藏主控台**。host 以 `CREATE_NO_WINDOW` 啟動後端與閘道，兩者各有自己的 `conhost`（現場核對：後端 82704、閘道 85588 各有一個 `conhost` 子程序），這解釋了為什麼只有它們存活。
+  - 啟動日誌 149 筆事件（`host_start` 102、`host_exit` 47）：`host_exit` 的 `-1` 都出現在發布停機時（.NET 的 `Process.Kill()` 結束碼）；三次消失的窗口都沒有 `host_exit`，代表包裝腳本沒機會寫就死了。
+- 機制實驗（隔離環境，模擬程序，沒有碰正式站）：對現行結構（包裝腳本前景執行 host）送出「關閉主控台視窗」，包裝腳本結束碼 `-1073741510`（即 `0xC000013A`，與正式站相同）、host 無聲死亡且沒有留下任何訊號紀錄、包裝腳本沒寫 `host_exit`、`CREATE_NO_WINDOW` 子程序存活，**與三次事故的全部特徵一致**。Ctrl+C 與 Ctrl+Break 做不到（host 會收到 `SIGINT`／`SIGBREAK` 並留下紀錄，包裝腳本也不會以 `0xC000013A` 結束）；直接終止 `conhost.exe` 也做不到（程序不會死）。同樣送出「關閉視窗」到修正後的結構：包裝腳本仍會死，host 與子程序都存活。
+- **發送者（誰關了那個視窗）未查明。** 已排除：沒有重開機（開機時間 2026-10-30，`quser` 顯示 console 工作階段 1 自 10-30 起沒有登出）；三個窗口的 Application 日誌沒有 python 或 powershell 當機；AI-Workspace 內沒有任何腳本會按名稱批次終止 `conhost`／`powershell`／`python`；Restart Manager 操作日誌啟用但**從未有任何紀錄（0 筆）**；Task Scheduler 操作日誌是停用的，沒有任務歷史。窗口內有的外部事件只是旁證，沒有證據連到「關閉視窗」：11-07 02:59 Explorer 當機並重啟 shell、每天約 02:59 的 Windows 維護動作、Chrome Remote Desktop 的 `remoting_desktop.exe` 在 11-07 07:15 與 18:41 當機、機器反覆進出 Modern Standby。診斷見「修正」。
+- 為什麼一直沒被看見：啟動器的來源 `scripts/install_private_web_startup.ps1` 只存在孤立提交 `e3dea84`（2026-09-05，只被 `refs/preserved/workspace-migration/reflog/…` 保留），**從未進入 main**；它的測試 `tests/test_private_web_startup.py` 同樣沒進來。正式站排程一直在執行一個沒有來源、沒有測試、沒有 CI 的已安裝檔案。安裝版與該提交的檔案位元組完全相同（SHA-256 開頭 `f7b217fa8f60d770`）。停止器（`scripts/停止私有網站.ps1`，發布預檢沿用它的排程身分函式）只核對這支檔案的路徑，不核對內容；預檢的其餘部分是否另有內容檢查，我沒有逐一確認，所以部署後仍要以一次預檢驗證。
+- 修正（兩個提交）：
+  1. 原樣復原腳本與測試，行為不變。測試只調整一處：`_run` 先把主控台輸出編碼設成 UTF-8（其他啟動器測試的既有做法）；原本在碼頁為 CP950 的機器或英文碼頁的 CI 上，用 UTF-8 解碼 PowerShell 的中文輸出會失敗，5 個實際執行的測試因此出錯。
+  2. host 改用 `ProcessStartInfo`（`CreateNoWindow`、`UseShellExecute=false`）啟動，擁有自己的隱藏主控台；包裝腳本即使被關閉，host 仍存活並繼續監督後端與閘道。新增 `host_spawned` 事件（含 `hostPid`）。新增 `Register-ConsoleCtrlLogger`：收到 Ctrl+C／Break／關閉／登出／關機時，先把事件種類、時間與最近 15 分鐘內啟動的程序（最多 40 筆）寫進 `private_web_startup.jsonl`，再交還預設處理；它失敗只留下 `ctrl_logger_unavailable`，不影響 host 啟動。
+- 驗證：
+  - 啟動器測試 13 項通過（復原的 10 項加新增 3 項：一個行為測試、兩個靜態檢查）。行為測試讓假 host 回報自己主控台上的程序清單，啟動器 PID 不能在其中；**對修正前的腳本它會失敗**（顯示啟動器 PID 在 host 的主控台清單內），對修正後通過。
+  - 端對端演練（真正的腳本、假的 install root、假 host，不碰正式站）：送出「關閉視窗」後，包裝腳本結束碼 `0xC000013A`（與正式站一致）、host 與子程序存活、啟動日誌留下 `console_ctrl`（`CTRL_CLOSE`）與 15 筆最近程序。
+  - 腳本語法檢查 0 錯誤，BOM 保留，內嵌 C# 可編譯。
+- **未驗證**：
+  - 在正式站實際運行（安裝版尚未更新）；沒有出現過真實的發送者，所以「診斷抓到發送者」還沒發生。
+  - 登出、關機事件（`CTRL_LOGOFF`、`CTRL_SHUTDOWN`）只靠記錄器的程式碼路徑，沒有實際觸發。
+  - 完整測試套件沒有重跑。
+- **部署（尚未做）**：安裝版 `%LOCALAPPDATA%\StockTerminalPrivateWeb\startup\private_web_startup.ps1` 不在 `current` 內，stage → promote 不會更新它，必須另外覆蓋，且要先備份舊檔、以雜湊驗證。覆蓋與驗證是合併後的獨立步驟；現場目前沒有包裝腳本在執行，覆蓋不影響運行中的服務。
+- 正式站目前狀態（2026-11-09 14:33，唯讀）：包裝腳本與 supervisor 已不存在，後端 82704 與閘道 85588 仍在服務（閘道 `ok=true`、`upstream=true`），也就是**目前沒有 supervisor 監督**，後端或閘道若當掉不會自動重啟。直接執行排程不會補回：包裝腳本發現閘道健康會回報 `already_healthy` 並結束。要恢復監督必須停止這兩個孤兒再啟動，會有停機；今天是平日，14:00～21:00 是更新排程的處理窗口，不宜此時重啟，建議在 21:00 之後或下次發布時（發布會用修正後的啟動器重新建立完整結構）處理。
+- CI 與審查的後續（提交 `b31d9b5` 與其後的測試補強）：
+  - 第一次推送後 `test (windows-latest)` 失敗：復原的舊測試 `test_inspect_builds_interactive_logon_contract_from_promoted_current` 在 GitHub 的 Windows runner 上把暫存目錄的 8.3 短檔名（`RUNNER~1`）與腳本回報的長檔名當成不同路徑。這是原測試在 CI 環境下的缺陷，與本修正無關；路徑比對改為先 `resolve()`。
+  - Codex 審查兩則行內意見，逐條對照程式碼後都成立並已修正：（P1）C# 回呼裡有兩個空 `catch`，其中一個把所有未預期的失敗整個吞掉，會讓這個診斷在失敗時又變成無聲；現改為預期的例外（無權限讀取系統程序、程序已結束）只計入 `skippedProcesses`，快照失敗仍寫主要紀錄並附 `snapshotError`，主要紀錄寫不進去就改寫旁邊的 `.fallback`，兩處都失敗才把原因留在記憶體的 `LastError`（包裝腳本若還活著，在 `host_exit` 補記 `ctrlLoggerError`）。（P2）安裝器的 `-TaskName` 接受任意名稱，但 `停止私有網站.ps1` 與 `START_LOCAL_AND_WEB.cmd` 只認 `StockTerminal_PrivateWeb_Host`；現限制為 `ValidateSet` 只接受這一個，repo 與測試裡沒有地方傳入其他名稱。
+  - 新增 5 項測試（啟動器測試現為 18 項）：直接呼叫回呼的三項（正常寫入並附程序快照、主要紀錄失敗時寫入備援檔、兩處都失敗時原因留在 `LastError` 且沒有例外逃出回呼），以及兩項靜態檢查（C# 內沒有空 `catch`、`-TaskName` 限制）。回呼是以反射直接呼叫，沒有真的送出主控台事件；真實事件的路徑由前面的端對端演練涵蓋。
+- 驗證計畫：`.github/驗證計畫.json` 以 origin/main（`a0f1dc07…`）為基底，兩個案例：啟動器測試（含停止器安全測試）與文件案例（`tests.test_dist_scrub`）。
 
 ## 2026-11-08 補記 #307 閘道修正的正式發布（Private Web 與本機 18432 在 `c883ceef`）
 
